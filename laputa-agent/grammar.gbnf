@@ -1,0 +1,9 @@
+# GBNF grammar for selector constraints
+# Restricts output to valid element IDs on the current screen
+
+root   : action
+action : "{" ws "\"action\"" ws ":" ws action_type ws "," ws "\"target\"" ws ":" ws target ws "," ws "\"params\"" ws ":" ws params ws "}"
+action_type : "\"click\"" | "\"type\"" | "\"scroll\"" | "\"screenshot\""
+target : "\"" [a-zA-Z0-9_-]+ "\""
+params : "{" [^}]* "}"
+ws : [ \t\n]*

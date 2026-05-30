@@ -1,0 +1,11 @@
+/models/
+/vault/
+/vm-images/
+/.laputa-secure/
+target/
+node_modules/
+*.gguf
+*.safetensors
+dist/
+.DS_Store
+laputa-agent/vendored/
