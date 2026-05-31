@@ -1,11 +1,15 @@
 /** @type {import('tailwindcss').Config} */
 module.exports = {
+  darkMode: ["class"],
   content: [
     "./index.html",
     "./src/**/*.{js,ts,jsx,tsx}",
   ],
   theme: {
     extend: {
+      borderColor: {
+        border: 'hsl(var(--border))',
+      },
       colors: {
         laputa: {
           bg: "#0f1117",
