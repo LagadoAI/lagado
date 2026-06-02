@@ -8,6 +8,7 @@ pub enum ToolCall {
     Key     { key: String },
     Wait    { ms: u64 },
     Task    { description: String },
+    Done    { reason: String },
 }
 
 #[derive(Debug, Clone)]

@@ -1,5 +1,7 @@
 import { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react'
 import type { ReactNode } from 'react'
+import { useAgentSocket } from './useAgentSocket'
+import type { PermissionRequest, ConnState } from './useAgentSocket'
 
 export interface Message {
   id: string
@@ -19,6 +21,10 @@ interface ChatContextValue {
   setIdleOpacity: (opacity: number) => void
   chatBoxHidden: boolean
   setChatBoxHidden: (hidden: boolean) => void
+  pendingPermission: PermissionRequest | null
+  approve: (id: string) => void
+  deny: (id: string) => void
+  connState: ConnState
 }
 
 const ChatContext = createContext<ChatContextValue | null>(null)
@@ -28,6 +34,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<ChatStatus>('idle')
   const [isPaused, setIsPaused] = useState(false)
   const [chatBoxHidden, setChatBoxHidden] = useState(false)
+  const [pendingPermission, setPendingPermission] = useState<PermissionRequest | null>(null)
   const [idleOpacity, setIdleOpacityState] = useState(() => {
     const saved = localStorage.getItem('ui-opacity')
     if (!saved) return 0.015
@@ -45,31 +52,50 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     localStorage.setItem('ui-opacity', opacity.toString())
   }, [])
 
+  const socket = useAgentSocket({
+    onPermissionRequest: useCallback((req: PermissionRequest) => {
+      if (!isMountedRef.current) return
+      setPendingPermission(req)
+    }, []),
+
+    onMessage: useCallback((text: string) => {
+      if (!isMountedRef.current) return
+      const msg: Message = { id: crypto.randomUUID(), role: 'assistant', content: text }
+      setMessages(prev => [...prev, msg])
+      setStatus('idle')
+    }, []),
+
+    onStatus: useCallback((s: { state: string; detail: string }) => {
+      if (!isMountedRef.current) return
+      const msg: Message = {
+        id: crypto.randomUUID(),
+        role: 'assistant',
+        content: s.detail ? `[${s.state}] ${s.detail}` : `[${s.state}]`,
+      }
+      setMessages(prev => [...prev, msg])
+      if (s.state === 'goal_done' || s.state === 'goal_aborted') {
+        setStatus('idle')
+      }
+    }, []),
+  })
+
   const sendMessage = useCallback(({ text }: { text: string }) => {
     if (!text.trim() || isPaused) return
     const userMsg: Message = { id: crypto.randomUUID(), role: 'user', content: text }
     setMessages(prev => [...prev, userMsg])
     setStatus('submitted')
+    socket.sendGoal(text)
+  }, [isPaused, socket])
 
-    // TODO Phase 10: replace with useAgentSocket send over WebSocket :9090
-    // ws.send(JSON.stringify({ type: 'chat', text }))
-    // listen for { type: 'chat_response', content } and append to messages
-    setTimeout(() => {
-      if (!isMountedRef.current) return
-      setStatus('streaming')
-      const agentMsg: Message = {
-        id: crypto.randomUUID(),
-        role: 'assistant',
-        content: 'Backend not connected yet — wire to useAgentSocket in Phase 10.',
-      }
-      setMessages(prev => [...prev, agentMsg])
-      // Separate tick so 'streaming' state renders before flipping to 'idle'
-      setTimeout(() => {
-        if (!isMountedRef.current) return
-        setStatus('idle')
-      }, 100)
-    }, 800)
-  }, [isPaused])
+  const approve = useCallback((id: string) => {
+    socket.sendApproval(id, true)
+    setPendingPermission(null)
+  }, [socket])
+
+  const deny = useCallback((id: string) => {
+    socket.sendApproval(id, false)
+    setPendingPermission(null)
+  }, [socket])
 
   return (
     <ChatContext.Provider value={{
@@ -77,6 +103,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       isPaused, setIsPaused,
       idleOpacity, setIdleOpacity,
       chatBoxHidden, setChatBoxHidden,
+      pendingPermission, approve, deny,
+      connState: socket.connState,
     }}>
       {children}
     </ChatContext.Provider>

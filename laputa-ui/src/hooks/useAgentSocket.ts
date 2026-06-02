@@ -5,24 +5,35 @@ import { useRef, useState, useEffect, useCallback } from 'react';
 export type ConnState   = 'connecting' | 'connected' | 'disconnected';
 export type AgentCmd    = 'pause' | 'resume' | 'stop';
 
+export interface Envelope {
+  v:       number;
+  kind:    string;
+  payload: any;
+}
+
 export interface PermissionRequest {
-  action: string;
-  tool:   string;
+  id:             string;
+  type:           'tap' | 'typed';
+  tool:           string;
+  action:         string;
+  reason:         string;
+  origin_surface: string;
+  origin_agent:   string;
 }
 
 export interface AgentSocket {
-  connState:    ConnState;
-  sendGoal:     (goal: string) => void;
-  sendCommand:  (cmd: AgentCmd) => void;
-  sendRaw:      (msg: string) => void;
-  disconnect:   () => void;
+  connState:     ConnState;
+  sendGoal:      (goal: string) => void;
+  sendCommand:   (cmd: AgentCmd) => void;
+  sendApproval:  (id: string, approved: boolean) => void;
+  sendRaw:       (msg: string) => void;
+  disconnect:    () => void;
 }
 
 export interface AgentSocketOptions {
-  /** Called when the agent sends a permission:<json> message. */
   onPermissionRequest?: (req: PermissionRequest) => void;
-  /** Called for every non-permission message (action log, status, etc.). */
-  onMessage?: (raw: string) => void;
+  onMessage?:           (text: string) => void;
+  onStatus?:            (s: { state: string; detail: string }) => void;
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -96,21 +107,35 @@ export function useAgentSocket(options: AgentSocketOptions = {}): AgentSocket {
       const raw = String(ev.data);
       console.log('[laputa-agent]', raw);
 
-      // ── Permission gate intercept ───────────────────────────────────────
-      if (raw.startsWith('permission:')) {
-        const jsonPart = raw.slice('permission:'.length).trim();
-        try {
-          const req = JSON.parse(jsonPart) as PermissionRequest;
-          optsRef.current.onPermissionRequest?.(req);
-        } catch {
-          // Malformed permission message — surface as plain message
-          optsRef.current.onMessage?.(raw);
-        }
+      let env: Envelope;
+      try {
+        env = JSON.parse(raw) as Envelope;
+      } catch {
+        console.warn('[laputa-agent] non-JSON message ignored:', raw);
         return;
       }
 
-      // ── Action log / status messages ────────────────────────────────────
-      optsRef.current.onMessage?.(raw);
+      if (env.v !== 1) {
+        console.warn('[laputa-agent] unknown envelope version:', env.v);
+        return;
+      }
+
+      switch (env.kind) {
+        case 'permission':
+          optsRef.current.onPermissionRequest?.(env.payload as PermissionRequest);
+          break;
+        case 'action_log':
+          optsRef.current.onMessage?.(env.payload.text ?? '');
+          break;
+        case 'status':
+          optsRef.current.onStatus?.({
+            state:  env.payload.state  ?? '',
+            detail: env.payload.detail ?? '',
+          });
+          break;
+        default:
+          console.warn('[laputa-agent] unknown envelope kind:', env.kind);
+      }
     };
 
     wsRef.current = ws;
@@ -142,11 +167,25 @@ export function useAgentSocket(options: AgentSocketOptions = {}): AgentSocket {
     }
   }, [connState, connect]);
 
-  const sendGoal    = useCallback((goal: string)   => send(`goal:${goal}`), [send]);
-  const sendCommand = useCallback((cmd: AgentCmd)   => send(cmd),           [send]);
-  const sendRaw     = useCallback((msg: string)     => send(msg),           [send]);
+  const sendGoal = useCallback(
+    (goal: string) => send(JSON.stringify({ v: 1, kind: 'goal', payload: { text: goal } })),
+    [send],
+  );
 
-  const disconnect  = useCallback(() => {
+  const sendCommand = useCallback(
+    (cmd: AgentCmd) => send(JSON.stringify({ v: 1, kind: 'command', payload: { cmd } })),
+    [send],
+  );
+
+  const sendApproval = useCallback(
+    (id: string, approved: boolean) =>
+      send(JSON.stringify({ v: 1, kind: 'approval', payload: { id, approved } })),
+    [send],
+  );
+
+  const sendRaw = useCallback((msg: string) => send(msg), [send]);
+
+  const disconnect = useCallback(() => {
     intentional.current = true;
     if (retryTimer.current) clearTimeout(retryTimer.current);
     wsRef.current?.close();
@@ -155,5 +194,5 @@ export function useAgentSocket(options: AgentSocketOptions = {}): AgentSocket {
     setConnState('disconnected');
   }, []);
 
-  return { connState, sendGoal, sendCommand, sendRaw, disconnect };
+  return { connState, sendGoal, sendCommand, sendApproval, sendRaw, disconnect };
 }

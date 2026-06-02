@@ -1,7 +1,9 @@
 import { useState, useRef, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Paperclip, Mic, MicOff, ArrowUp, X, ChevronUp, ChevronDown } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useChatContext } from '@/hooks/use-chat-context'
+import { PermissionCard } from '@/components/PermissionCard'
 
 interface ChatBoxProps {
   placeholder?: string
@@ -24,7 +26,15 @@ export function ChatBox({
   placeholder = 'What can I help you with?',
   className
 }: ChatBoxProps) {
-  const { messages, sendMessage, status, isPaused, idleOpacity } = useChatContext()
+  const navigate = useNavigate()
+  const { messages, sendMessage, status, isPaused, idleOpacity, pendingPermission, approve, deny } = useChatContext()
+
+  const surfaceRoutes: Record<string, string> = {
+    immersive: '/immersive',
+    chat: '/chat',
+    code: '/code',
+  }
+  const handleSwitch = (surface: string) => navigate(surfaceRoutes[surface] ?? '/')
 
   const [input, setInput] = useState('')
   const [isActive, setIsActive] = useState(false)
@@ -181,6 +191,14 @@ export function ChatBox({
                     </div>
                   </div>
                 </div>
+              )}
+              {pendingPermission && (
+                <PermissionCard
+                  req={pendingPermission}
+                  onApprove={() => approve(pendingPermission.id)}
+                  onDeny={() => deny(pendingPermission.id)}
+                  onSwitch={handleSwitch}
+                />
               )}
               <div ref={messagesEndRef} />
             </div>
