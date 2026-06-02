@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { useState } from 'react';
+import { TooltipProvider } from '@/components/ui/tooltip';
 import LoginPage from './pages/LoginPage';
 import FirstLaunchWelcome from './pages/FirstLaunchWelcome';
 import FirstLaunchSystemDetected from './pages/FirstLaunchSystemDetected';
@@ -25,6 +26,7 @@ import MCPManager from './pages/MCPManager';
 import ServerManagement from './pages/ServerManagement';
 import VMManager from './pages/VMManager';
 import './index.css';
+import { ChatProvider } from './hooks/use-chat-context';
 
 function AppRoutes({ isLoggedIn, setIsLoggedIn }: { isLoggedIn: boolean; setIsLoggedIn: (v: boolean) => void }) {
   if (!isLoggedIn) {
@@ -63,10 +65,13 @@ function AppRoutes({ isLoggedIn, setIsLoggedIn }: { isLoggedIn: boolean; setIsLo
 
 export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
-
   return (
     <BrowserRouter>
-      <AppRoutes isLoggedIn={isLoggedIn} setIsLoggedIn={setIsLoggedIn} />
+      <TooltipProvider>
+        <ChatProvider>
+          <AppRoutes isLoggedIn={isLoggedIn} setIsLoggedIn={setIsLoggedIn} />
+        </ChatProvider>
+      </TooltipProvider>
     </BrowserRouter>
   );
 }
