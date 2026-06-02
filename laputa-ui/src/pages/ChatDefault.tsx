@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useChatContext } from "@/hooks/use-chat-context";
+import { PermissionCard } from "@/components/PermissionCard";
 
 interface Conversation {
   id: string;
@@ -12,7 +13,13 @@ const PROJECTS: { id: string; name: string }[] = [];
 
 export default function ChatDefault() {
   const navigate = useNavigate();
-  const { messages, sendMessage, status, isPaused, setIsPaused, connState } = useChatContext();
+  const { messages, sendMessage, status, isPaused, setIsPaused, connState, pendingPermission, approve, deny } = useChatContext();
+
+  const surfaceRoutes: Record<string, string> = {
+    immersive: "/immersive",
+    chat: "/chat",
+    code: "/code",
+  };
 
   const [input, setInput] = useState("");
   const [showSidebar, setShowSidebar] = useState(true);
@@ -26,7 +33,7 @@ export default function ChatDefault() {
   const isConnected = connState === "connected";
   const isLoading = status === "submitted" || status === "streaming";
 
-  useEffect(() => {
+useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
@@ -220,6 +227,14 @@ export default function ChatDefault() {
                 <div className="w-8 h-8 rounded-md bg-laputa-surface-2 border border-laputa-border flex-shrink-0" />
                 <TypingAnimation />
               </div>
+            )}
+            {pendingPermission && (
+              <PermissionCard
+                req={pendingPermission}
+                onApprove={() => approve(pendingPermission.id)}
+                onDeny={() => deny(pendingPermission.id)}
+                onSwitch={(surface) => navigate(surfaceRoutes[surface] ?? "/chat")}
+              />
             )}
             <div ref={messagesEndRef} />
           </div>
