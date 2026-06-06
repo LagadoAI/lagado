@@ -10,7 +10,6 @@ mod memory;
 mod chronos;
 mod envelope;
 mod inference;
-mod vm;
 
 use std::process::Command;
 use std::sync::Arc;
