@@ -14,7 +14,7 @@ interface TabsProps {
  
 export function Tabs({ tabs, activeTab, onTabChange, className }: TabsProps) {
   return (
-    <div className={`flex border-b border-laputa-border ${className || ""}`}>
+    <div className={`flex border-b border-lagado-border ${className || ""}`}>
       {tabs.map((tab) => (
         <button
           key={tab.id}
@@ -23,8 +23,8 @@ export function Tabs({ tabs, activeTab, onTabChange, className }: TabsProps) {
             px-4 py-3 text-body font-rajdhani transition-colors
             ${
               activeTab === tab.id
-                ? "text-laputa-text-bright border-b-2 border-laputa-red"
-                : "text-laputa-text-dim hover:text-laputa-text"
+                ? "text-lagado-text-bright border-b-2 border-lagado-red"
+                : "text-lagado-text-dim hover:text-lagado-text"
             }
           `}
         >

@@ -1,5 +1,6 @@
 use std::fs::OpenOptions;
 use std::io::Write;
+use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub fn log(event: &str) {
@@ -8,14 +9,17 @@ pub fn log(event: &str) {
         .map(|d| d.as_secs())
         .unwrap_or(0);
     let line = format!("{ts}\t{event}\n");
-    if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(path()) {
+    let p = path();
+    if let Some(parent) = p.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(&p) {
         let _ = f.write_all(line.as_bytes());
     }
 }
 
-fn path() -> String {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/home/d".into());
-    format!("{home}/.laputa-secure/chronos.log")
+fn path() -> PathBuf {
+    crate::config::chronos_log()
 }
 
 #[cfg(test)]
@@ -29,7 +33,7 @@ mod tests {
         log("action: click(selector=\"ref_1\") -> Clicked ref_1");
         log("goal_done: test complete");
 
-        let contents = std::fs::read_to_string(path()).expect("chronos.log must exist");
+        let contents = std::fs::read_to_string(&path()).expect("chronos.log must exist");
         assert!(contents.contains("goal_received: test goal"));
         assert!(contents.contains("confirm_requested: tap:"));
         assert!(contents.contains("action: click"));

@@ -26,48 +26,48 @@ export function URLHandlerConfirmationDialog({
  
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
-      <div className="absolute inset-0 bg-laputa-modal-overlay" />
+      <div className="absolute inset-0 bg-lagado-modal-overlay" />
  
-      <div className="relative bg-laputa-surface border border-laputa-yellow rounded-md p-6 max-w-md w-full shadow-2xl">
+      <div className="relative bg-lagado-surface border border-lagado-yellow rounded-md p-6 max-w-md w-full shadow-2xl">
         <div className="flex items-center gap-3 mb-4">
-          <span className="text-laputa-yellow text-3xl">⚠</span>
-          <h2 className="text-h2 text-laputa-text-bright font-bold">
+          <span className="text-lagado-yellow text-3xl">⚠</span>
+          <h2 className="text-h2 text-lagado-text-bright font-bold">
             Security: External Request
           </h2>
         </div>
  
-        <p className="text-body text-laputa-text mb-4">
-          An external application is requesting Laputa to perform an action.
+        <p className="text-body text-lagado-text mb-4">
+          An external application is requesting Lagado to perform an action.
         </p>
  
         <div className="space-y-3 mb-6">
           <div>
-            <p className="text-caption text-laputa-text-dim">Source:</p>
-            <p className="text-body-sm text-laputa-text-bright font-mono break-all">
+            <p className="text-caption text-lagado-text-dim">Source:</p>
+            <p className="text-body-sm text-lagado-text-bright font-mono break-all">
               {source}
             </p>
           </div>
           <div>
-            <p className="text-caption text-laputa-text-dim">Action:</p>
-            <p className="text-body-sm text-laputa-red font-mono font-semibold">
+            <p className="text-caption text-lagado-text-dim">Action:</p>
+            <p className="text-body-sm text-lagado-red font-mono font-semibold">
               {action}
             </p>
           </div>
           <div>
-            <p className="text-caption text-laputa-text-dim">Parameters:</p>
-            <div className="bg-laputa-surface-2 border border-laputa-border rounded-sm p-3 mt-1">
+            <p className="text-caption text-lagado-text-dim">Parameters:</p>
+            <div className="bg-lagado-surface-2 border border-lagado-border rounded-sm p-3 mt-1">
               {Object.entries(parameters).map(([key, value]) => (
                 <div key={key} className="text-body-sm font-mono">
-                  <span className="text-laputa-text-dim">{key}:</span>{" "}
-                  <span className="text-laputa-text">{value}</span>
+                  <span className="text-lagado-text-dim">{key}:</span>{" "}
+                  <span className="text-lagado-text">{value}</span>
                 </div>
               ))}
             </div>
           </div>
         </div>
  
-        <div className="bg-laputa-yellow bg-opacity-10 border border-laputa-yellow rounded-sm p-3 mb-6">
-          <p className="text-body-sm text-laputa-yellow">
+        <div className="bg-lagado-yellow bg-opacity-10 border border-lagado-yellow rounded-sm p-3 mb-6">
+          <p className="text-body-sm text-lagado-yellow">
             ⚠ Verify the source is trusted before allowing this action.
           </p>
         </div>

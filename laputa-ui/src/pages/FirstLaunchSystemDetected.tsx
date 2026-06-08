@@ -49,10 +49,10 @@ export default function FirstLaunchSystemDetected({ onNext }: FirstLaunchSystemD
  
   if (isDetecting) {
     return (
-      <div className="min-h-screen bg-laputa-bg flex items-center justify-center px-4">
+      <div className="min-h-screen bg-lagado-bg flex items-center justify-center px-4">
         <div className="text-center">
           <Spinner size="lg" label="Detecting your system..." />
-          <p className="mt-6 text-body-sm text-laputa-text-dim max-w-sm">
+          <p className="mt-6 text-body-sm text-lagado-text-dim max-w-sm">
             Reading hardware specs to recommend the best configuration
           </p>
         </div>
@@ -61,16 +61,16 @@ export default function FirstLaunchSystemDetected({ onNext }: FirstLaunchSystemD
   }
  
   return (
-    <div className="min-h-screen bg-laputa-bg flex items-center justify-center px-4">
+    <div className="min-h-screen bg-lagado-bg flex items-center justify-center px-4">
       <div className="max-w-2xl w-full">
-        <h1 className="text-h1 text-laputa-text-bright font-bold mb-2">
+        <h1 className="text-h1 text-lagado-text-bright font-bold mb-2">
           System Detected
         </h1>
-        <p className="text-body text-laputa-text-dim mb-8">
+        <p className="text-body text-lagado-text-dim mb-8">
           Here's what we found on your machine
         </p>
  
-        <div className="bg-laputa-surface border border-laputa-border rounded-sm p-6 mb-6">
+        <div className="bg-lagado-surface border border-lagado-border rounded-sm p-6 mb-6">
           <MetadataList
             items={[
               { key: "CPU", value: systemInfo!.cpu, mono: true },
@@ -88,14 +88,14 @@ export default function FirstLaunchSystemDetected({ onNext }: FirstLaunchSystemD
           />
         </div>
  
-        <div className="bg-laputa-purple bg-opacity-10 border border-laputa-purple rounded-sm p-4 mb-8">
+        <div className="bg-lagado-purple bg-opacity-10 border border-lagado-purple rounded-sm p-4 mb-8">
           <div className="flex items-start gap-3">
             <span className="text-2xl">💡</span>
             <div>
-              <p className="text-body text-laputa-purple font-semibold mb-1">
+              <p className="text-body text-lagado-purple font-semibold mb-1">
                 Recommendation
               </p>
-              <p className="text-body-sm text-laputa-text">
+              <p className="text-body-sm text-lagado-text">
                 Your system can run a balanced model. We'll suggest{" "}
                 <span className="font-mono">Qwen3-2.5B</span> on the next step.
               </p>

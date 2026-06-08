@@ -11,11 +11,11 @@ function SettingsModels() {
  
   return (
     <Card>
-      <h2 className="text-h2 text-laputa-text-bright font-bold mb-6">Models</h2>
+      <h2 className="text-h2 text-lagado-text-bright font-bold mb-6">Models</h2>
  
       <div className="space-y-6">
         <div>
-          <label className="block text-body-sm text-laputa-text-dim mb-2">Active Model</label>
+          <label className="block text-body-sm text-lagado-text-dim mb-2">Active Model</label>
           <Select
             value={activeModel}
             onChange={setActiveModel}
@@ -32,16 +32,16 @@ function SettingsModels() {
         </div>
  
         <div>
-          <h3 className="text-h3 text-laputa-text-bright font-semibold mb-3">Installed Models</h3>
+          <h3 className="text-h3 text-lagado-text-bright font-semibold mb-3">Installed Models</h3>
           <div className="space-y-2">
             {installedModels.map((model) => (
               <div
                 key={model.id}
-                className="bg-laputa-surface-2 border border-laputa-border rounded-sm p-4 flex items-center justify-between"
+                className="bg-lagado-surface-2 border border-lagado-border rounded-sm p-4 flex items-center justify-between"
               >
                 <div>
-                  <div className="text-body text-laputa-text-bright font-semibold">{model.name}</div>
-                  <div className="flex items-center gap-3 mt-1 text-body-sm text-laputa-text-dim">
+                  <div className="text-body text-lagado-text-bright font-semibold">{model.name}</div>
+                  <div className="flex items-center gap-3 mt-1 text-body-sm text-lagado-text-dim">
                     <span>Size: {model.size}</span>
                     <Badge variant={model.status === "active" ? "success" : "default"}>
                       {model.status === "active" ? "ACTIVE" : "COLD"}

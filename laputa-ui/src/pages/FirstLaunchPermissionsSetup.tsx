@@ -38,18 +38,18 @@ export default function FirstLaunchPermissionsSetup({
   };
  
   return (
-    <div className="min-h-screen bg-laputa-bg flex items-center justify-center px-4">
+    <div className="min-h-screen bg-lagado-bg flex items-center justify-center px-4">
       <div className="max-w-2xl w-full py-8">
-        <h1 className="text-h1 text-laputa-text-bright font-bold mb-2">
+        <h1 className="text-h1 text-lagado-text-bright font-bold mb-2">
           Set Up Permissions
         </h1>
-        <p className="text-body text-laputa-text-dim mb-8">
-          Choose what Laputa can access. You can change these anytime in Settings.
+        <p className="text-body text-lagado-text-dim mb-8">
+          Choose what Lagado can access. You can change these anytime in Settings.
         </p>
  
         {/* File System */}
         <Card className="mb-6">
-          <h3 className="text-h3 text-laputa-text-bright font-bold mb-4 flex items-center gap-2">
+          <h3 className="text-h3 text-lagado-text-bright font-bold mb-4 flex items-center gap-2">
             <span className="text-2xl">📁</span> File System
           </h3>
           <div className="space-y-3">
@@ -73,7 +73,7 @@ export default function FirstLaunchPermissionsSetup({
  
         {/* Applications */}
         <Card className="mb-6">
-          <h3 className="text-h3 text-laputa-text-bright font-bold mb-4 flex items-center gap-2">
+          <h3 className="text-h3 text-lagado-text-bright font-bold mb-4 flex items-center gap-2">
             <span className="text-2xl">📱</span> Applications
           </h3>
           <div className="space-y-3">
@@ -97,7 +97,7 @@ export default function FirstLaunchPermissionsSetup({
  
         {/* Advanced */}
         <Card className="mb-6">
-          <h3 className="text-h3 text-laputa-text-bright font-bold mb-4 flex items-center gap-2">
+          <h3 className="text-h3 text-lagado-text-bright font-bold mb-4 flex items-center gap-2">
             <span className="text-2xl">⚡</span> Operations
           </h3>
           <div className="space-y-3">
@@ -121,15 +121,15 @@ export default function FirstLaunchPermissionsSetup({
  
         <div className="flex gap-3">
           <Button variant="primary" size="lg" onClick={handleComplete} className="flex-1">
-            Start Using Laputa
+            Start Using Lagado
           </Button>
           <Button variant="secondary" size="lg" className="flex-1">
             Customize Later
           </Button>
         </div>
  
-        <p className="text-caption text-laputa-text-dim text-center mt-6">
-          You'll be prompted before Laputa accesses any approved resource
+        <p className="text-caption text-lagado-text-dim text-center mt-6">
+          You'll be prompted before Lagado accesses any approved resource
         </p>
       </div>
     </div>

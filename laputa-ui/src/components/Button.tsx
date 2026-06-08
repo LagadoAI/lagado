@@ -12,9 +12,9 @@ interface ButtonProps {
 export function Button({ variant = 'primary', size = 'md', children, onClick, disabled, className }: ButtonProps) {
   const baseStyle = 'font-rajdhani font-semibold rounded-sm transition-colors cursor-pointer';
   const variants = {
-    primary: 'bg-laputa-red text-white hover:bg-opacity-90',
-    secondary: 'bg-laputa-surface border border-laputa-border text-laputa-text hover:bg-laputa-surface-2',
-    danger: 'bg-laputa-red text-white hover:bg-opacity-90',
+    primary: 'bg-lagado-red text-white hover:bg-opacity-90',
+    secondary: 'bg-lagado-surface border border-lagado-border text-lagado-text hover:bg-lagado-surface-2',
+    danger: 'bg-lagado-red text-white hover:bg-opacity-90',
   };
   const sizes = {
     sm: 'px-3 py-1 text-btn',

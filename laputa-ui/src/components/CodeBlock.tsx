@@ -18,16 +18,16 @@ export function CodeBlock({
   return (
     <pre
       className={`
-        bg-laputa-bg border border-laputa-border rounded-sm p-4
+        bg-lagado-bg border border-lagado-border rounded-sm p-4
         overflow-x-auto font-mono text-sm
         ${className || ""}
       `}
     >
-      <code className="text-laputa-text">
+      <code className="text-lagado-text">
         {lines.map((line, idx) => (
           <div key={idx} className="flex">
             {showLineNumbers && (
-              <span className="text-laputa-text-dim mr-4 w-8 text-right select-none">
+              <span className="text-lagado-text-dim mr-4 w-8 text-right select-none">
                 {idx + 1}
               </span>
             )}

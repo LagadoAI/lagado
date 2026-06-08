@@ -9,15 +9,15 @@ function SettingsSystemIntegration() {
  
   return (
     <Card>
-      <h2 className="text-h2 text-laputa-text-bright font-bold mb-6">System Integration</h2>
+      <h2 className="text-h2 text-lagado-text-bright font-bold mb-6">System Integration</h2>
  
       <div className="space-y-8">
         {/* System Tray */}
         <div>
-          <h3 className="text-h3 text-laputa-text-bright font-semibold mb-3">System Tray</h3>
+          <h3 className="text-h3 text-lagado-text-bright font-semibold mb-3">System Tray</h3>
           <div className="space-y-3">
             <Checkbox
-              label="Show Laputa icon in system tray"
+              label="Show Lagado icon in system tray"
               checked={showTray}
               onChange={setShowTray}
             />
@@ -36,8 +36,8 @@ function SettingsSystemIntegration() {
  
         {/* URL Handler */}
         <div>
-          <h3 className="text-h3 text-laputa-text-bright font-semibold mb-3">
-            URL Handler (laputa://)
+          <h3 className="text-h3 text-lagado-text-bright font-semibold mb-3">
+            URL Handler (lagado://)
           </h3>
           <Alert
             type="warning"
@@ -46,7 +46,7 @@ function SettingsSystemIntegration() {
           />
           <div className="space-y-3 mt-4">
             <Checkbox
-              label="Enable laputa:// URL protocol"
+              label="Enable lagado:// URL protocol"
               checked={enableURL}
               onChange={setEnableURL}
             />
@@ -57,7 +57,7 @@ function SettingsSystemIntegration() {
             />
           </div>
           <div className="mt-4">
-            <p className="text-body-sm text-laputa-text-dim mb-2">Allowed Actions:</p>
+            <p className="text-body-sm text-lagado-text-dim mb-2">Allowed Actions:</p>
             <div className="space-y-2 ml-4">
               <Checkbox label="Open task" checked={true} onChange={() => {}} />
               <Checkbox label="Connect to MCP server" checked={true} onChange={() => {}} />
@@ -65,7 +65,7 @@ function SettingsSystemIntegration() {
                 label="Execute command"
                 checked={false}
                 onChange={() => {}}
-                className="text-laputa-red"
+                className="text-lagado-red"
               />
             </div>
           </div>
@@ -76,7 +76,7 @@ function SettingsSystemIntegration() {
  
         {/* Clipboard */}
         <div>
-          <h3 className="text-h3 text-laputa-text-bright font-semibold mb-3">Clipboard</h3>
+          <h3 className="text-h3 text-lagado-text-bright font-semibold mb-3">Clipboard</h3>
           <div className="space-y-3">
             <Checkbox
               label="Allow agent to read clipboard"
@@ -95,7 +95,7 @@ function SettingsSystemIntegration() {
             />
           </div>
           <div className="mt-3">
-            <label className="block text-body-sm text-laputa-text-dim mb-2">
+            <label className="block text-body-sm text-lagado-text-dim mb-2">
               Clear Timeout
             </label>
             <Select
@@ -112,15 +112,15 @@ function SettingsSystemIntegration() {
  
         {/* Drag & Drop */}
         <div>
-          <h3 className="text-h3 text-laputa-text-bright font-semibold mb-3">Drag & Drop</h3>
+          <h3 className="text-h3 text-lagado-text-bright font-semibold mb-3">Drag & Drop</h3>
           <div className="space-y-3">
             <Checkbox
-              label="Accept files dropped on Laputa"
+              label="Accept files dropped on Lagado"
               checked={true}
               onChange={() => {}}
             />
             <Checkbox
-              label="Accept text dropped on Laputa"
+              label="Accept text dropped on Lagado"
               checked={true}
               onChange={() => {}}
             />
@@ -129,9 +129,9 @@ function SettingsSystemIntegration() {
  
         {/* File Associations */}
         <div>
-          <h3 className="text-h3 text-laputa-text-bright font-semibold mb-3">File Associations</h3>
+          <h3 className="text-h3 text-lagado-text-bright font-semibold mb-3">File Associations</h3>
           <Checkbox
-            label="Register .laputa file type"
+            label="Register .lagado file type"
             checked={true}
             onChange={() => {}}
           />

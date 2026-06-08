@@ -1,6 +1,5 @@
 mod action_graph;
 mod types;
-mod parser;
 mod bracket_parser;
 mod forge;
 mod gate;
@@ -10,6 +9,8 @@ mod memory;
 mod chronos;
 mod envelope;
 mod inference;
+mod config;
+mod perception;
 
 use std::process::Command;
 use std::sync::Arc;
@@ -24,6 +25,7 @@ use operator::StepEnforcer;
 use memory::Memory;
 use inference::llama_cpp::LlamaCppAdapter;
 use inference::InferenceAdapter;
+use perception::{Perceptor, Actuator, MockPerceptor, MockActuator};
 
 const SYSTEM_PROMPT: &str = r#"You are an assistant that operates the user's Linux desktop on their behalf. You read the screen and act by emitting one tool call at a time.
 Your perception tool outputs the active window's interactive elements in this format:
@@ -43,11 +45,6 @@ EXAMPLES:
   type(selector="ref_5", text="hello")
 Respond with ONLY one bracket tool call. No markdown, no explanation."#;
 
-const MODEL_PATH: &str = "/home/d/.laputa-secure/models/LFM2.5-8B-A1B-Q4_K_M.gguf";
-const CONTEXT_SIZE: usize = 32768;
-const LLAMA_SERVER_BIN: &str =
-    "/home/d/laputa/laputa-agent/vendored/llama.cpp-2/build/bin/llama-server";
-
 // ── State shared between WebSocket and agent ──────────────────────
 struct AgentState {
     goal: String,
@@ -56,58 +53,18 @@ struct AgentState {
     pending_id: Option<String>,
 }
 
-// ── Screen reading ────────────────────────────────────────────────
-async fn get_screen_state() -> String {
-    let output = Command::new("python3")
-        .args(["/home/d/laputa/perceive.py", "--focused"])
-        .output()
-        .ok();
-    match output {
-        Some(out) => String::from_utf8_lossy(&out.stdout).to_string(),
-        None => "Screen state unavailable".to_string(),
-    }
-}
-
 // ── Tool execution ────────────────────────────────────────────────
-async fn execute_tool(call: &ToolCall) -> String {
+async fn execute_tool(call: &ToolCall, actuator: &dyn Actuator) -> String {
     match call {
-        ToolCall::Click { selector } => {
-            let _ = Command::new("python3")
-                .args(["-m", "tine.cli", "click", selector])
-                .current_dir("/home/d/laputa/tine")
-                .output();
-            format!("Clicked {}", selector)
-        }
-        ToolCall::Type { selector, text } => {
-            if selector != "body" {
-                let _ = Command::new("python3")
-                    .args(["-m", "tine.cli", "focus", selector])
-                    .current_dir("/home/d/laputa/tine")
-                    .output();
-            }
-            let _ = Command::new("python3")
-                .args(["-m", "tine.cli", "type", text])
-                .current_dir("/home/d/laputa/tine")
-                .output();
-            format!("Typed '{}' in {}", text, selector)
-        }
-        ToolCall::Key { key } => {
-            let _ = Command::new("python3")
-                .args(["-m", "tine.cli", "key", key])
-                .current_dir("/home/d/laputa/tine")
-                .output();
-            format!("Pressed {}", key)
-        }
+        ToolCall::Click { selector } => actuator.click(selector),
+        ToolCall::Type { selector, text } => actuator.type_text(selector, text),
+        ToolCall::Key { key } => actuator.key(key),
         ToolCall::Wait { ms } => {
             tokio::time::sleep(tokio::time::Duration::from_millis(*ms as u64)).await;
             format!("Waited {}ms", ms)
         }
-        ToolCall::Task { description } => {
-            format!("Task completed: {}", description)
-        }
-        ToolCall::Done { reason } => {
-            format!("Done: {}", reason)
-        }
+        ToolCall::Task { description } => format!("Task completed: {}", description),
+        ToolCall::Done { reason } => format!("Done: {}", reason),
     }
 }
 
@@ -115,6 +72,8 @@ async fn execute_tool(call: &ToolCall) -> String {
 async fn agent_loop(
     state: Arc<Mutex<AgentState>>,
     adapter: Arc<dyn InferenceAdapter>,
+    perceptor: Arc<dyn Perceptor>,
+    actuator: Arc<dyn Actuator>,
     mut approval_rx: mpsc::Receiver<bool>,
     confirm_tx: mpsc::Sender<String>,
 ) {
@@ -145,7 +104,7 @@ async fn agent_loop(
             break;
         }
 
-        let screen = get_screen_state().await;
+        let screen = perceptor.read_screen();
         let context = memory.context_string();
         let prompt = format!(
             "{}\n\n{context}\n\nScreen:\n{screen}\n\nGoal: {goal}\n\nWhat is your next action?",
@@ -175,7 +134,7 @@ async fn agent_loop(
                 let output = match gate::evaluate_action(&tool_call) {
                     gate::Verdict::Allow => {
                         let desc = gate::describe(&tool_call);
-                        let out = execute_tool(&tool_call).await;
+                        let out = execute_tool(&tool_call, actuator.as_ref()).await;
                         chronos::log(&format!("action: {desc} -> {out}"));
                         let _ = confirm_tx.send(envelope::make("action_log", envelope::ActionLogPayload {
                             text: format!("{desc} -> {out}"),
@@ -205,7 +164,7 @@ async fn agent_loop(
                         { state.lock().await.pending_id = Some(id); }
                         let approved = approval_rx.recv().await.unwrap_or(false);
                         if approved {
-                            let out = execute_tool(&tool_call).await;
+                            let out = execute_tool(&tool_call, actuator.as_ref()).await;
                             chronos::log(&format!("action: {desc} -> {out}"));
                             let _ = confirm_tx.send(envelope::make("action_log", envelope::ActionLogPayload {
                                 text: format!("{desc} -> {out}"),
@@ -243,7 +202,7 @@ async fn agent_loop(
                         { state.lock().await.pending_id = Some(id); }
                         let approved = approval_rx.recv().await.unwrap_or(false);
                         if approved {
-                            let out = execute_tool(&tool_call).await;
+                            let out = execute_tool(&tool_call, actuator.as_ref()).await;
                             chronos::log(&format!("action: {desc} -> {out}"));
                             let _ = confirm_tx.send(envelope::make("action_log", envelope::ActionLogPayload {
                                 text: format!("{desc} -> {out}"),
@@ -317,8 +276,10 @@ async fn agent_loop(
 async fn main() {
     tracing_subscriber::fmt::init();
 
+    let model_path = config::model_path();
+
     // ── Governor: detect hardware, plan server config ─────────────
-    let cfg = governor::detect_and_plan(CONTEXT_SIZE);
+    let cfg = governor::detect_and_plan(config::CONTEXT_SIZE);
     chronos::log(&format!(
         "server_config: gpu={} ctx={} ngl={} threads={} parallel={}",
         cfg.n_gpu_layers > 0, cfg.ctx, cfg.n_gpu_layers, cfg.threads, cfg.n_parallel
@@ -326,7 +287,8 @@ async fn main() {
 
     // Check if llama-server is already up before spawning
     let already_up = tokio::task::spawn_blocking(|| {
-        ureq::get("http://127.0.0.1:8080/health").call().is_ok()
+        let url = format!("{}/health", config::llama_base_url());
+        ureq::get(&url).call().is_ok()
     })
     .await
     .unwrap_or(false);
@@ -334,25 +296,25 @@ async fn main() {
     // Keep child alive for the duration of the program
     let _server_child: Option<std::process::Child> = if already_up {
         chronos::log("server_config: reusing existing server");
-        println!("llama-server already running on :8080 — reusing.");
+        println!("llama-server already running — reusing.");
         None
     } else {
         let mut args = vec![
-            "-m".to_string(), MODEL_PATH.to_string(),
+            "-m".to_string(), model_path.to_string_lossy().to_string(),
             "-c".to_string(), cfg.ctx.to_string(),
             "-ngl".to_string(), cfg.n_gpu_layers.to_string(),
             "-t".to_string(), cfg.threads.to_string(),
             "--parallel".to_string(), cfg.n_parallel.to_string(),
-            "--host".to_string(), "127.0.0.1".to_string(),
-            "--port".to_string(), "8080".to_string(),
+            "--host".to_string(), config::llama_host(),
+            "--port".to_string(), config::llama_port().to_string(),
         ];
         if cfg.flash_attn {
             args.push("-fa".to_string());
             args.push("on".to_string());
         }
-        println!("Spawning: {} {}", LLAMA_SERVER_BIN, args.join(" "));
+        println!("Spawning: {} {}", config::llama_server_bin().display(), args.join(" "));
 
-        let mut cmd = Command::new(LLAMA_SERVER_BIN);
+        let mut cmd = Command::new(config::llama_server_bin());
         cmd.args(&args);
         match cmd.spawn() {
             Ok(child) => {
@@ -360,8 +322,9 @@ async fn main() {
                     let agent = ureq::AgentBuilder::new()
                         .timeout(std::time::Duration::from_secs(2))
                         .build();
+                    let url = format!("{}/health", config::llama_base_url());
                     for _ in 0..60 {
-                        if agent.get("http://127.0.0.1:8080/health").call().is_ok() {
+                        if agent.get(&url).call().is_ok() {
                             return true;
                         }
                         std::thread::sleep(std::time::Duration::from_secs(1));
@@ -375,7 +338,7 @@ async fn main() {
                     eprintln!("llama-server did not become ready within 60s — exiting.");
                     std::process::exit(1);
                 }
-                println!("llama-server ready on :8080");
+                println!("llama-server ready.");
                 Some(child)
             }
             Err(e) => {
@@ -387,9 +350,12 @@ async fn main() {
 
     // ── Inference adapter ─────────────────────────────────────────
     let adapter: Arc<dyn InferenceAdapter> = Arc::new(
-        LlamaCppAdapter::new(MODEL_PATH, CONTEXT_SIZE)
+        LlamaCppAdapter::new(&model_path.to_string_lossy(), config::CONTEXT_SIZE)
             .expect("Failed to construct LlamaCppAdapter")
     );
+
+    let perceptor: Arc<dyn Perceptor> = Arc::new(MockPerceptor);
+    let actuator: Arc<dyn Actuator> = Arc::new(MockActuator);
 
     let state = Arc::new(Mutex::new(AgentState {
         goal: String::new(),
@@ -400,15 +366,19 @@ async fn main() {
 
     let state_ws = state.clone();
     let adapter_ws = adapter.clone();
+    let perceptor_ws = perceptor.clone();
+    let actuator_ws = actuator.clone();
 
     tokio::spawn(async move {
-        let listener = TcpListener::bind("127.0.0.1:9090").await.unwrap();
-        println!("WebSocket server on ws://127.0.0.1:9090");
+        let listener = TcpListener::bind(config::ws_addr()).await.unwrap();
+        println!("WebSocket server on ws://{}", config::ws_addr());
         while let Ok((stream, _)) = listener.accept().await {
             let ws = accept_async(stream).await.unwrap();
             let (mut ws_sender, mut receiver) = ws.split();
             let state = state_ws.clone();
             let adapter = adapter_ws.clone();
+            let perceptor = perceptor_ws.clone();
+            let actuator = actuator_ws.clone();
 
             // Per-connection outbound channel: agent_loop → ws_sender
             let (outbound_tx, mut outbound_rx) = mpsc::channel::<String>(4);
@@ -439,8 +409,10 @@ async fn main() {
                                             } // guard dropped before spawn
                                             let state_clone = state.clone();
                                             let adapter_clone = adapter.clone();
+                                            let perceptor_clone = perceptor.clone();
+                                            let actuator_clone = actuator.clone();
                                             tokio::spawn(async move {
-                                                agent_loop(state_clone, adapter_clone, approval_rx, confirm_tx).await;
+                                                agent_loop(state_clone, adapter_clone, perceptor_clone, actuator_clone, approval_rx, confirm_tx).await;
                                             });
                                         }
                                     }

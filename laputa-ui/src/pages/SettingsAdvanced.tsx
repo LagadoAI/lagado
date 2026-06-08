@@ -4,11 +4,11 @@ function SettingsAdvanced() {
  
   return (
     <Card>
-      <h2 className="text-h2 text-laputa-text-bright font-bold mb-6">Advanced</h2>
+      <h2 className="text-h2 text-lagado-text-bright font-bold mb-6">Advanced</h2>
  
       <div className="space-y-6">
         <div>
-          <label className="block text-body-sm text-laputa-text-dim mb-3">Mode</label>
+          <label className="block text-body-sm text-lagado-text-dim mb-3">Mode</label>
           <div className="space-y-2">
             <Radio
               name="mode"
@@ -32,34 +32,34 @@ function SettingsAdvanced() {
         {mode === "tune" && (
           <>
             <div>
-              <label className="block text-body-sm text-laputa-text-dim mb-2">
+              <label className="block text-body-sm text-lagado-text-dim mb-2">
                 Sampling Parameters
               </label>
               <div className="grid grid-cols-3 gap-3">
                 <div>
-                  <label className="text-caption text-laputa-text-dim">temp</label>
+                  <label className="text-caption text-lagado-text-dim">temp</label>
                   <Input type="number" defaultValue="0.7" />
                 </div>
                 <div>
-                  <label className="text-caption text-laputa-text-dim">top_p</label>
+                  <label className="text-caption text-lagado-text-dim">top_p</label>
                   <Input type="number" defaultValue="0.9" />
                 </div>
                 <div>
-                  <label className="text-caption text-laputa-text-dim">top_k</label>
+                  <label className="text-caption text-lagado-text-dim">top_k</label>
                   <Input type="number" defaultValue="40" />
                 </div>
               </div>
             </div>
  
             <div>
-              <label className="block text-body-sm text-laputa-text-dim mb-2">
+              <label className="block text-body-sm text-lagado-text-dim mb-2">
                 llama.cpp Flags
               </label>
               <Input placeholder="--ctx-size 4096 --batch-size 512" />
             </div>
  
             <div>
-              <label className="block text-body-sm text-laputa-text-dim mb-2">
+              <label className="block text-body-sm text-lagado-text-dim mb-2">
                 Context Strategy
               </label>
               <Select
@@ -74,7 +74,7 @@ function SettingsAdvanced() {
             </div>
  
             <div>
-              <label className="block text-body-sm text-laputa-text-dim mb-2">
+              <label className="block text-body-sm text-lagado-text-dim mb-2">
                 Quantization
               </label>
               <Select
@@ -93,7 +93,7 @@ function SettingsAdvanced() {
         )}
  
         <div>
-          <label className="block text-body-sm text-laputa-text-dim mb-2">Logging Level</label>
+          <label className="block text-body-sm text-lagado-text-dim mb-2">Logging Level</label>
           <Select
             value="info"
             onChange={() => {}}

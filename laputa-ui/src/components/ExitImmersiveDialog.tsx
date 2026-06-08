@@ -34,15 +34,15 @@ export function ExitImmersiveDialog({
  
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
-      <div className="absolute inset-0 bg-laputa-modal-overlay" />
+      <div className="absolute inset-0 bg-lagado-modal-overlay" />
  
-      <div className="relative bg-laputa-surface border border-laputa-border rounded-md p-6 max-w-md w-full shadow-2xl">
+      <div className="relative bg-lagado-surface border border-lagado-border rounded-md p-6 max-w-md w-full shadow-2xl">
         {step === 1 && (
           <>
-            <h2 className="text-h2 text-laputa-text-bright font-bold mb-3">
+            <h2 className="text-h2 text-lagado-text-bright font-bold mb-3">
               Pause agent before leaving?
             </h2>
-            <p className="text-body text-laputa-text mb-6">
+            <p className="text-body text-lagado-text mb-6">
               The agent is currently running. Should it continue when you leave?
             </p>
             <div className="flex gap-3">
@@ -71,7 +71,7 @@ export function ExitImmersiveDialog({
             </div>
             <button
               onClick={onCancel}
-              className="block w-full text-center text-caption text-laputa-text-dim mt-4 hover:underline"
+              className="block w-full text-center text-caption text-lagado-text-dim mt-4 hover:underline"
             >
               Cancel
             </button>
@@ -80,13 +80,13 @@ export function ExitImmersiveDialog({
  
         {step === 2 && (
           <>
-            <h2 className="text-h2 text-laputa-text-bright font-bold mb-3">
+            <h2 className="text-h2 text-lagado-text-bright font-bold mb-3">
               Ready to leave immersive mode?
             </h2>
-            <p className="text-body text-laputa-text mb-6">
+            <p className="text-body text-lagado-text mb-6">
               You'll return to the chat page.
               {shouldPause && (
-                <span className="block text-body-sm text-laputa-text-dim mt-2">
+                <span className="block text-body-sm text-lagado-text-dim mt-2">
                   Agent will be paused.
                 </span>
               )}

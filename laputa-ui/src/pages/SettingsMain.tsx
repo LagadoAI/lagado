@@ -24,12 +24,12 @@ const settingsTabs = [
  
 export default function SettingsMain() {
   const [activeTab, setActiveTab] = useState("profile");
-  const [username, setUsername] = useState("laputa_user");
+  const [username, setUsername] = useState("lagado_user");
   const [theme, setTheme] = useState("dark");
   const [timeout, setTimeout] = useState("60");
  
   return (
-    <div className="min-h-screen bg-laputa-bg flex flex-col">
+    <div className="min-h-screen bg-lagado-bg flex flex-col">
       <Header title="Settings" />
  
       <div className="flex-1 max-w-5xl mx-auto w-full">
@@ -42,22 +42,22 @@ export default function SettingsMain() {
         <div className="p-6">
           {activeTab === "profile" && (
             <Card>
-              <h2 className="text-h2 text-laputa-text-bright font-bold mb-6">Profile</h2>
+              <h2 className="text-h2 text-lagado-text-bright font-bold mb-6">Profile</h2>
               <div className="space-y-6">
                 <div>
-                  <label className="block text-body-sm text-laputa-text-dim mb-2">Username</label>
+                  <label className="block text-body-sm text-lagado-text-dim mb-2">Username</label>
                   <Input value={username} onChange={(e) => setUsername(e.target.value)} />
                 </div>
  
                 <div>
-                  <label className="block text-body-sm text-laputa-text-dim mb-2">Avatar</label>
-                  <div className="w-20 h-20 bg-laputa-surface-2 rounded-lg flex items-center justify-center border border-laputa-border">
+                  <label className="block text-body-sm text-lagado-text-dim mb-2">Avatar</label>
+                  <div className="w-20 h-20 bg-lagado-surface-2 rounded-lg flex items-center justify-center border border-lagado-border">
                     <span className="text-4xl">⚔</span>
                   </div>
                 </div>
  
                 <div>
-                  <label className="block text-body-sm text-laputa-text-dim mb-2">Theme</label>
+                  <label className="block text-body-sm text-lagado-text-dim mb-2">Theme</label>
                   <Select
                     value={theme}
                     onChange={setTheme}
@@ -70,7 +70,7 @@ export default function SettingsMain() {
                 </div>
  
                 <div>
-                  <label className="block text-body-sm text-laputa-text-dim mb-2">Session Timeout</label>
+                  <label className="block text-body-sm text-lagado-text-dim mb-2">Session Timeout</label>
                   <Select
                     value={timeout}
                     onChange={setTimeout}

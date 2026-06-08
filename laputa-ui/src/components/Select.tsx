@@ -19,8 +19,8 @@ export function Select({ value, onChange, options, className }: SelectProps) {
       onChange={(e) => onChange(e.target.value)}
       className={`
         w-full px-3 py-2 rounded-sm
-        bg-laputa-surface-2 border border-laputa-border
-        text-laputa-text focus:border-laputa-red focus:outline-none
+        bg-lagado-surface-2 border border-lagado-border
+        text-lagado-text focus:border-lagado-red focus:outline-none
         font-rajdhani text-body
         transition-colors duration-mid
         ${className || ""}

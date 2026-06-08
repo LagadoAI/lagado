@@ -18,21 +18,21 @@ export function Radio({
   description,
 }: RadioProps) {
   return (
-    <label className="flex items-start gap-3 cursor-pointer p-3 rounded-sm hover:bg-laputa-surface-2 transition-colors">
+    <label className="flex items-start gap-3 cursor-pointer p-3 rounded-sm hover:bg-lagado-surface-2 transition-colors">
       <input
         type="radio"
         name={name}
         value={value}
         checked={checked}
         onChange={onChange}
-        className="w-4 h-4 mt-1 accent-laputa-red"
+        className="w-4 h-4 mt-1 accent-lagado-red"
       />
       <div>
-        <div className="text-body text-laputa-text-bright font-semibold">
+        <div className="text-body text-lagado-text-bright font-semibold">
           {label}
         </div>
         {description && (
-          <div className="text-caption text-laputa-text-dim mt-1">
+          <div className="text-caption text-lagado-text-dim mt-1">
             {description}
           </div>
         )}

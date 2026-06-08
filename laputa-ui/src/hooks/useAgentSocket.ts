@@ -105,18 +105,18 @@ export function useAgentSocket(options: AgentSocketOptions = {}): AgentSocket {
 
     ws.onmessage = (ev) => {
       const raw = String(ev.data);
-      console.log('[laputa-agent]', raw);
+      console.log('[lagado-agent]', raw);
 
       let env: Envelope;
       try {
         env = JSON.parse(raw) as Envelope;
       } catch {
-        console.warn('[laputa-agent] non-JSON message ignored:', raw);
+        console.warn('[lagado-agent] non-JSON message ignored:', raw);
         return;
       }
 
       if (env.v !== 1) {
-        console.warn('[laputa-agent] unknown envelope version:', env.v);
+        console.warn('[lagado-agent] unknown envelope version:', env.v);
         return;
       }
 
@@ -134,7 +134,7 @@ export function useAgentSocket(options: AgentSocketOptions = {}): AgentSocket {
           });
           break;
         default:
-          console.warn('[laputa-agent] unknown envelope kind:', env.kind);
+          console.warn('[lagado-agent] unknown envelope kind:', env.kind);
       }
     };
 

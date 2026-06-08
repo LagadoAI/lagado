@@ -8,19 +8,19 @@ function SettingsAppConnections() {
  
   return (
     <Card>
-      <h2 className="text-h2 text-laputa-text-bright font-bold mb-6">External Apps</h2>
+      <h2 className="text-h2 text-lagado-text-bright font-bold mb-6">External Apps</h2>
  
       <div className="space-y-3">
         {apps.map((app) => (
           <div
             key={app.name}
-            className="flex items-center justify-between p-4 bg-laputa-surface-2 border border-laputa-border rounded-sm"
+            className="flex items-center justify-between p-4 bg-lagado-surface-2 border border-lagado-border rounded-sm"
           >
             <div className="flex items-center gap-3">
               <span className="text-2xl">{app.icon}</span>
               <div>
-                <div className="text-body text-laputa-text-bright font-semibold">{app.name}</div>
-                <div className="text-caption text-laputa-text-dim">
+                <div className="text-body text-lagado-text-bright font-semibold">{app.name}</div>
+                <div className="text-caption text-lagado-text-dim">
                   Status: {app.status === "connected" ? "✓ Connected" : "○ Not configured"}
                 </div>
               </div>

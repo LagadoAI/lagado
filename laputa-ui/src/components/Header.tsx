@@ -6,8 +6,8 @@ interface HeaderProps {
 
 export function Header({ title }: HeaderProps) {
   return (
-    <div className="bg-laputa-surface border-b border-laputa-border px-6 py-4">
-      <h1 className="text-h1 text-laputa-text-bright font-bold">{title}</h1>
+    <div className="bg-lagado-surface border-b border-lagado-border px-6 py-4">
+      <h1 className="text-h1 text-lagado-text-bright font-bold">{title}</h1>
     </div>
   );
 }

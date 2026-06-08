@@ -6,11 +6,11 @@ function SettingsInference() {
  
   return (
     <Card>
-      <h2 className="text-h2 text-laputa-text-bright font-bold mb-6">Inference Settings</h2>
+      <h2 className="text-h2 text-lagado-text-bright font-bold mb-6">Inference Settings</h2>
  
       <div className="space-y-6">
         <div>
-          <label className="block text-body-sm text-laputa-text-dim mb-3">Mode</label>
+          <label className="block text-body-sm text-lagado-text-dim mb-3">Mode</label>
           <div className="space-y-2">
             <Radio
               name="mode"
@@ -41,7 +41,7 @@ function SettingsInference() {
  
         {mode !== "local" && (
           <div>
-            <label className="block text-body-sm text-laputa-text-dim mb-2">Cloud Provider</label>
+            <label className="block text-body-sm text-lagado-text-dim mb-2">Cloud Provider</label>
             <Select
               value="none"
               onChange={() => {}}

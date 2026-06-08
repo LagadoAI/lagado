@@ -6,11 +6,11 @@ function SettingsBackup() {
  
   return (
     <Card>
-      <h2 className="text-h2 text-laputa-text-bright font-bold mb-6">Backup & Sync</h2>
+      <h2 className="text-h2 text-lagado-text-bright font-bold mb-6">Backup & Sync</h2>
  
       <div className="space-y-6">
         <div>
-          <label className="block text-body-sm text-laputa-text-dim mb-3">Backup Method</label>
+          <label className="block text-body-sm text-lagado-text-dim mb-3">Backup Method</label>
           <div className="space-y-2">
             <Radio
               name="backup"
@@ -50,7 +50,7 @@ function SettingsBackup() {
         {backupMethod === "cloud" && (
           <>
             <div>
-              <label className="block text-body-sm text-laputa-text-dim mb-2">Cloud Provider</label>
+              <label className="block text-body-sm text-lagado-text-dim mb-2">Cloud Provider</label>
               <Select
                 value="none"
                 onChange={() => {}}
@@ -64,7 +64,7 @@ function SettingsBackup() {
               />
             </div>
             <div>
-              <label className="block text-body-sm text-laputa-text-dim mb-2">Frequency</label>
+              <label className="block text-body-sm text-lagado-text-dim mb-2">Frequency</label>
               <Select
                 value={frequency}
                 onChange={setFrequency}
@@ -78,8 +78,8 @@ function SettingsBackup() {
           </>
         )}
  
-        <div className="pt-4 border-t border-laputa-border">
-          <p className="text-body-sm text-laputa-text-dim mb-3">
+        <div className="pt-4 border-t border-lagado-border">
+          <p className="text-body-sm text-lagado-text-dim mb-3">
             Last backup: 5/26/2026 14:30
           </p>
           <Button variant="primary" size="md">

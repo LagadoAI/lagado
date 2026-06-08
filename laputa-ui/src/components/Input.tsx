@@ -19,7 +19,7 @@ export function Input({ value, onChange, placeholder, type = 'text', disabled, c
       onKeyPress={onKeyPress}
       placeholder={placeholder}
       disabled={disabled}
-      className={`w-full px-3 py-2 bg-laputa-surface-2 border border-laputa-border rounded-sm text-laputa-text placeholder-laputa-text-dim focus:border-laputa-red focus:outline-none font-rajdhani text-body ${className || ''}`}
+      className={`w-full px-3 py-2 bg-lagado-surface-2 border border-lagado-border rounded-sm text-lagado-text placeholder-lagado-text-dim focus:border-lagado-red focus:outline-none font-rajdhani text-body ${className || ''}`}
     />
   );
 }

@@ -11,7 +11,7 @@ module.exports = {
         border: 'hsl(var(--border))',
       },
       colors: {
-        laputa: {
+        lagado: {
           bg: "#0f1117",
           surface: "#1a1c23",
           "surface-2": "#21242e",

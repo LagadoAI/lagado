@@ -18,12 +18,12 @@ export function Alert({
   onClose,
 }: AlertProps) {
   const typeStyles = {
-    info: "bg-laputa-purple bg-opacity-10 border-laputa-purple text-laputa-purple",
+    info: "bg-lagado-purple bg-opacity-10 border-lagado-purple text-lagado-purple",
     success:
-      "bg-laputa-green bg-opacity-10 border-laputa-green text-laputa-green",
+      "bg-lagado-green bg-opacity-10 border-lagado-green text-lagado-green",
     warning:
-      "bg-laputa-yellow bg-opacity-10 border-laputa-yellow text-laputa-yellow",
-    error: "bg-laputa-red bg-opacity-10 border-laputa-red text-laputa-red",
+      "bg-lagado-yellow bg-opacity-10 border-lagado-yellow text-lagado-yellow",
+    error: "bg-lagado-red bg-opacity-10 border-lagado-red text-lagado-red",
   };
  
   const typeIcons = {

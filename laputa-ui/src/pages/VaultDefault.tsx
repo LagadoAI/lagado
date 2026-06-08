@@ -30,13 +30,13 @@ export default function VaultDefault() {
   ];
  
   return (
-    <div className="min-h-screen bg-laputa-bg flex flex-col">
+    <div className="min-h-screen bg-lagado-bg flex flex-col">
       <Header title="Vault" />
  
       <div className="flex-1 flex">
         {/* Sidebar */}
-        <div className="w-64 border-r border-laputa-border bg-laputa-surface p-4">
-          <h3 className="text-h3 text-laputa-text-bright font-semibold mb-3">Folders</h3>
+        <div className="w-64 border-r border-lagado-border bg-lagado-surface p-4">
+          <h3 className="text-h3 text-lagado-text-bright font-semibold mb-3">Folders</h3>
           <div className="space-y-1">
             {folders.map((folder) => (
               <button
@@ -44,8 +44,8 @@ export default function VaultDefault() {
                 onClick={() => setSelectedFolder(folder.id)}
                 className={`w-full text-left px-3 py-2 rounded-sm flex items-center gap-2 transition-colors ${
                   selectedFolder === folder.id
-                    ? "bg-laputa-surface-2 text-laputa-text-bright"
-                    : "text-laputa-text hover:bg-laputa-surface-2"
+                    ? "bg-lagado-surface-2 text-lagado-text-bright"
+                    : "text-lagado-text hover:bg-lagado-surface-2"
                 }`}
               >
                 <span>{folder.icon}</span>
@@ -61,13 +61,13 @@ export default function VaultDefault() {
         {/* Main content */}
         <div className="flex-1 flex flex-col">
           {/* Search bar */}
-          <div className="p-4 border-b border-laputa-border">
+          <div className="p-4 border-b border-lagado-border">
             <input
               type="text"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               placeholder="Search files..."
-              className="w-full px-3 py-2 rounded-sm bg-laputa-surface-2 border border-laputa-border text-laputa-text focus:border-laputa-red focus:outline-none font-rajdhani text-body"
+              className="w-full px-3 py-2 rounded-sm bg-lagado-surface-2 border border-lagado-border text-lagado-text focus:border-lagado-red focus:outline-none font-rajdhani text-body"
             />
           </div>
  
@@ -77,22 +77,22 @@ export default function VaultDefault() {
               {files.map((file) => (
                 <div
                   key={file.id}
-                  className="flex items-center justify-between p-3 bg-laputa-surface border border-laputa-border rounded-sm hover:border-laputa-border-light transition-colors cursor-pointer"
+                  className="flex items-center justify-between p-3 bg-lagado-surface border border-lagado-border rounded-sm hover:border-lagado-border-light transition-colors cursor-pointer"
                 >
                   <div className="flex items-center gap-3">
                     <span className="text-2xl">
                       {file.type === "doc" ? "📄" : file.type === "image" ? "🖼" : "📦"}
                     </span>
                     <div>
-                      <div className="text-body text-laputa-text-bright">{file.name}</div>
-                      <div className="text-caption text-laputa-text-dim">
+                      <div className="text-body text-lagado-text-bright">{file.name}</div>
+                      <div className="text-caption text-lagado-text-dim">
                         {file.size} • {file.modified.toLocaleDateString()}
                       </div>
                     </div>
                   </div>
                   <div className="flex gap-2">
-                    <button className="text-laputa-text-dim hover:text-laputa-text">👁</button>
-                    <button className="text-laputa-text-dim hover:text-laputa-text">⬇</button>
+                    <button className="text-lagado-text-dim hover:text-lagado-text">👁</button>
+                    <button className="text-lagado-text-dim hover:text-lagado-text">⬇</button>
                   </div>
                 </div>
               ))}
@@ -100,14 +100,14 @@ export default function VaultDefault() {
           </div>
  
           {/* Storage indicator */}
-          <div className="p-4 border-t border-laputa-border bg-laputa-surface">
+          <div className="p-4 border-t border-lagado-border bg-lagado-surface">
             <ProgressBar
               value={5.2}
               max={10}
               label="Storage"
               showPercent
             />
-            <p className="text-caption text-laputa-text-dim mt-2 text-center">
+            <p className="text-caption text-lagado-text-dim mt-2 text-center">
               5.2 GB used of 10 GB
             </p>
           </div>

@@ -16,15 +16,15 @@ export function PermissionCard({ req, onApprove, onDeny, onSwitch }: PermissionC
   const approveEnabled = !isTyped || typedConfirm.trim().length > 0;
 
   return (
-    <div className="border border-laputa-border rounded-lg bg-laputa-surface p-3 space-y-3 max-w-3xl mx-auto">
+    <div className="border border-lagado-border rounded-lg bg-lagado-surface p-3 space-y-3 max-w-3xl mx-auto">
       {/* Action + Details toggle */}
       <div className="flex items-start gap-2">
-        <span className="text-caption text-laputa-text-dim font-mono flex-1 break-all leading-relaxed">
+        <span className="text-caption text-lagado-text-dim font-mono flex-1 break-all leading-relaxed">
           {req.action}
         </span>
         <button
           onClick={() => setExpanded(!expanded)}
-          className="text-caption text-laputa-text-dim hover:text-laputa-text flex-shrink-0 transition-colors"
+          className="text-caption text-lagado-text-dim hover:text-lagado-text flex-shrink-0 transition-colors"
         >
           Details {expanded ? "▴" : "▾"}
         </button>
@@ -37,7 +37,7 @@ export function PermissionCard({ req, onApprove, onDeny, onSwitch }: PermissionC
           value={typedConfirm}
           onChange={(e) => setTypedConfirm(e.target.value)}
           placeholder="Type to confirm..."
-          className="w-full px-3 py-1.5 bg-laputa-surface-2 border border-laputa-border rounded-md text-body-sm text-laputa-text placeholder-laputa-text-dim focus:border-laputa-red focus:outline-none"
+          className="w-full px-3 py-1.5 bg-lagado-surface-2 border border-lagado-border rounded-md text-body-sm text-lagado-text placeholder-lagado-text-dim focus:border-lagado-red focus:outline-none"
         />
       )}
 
@@ -48,15 +48,15 @@ export function PermissionCard({ req, onApprove, onDeny, onSwitch }: PermissionC
           disabled={!approveEnabled}
           className={`px-4 py-1.5 rounded-md text-body-sm font-semibold transition-colors ${
             approveEnabled
-              ? "bg-laputa-green text-white hover:bg-opacity-90"
-              : "bg-laputa-surface-2 border border-laputa-border text-laputa-text-dim cursor-not-allowed"
+              ? "bg-lagado-green text-white hover:bg-opacity-90"
+              : "bg-lagado-surface-2 border border-lagado-border text-lagado-text-dim cursor-not-allowed"
           }`}
         >
           Approve
         </button>
         <button
           onClick={onDeny}
-          className="px-4 py-1.5 rounded-md text-body-sm font-semibold bg-laputa-surface-2 border border-laputa-border text-laputa-text hover:border-laputa-red hover:text-laputa-red transition-colors"
+          className="px-4 py-1.5 rounded-md text-body-sm font-semibold bg-lagado-surface-2 border border-lagado-border text-lagado-text hover:border-lagado-red hover:text-lagado-red transition-colors"
         >
           Deny
         </button>
@@ -64,20 +64,20 @@ export function PermissionCard({ req, onApprove, onDeny, onSwitch }: PermissionC
 
       {/* Expanded details */}
       {expanded && (
-        <div className="space-y-2 pt-2 border-t border-laputa-border">
+        <div className="space-y-2 pt-2 border-t border-lagado-border">
           <div>
-            <span className="text-caption text-laputa-text-dim font-semibold">Why: </span>
-            <span className="text-caption text-laputa-text">{req.reason}</span>
+            <span className="text-caption text-lagado-text-dim font-semibold">Why: </span>
+            <span className="text-caption text-lagado-text">{req.reason}</span>
           </div>
           <div>
-            <span className="text-caption text-laputa-text-dim font-semibold">Where: </span>
-            <span className="text-caption text-laputa-text">
+            <span className="text-caption text-lagado-text-dim font-semibold">Where: </span>
+            <span className="text-caption text-lagado-text">
               {req.origin_agent} in {req.origin_surface}
             </span>
           </div>
           <button
             onClick={() => onSwitch(req.origin_surface)}
-            className="text-caption text-laputa-purple hover:text-laputa-text transition-colors"
+            className="text-caption text-lagado-purple hover:text-lagado-text transition-colors"
           >
             Switch to {req.origin_surface} ↗
           </button>

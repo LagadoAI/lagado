@@ -34,7 +34,7 @@ export function FileTree({ files, onSelect, className }: FileTreeProps) {
       <div
         className={`
           flex items-center gap-2 px-2 py-1 cursor-pointer
-          hover:bg-laputa-surface-2 rounded transition-colors
+          hover:bg-lagado-surface-2 rounded transition-colors
           ${level > 0 ? `ml-${level * 4}` : ""}
         `}
         onClick={() => {
@@ -46,14 +46,14 @@ export function FileTree({ files, onSelect, className }: FileTreeProps) {
         }}
       >
         {node.type === "folder" && (
-          <span className="text-laputa-text-dim">
+          <span className="text-lagado-text-dim">
             {expanded.has(node.id) ? "▼" : "▶"}
           </span>
         )}
-        <span className="text-laputa-text">
+        <span className="text-lagado-text">
           {node.type === "folder" ? "📁" : "📄"}
         </span>
-        <span className="text-body-sm text-laputa-text">{node.name}</span>
+        <span className="text-body-sm text-lagado-text">{node.name}</span>
       </div>
       {node.type === "folder" &&
         expanded.has(node.id) &&

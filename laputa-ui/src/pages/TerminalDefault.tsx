@@ -10,9 +10,9 @@ interface TerminalLine {
  
 export default function TerminalDefault() {
   const [lines, setLines] = useState<TerminalLine[]>([
-    { type: "command", content: "user@laputa:~$ ls" },
+    { type: "command", content: "user@lagado:~$ ls" },
     { type: "output", content: "Desktop  Documents  Downloads  Pictures" },
-    { type: "command", content: "user@laputa:~$ pwd" },
+    { type: "command", content: "user@lagado:~$ pwd" },
     { type: "output", content: "/home/user" },
   ]);
   const [currentInput, setCurrentInput] = useState("");
@@ -31,7 +31,7 @@ export default function TerminalDefault() {
     if (e.key === "Enter" && currentInput.trim()) {
       setLines((prev) => [
         ...prev,
-        { type: "command", content: `user@laputa:~$ ${currentInput}` },
+        { type: "command", content: `user@lagado:~$ ${currentInput}` },
         { type: "output", content: `Command executed: ${currentInput}` },
       ]);
       setCurrentInput("");
@@ -39,17 +39,17 @@ export default function TerminalDefault() {
   };
  
   return (
-    <div className="min-h-screen bg-laputa-bg flex flex-col">
+    <div className="min-h-screen bg-lagado-bg flex flex-col">
       <Header title="Terminal" />
  
       <div className="flex-1 flex flex-col bg-black">
         {/* Tab bar */}
-        <div className="flex border-b border-laputa-border bg-laputa-surface">
-          <div className="px-4 py-2 border-r border-laputa-border bg-laputa-surface-2 text-body-sm font-mono">
-            <span className="text-laputa-red mr-2">●</span>
-            user@laputa
+        <div className="flex border-b border-lagado-border bg-lagado-surface">
+          <div className="px-4 py-2 border-r border-lagado-border bg-lagado-surface-2 text-body-sm font-mono">
+            <span className="text-lagado-red mr-2">●</span>
+            user@lagado
           </div>
-          <button className="px-4 py-2 text-laputa-text-dim hover:text-laputa-text">
+          <button className="px-4 py-2 text-lagado-text-dim hover:text-lagado-text">
             +
           </button>
         </div>
@@ -64,31 +64,31 @@ export default function TerminalDefault() {
               key={idx}
               className={
                 line.type === "command"
-                  ? "text-laputa-green"
-                  : "text-laputa-text"
+                  ? "text-lagado-green"
+                  : "text-lagado-text"
               }
             >
               {line.content}
             </div>
           ))}
-          <div className="text-laputa-green flex items-center">
-            user@laputa:~${" "}
+          <div className="text-lagado-green flex items-center">
+            user@lagado:~${" "}
             <input
               ref={inputRef}
               type="text"
               value={currentInput}
               onChange={(e) => setCurrentInput(e.target.value)}
               onKeyDown={handleCommand}
-              className="flex-1 bg-transparent text-laputa-text outline-none ml-1"
+              className="flex-1 bg-transparent text-lagado-text outline-none ml-1"
               spellCheck={false}
             />
-            <span className="w-2 h-4 bg-laputa-red animate-pulse ml-1"></span>
+            <span className="w-2 h-4 bg-lagado-red animate-pulse ml-1"></span>
           </div>
           <div ref={terminalEndRef} />
         </div>
  
         {/* Bottom toolbar */}
-        <div className="p-3 border-t border-laputa-border bg-laputa-surface flex gap-2">
+        <div className="p-3 border-t border-lagado-border bg-lagado-surface flex gap-2">
           <Button variant="secondary" size="sm" onClick={() => setLines([])}>
             Clear
           </Button>

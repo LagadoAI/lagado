@@ -11,14 +11,14 @@ export function ProgressBar({ value, max, label, showPercent, className }: Progr
 
   return (
     <div className={className || ''}>
-      {label && <p className="text-body-sm text-laputa-text-dim mb-1">{label}</p>}
-      <div className="w-full h-2 bg-laputa-surface-2 rounded-full overflow-hidden">
+      {label && <p className="text-body-sm text-lagado-text-dim mb-1">{label}</p>}
+      <div className="w-full h-2 bg-lagado-surface-2 rounded-full overflow-hidden">
         <div
-          className={`h-full rounded-full transition-all ${percent > 80 ? 'bg-laputa-red' : 'bg-laputa-green'}`}
+          className={`h-full rounded-full transition-all ${percent > 80 ? 'bg-lagado-red' : 'bg-lagado-green'}`}
           style={{ width: `${percent}%` }}
         />
       </div>
-      {showPercent && <p className="text-caption text-laputa-text-dim mt-1">{Math.round(percent)}%</p>}
+      {showPercent && <p className="text-caption text-lagado-text-dim mt-1">{Math.round(percent)}%</p>}
     </div>
   );
 }

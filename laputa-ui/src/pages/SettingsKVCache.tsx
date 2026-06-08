@@ -5,11 +5,11 @@ function SettingsKVCache() {
  
   return (
     <Card>
-      <h2 className="text-h2 text-laputa-text-bright font-bold mb-6">KV Cache Configuration</h2>
+      <h2 className="text-h2 text-lagado-text-bright font-bold mb-6">KV Cache Configuration</h2>
  
       <div className="space-y-6">
         <div>
-          <label className="block text-body-sm text-laputa-text-dim mb-3">Cache Location</label>
+          <label className="block text-body-sm text-lagado-text-dim mb-3">Cache Location</label>
           <div className="space-y-2">
             <Radio
               name="kvcache"
@@ -61,7 +61,7 @@ function SettingsKVCache() {
         />
  
         <div>
-          <label className="block text-body-sm text-laputa-text-dim mb-2">Cache Size</label>
+          <label className="block text-body-sm text-lagado-text-dim mb-2">Cache Size</label>
           <Select
             value={cacheSize}
             onChange={setCacheSize}

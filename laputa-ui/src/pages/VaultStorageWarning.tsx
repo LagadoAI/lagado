@@ -7,7 +7,7 @@ import { Alert } from "../components/Alert";
  
 export default function VaultStorageWarning() {
   return (
-    <div className="min-h-screen bg-laputa-bg flex flex-col">
+    <div className="min-h-screen bg-lagado-bg flex flex-col">
       <Header title="Vault - Storage Warning" />
  
       <div className="flex-1 p-6 max-w-3xl mx-auto w-full">
@@ -17,19 +17,19 @@ export default function VaultStorageWarning() {
           message="Your storage is running low. Consider pruning old files or expanding storage."
         />
  
-        <div className="mt-6 bg-laputa-surface border border-laputa-border rounded-sm p-6">
-          <h3 className="text-h3 text-laputa-text-bright font-bold mb-4">
+        <div className="mt-6 bg-lagado-surface border border-lagado-border rounded-sm p-6">
+          <h3 className="text-h3 text-lagado-text-bright font-bold mb-4">
             Storage Usage
           </h3>
           <ProgressBar value={8.5} max={10} label="" showPercent />
           <div className="grid grid-cols-2 gap-4 mt-6">
             <div>
-              <p className="text-caption text-laputa-text-dim">Used</p>
-              <p className="text-h2 text-laputa-text-bright font-bold">8.5 GB</p>
+              <p className="text-caption text-lagado-text-dim">Used</p>
+              <p className="text-h2 text-lagado-text-bright font-bold">8.5 GB</p>
             </div>
             <div>
-              <p className="text-caption text-laputa-text-dim">Total</p>
-              <p className="text-h2 text-laputa-text-bright font-bold">10 GB</p>
+              <p className="text-caption text-lagado-text-dim">Total</p>
+              <p className="text-h2 text-lagado-text-bright font-bold">10 GB</p>
             </div>
           </div>
         </div>

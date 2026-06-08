@@ -12,10 +12,10 @@ export function Badge({
   size = "sm",
 }: BadgeProps) {
   const variantClasses = {
-    default: "bg-laputa-surface-2 text-laputa-text border border-laputa-border",
-    success: "bg-laputa-green bg-opacity-20 text-laputa-green",
-    error: "bg-laputa-red bg-opacity-20 text-laputa-red",
-    warning: "bg-laputa-yellow bg-opacity-20 text-laputa-yellow",
+    default: "bg-lagado-surface-2 text-lagado-text border border-lagado-border",
+    success: "bg-lagado-green bg-opacity-20 text-lagado-green",
+    error: "bg-lagado-red bg-opacity-20 text-lagado-red",
+    warning: "bg-lagado-yellow bg-opacity-20 text-lagado-yellow",
   };
  
   const sizeClasses = {

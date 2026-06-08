@@ -16,12 +16,12 @@ export function Spinner({ size = "md", label }: SpinnerProps) {
     <div className="flex flex-col items-center justify-center gap-3">
       <div
         className={`
-          border-2 border-laputa-border rounded-full
-          border-t-laputa-red animate-spin
+          border-2 border-lagado-border rounded-full
+          border-t-lagado-red animate-spin
           ${sizeClasses[size]}
         `}
       />
-      {label && <p className="text-body text-laputa-text-dim">{label}</p>}
+      {label && <p className="text-body text-lagado-text-dim">{label}</p>}
     </div>
   );
 }

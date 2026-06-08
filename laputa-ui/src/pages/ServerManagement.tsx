@@ -1,16 +1,16 @@
  
 export default function ServerManagement() {
   return (
-    <div className="min-h-screen bg-laputa-bg flex flex-col">
+    <div className="min-h-screen bg-lagado-bg flex flex-col">
       <Header title="Server & Models" />
  
       <div className="flex-1 p-6 max-w-3xl mx-auto w-full">
         <Card>
-          <h2 className="text-h2 text-laputa-text-bright font-bold mb-6">Active Model</h2>
+          <h2 className="text-h2 text-lagado-text-bright font-bold mb-6">Active Model</h2>
  
-          <div className="bg-laputa-surface-2 border border-laputa-border rounded-sm p-4 mb-6">
+          <div className="bg-lagado-surface-2 border border-lagado-border rounded-sm p-4 mb-6">
             <div className="flex items-center justify-between mb-3">
-              <span className="text-body text-laputa-text-bright font-semibold">
+              <span className="text-body text-lagado-text-bright font-semibold">
                 Qwen3-2.5B-IQ4
               </span>
               <Badge variant="success">ACTIVE</Badge>
@@ -27,7 +27,7 @@ export default function ServerManagement() {
  
           <div className="space-y-4">
             <div>
-              <label className="block text-body-sm text-laputa-text-dim mb-2">
+              <label className="block text-body-sm text-lagado-text-dim mb-2">
                 Switch Model
               </label>
               <Select
@@ -47,7 +47,7 @@ export default function ServerManagement() {
         </Card>
  
         <Card className="mt-4">
-          <h3 className="text-h3 text-laputa-text-bright font-bold mb-4">Storage</h3>
+          <h3 className="text-h3 text-lagado-text-bright font-bold mb-4">Storage</h3>
           <MetadataList
             items={[
               { key: "Cold Storage", value: "1.4 GB" },

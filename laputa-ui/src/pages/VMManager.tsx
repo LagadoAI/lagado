@@ -1,16 +1,16 @@
  
 export default function VMManager() {
   return (
-    <div className="min-h-screen bg-laputa-bg flex flex-col">
+    <div className="min-h-screen bg-lagado-bg flex flex-col">
       <Header title="VM Manager" />
  
       <div className="flex-1 p-6 max-w-3xl mx-auto w-full">
         <Card className="mb-4">
-          <h2 className="text-h2 text-laputa-text-bright font-bold mb-4">Current VM</h2>
+          <h2 className="text-h2 text-lagado-text-bright font-bold mb-4">Current VM</h2>
  
-          <div className="bg-laputa-surface-2 border border-laputa-border rounded-sm p-4">
+          <div className="bg-lagado-surface-2 border border-lagado-border rounded-sm p-4">
             <div className="flex items-center justify-between mb-3">
-              <span className="text-body text-laputa-text-bright font-semibold">
+              <span className="text-body text-lagado-text-bright font-semibold">
                 Arch Linux XFCE
               </span>
               <Badge variant="success">RUNNING</Badge>
@@ -31,10 +31,10 @@ export default function VMManager() {
         </Card>
  
         <Card className="mb-4">
-          <h3 className="text-h3 text-laputa-text-bright font-bold mb-4">Load New OS</h3>
+          <h3 className="text-h3 text-lagado-text-bright font-bold mb-4">Load New OS</h3>
           <Button variant="primary" size="md">Select ISO File</Button>
           <div className="mt-4">
-            <p className="text-body-sm text-laputa-text-dim mb-2">Available ISOs:</p>
+            <p className="text-body-sm text-lagado-text-dim mb-2">Available ISOs:</p>
             <ul className="text-body-sm space-y-1 ml-4">
               <li>• Ubuntu 22.04</li>
               <li>• Windows 11 (custom)</li>
@@ -45,13 +45,13 @@ export default function VMManager() {
         </Card>
  
         <Card>
-          <h3 className="text-h3 text-laputa-text-bright font-bold mb-4">Snapshots</h3>
+          <h3 className="text-h3 text-lagado-text-bright font-bold mb-4">Snapshots</h3>
           <div className="space-y-2">
-            <div className="flex justify-between items-center p-3 bg-laputa-surface-2 border border-laputa-border rounded-sm">
+            <div className="flex justify-between items-center p-3 bg-lagado-surface-2 border border-lagado-border rounded-sm">
               <span className="text-body-sm">Default state - 5/26 10:00</span>
               <Button variant="secondary" size="sm">Restore</Button>
             </div>
-            <div className="flex justify-between items-center p-3 bg-laputa-surface-2 border border-laputa-border rounded-sm">
+            <div className="flex justify-between items-center p-3 bg-lagado-surface-2 border border-lagado-border rounded-sm">
               <span className="text-body-sm">After Firefox install - 5/26 14:30</span>
               <Button variant="secondary" size="sm">Restore</Button>
             </div>

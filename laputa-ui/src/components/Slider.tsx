@@ -21,8 +21,8 @@ export function Slider({
     <div>
       {label && (
         <div className="flex justify-between mb-2">
-          <span className="text-body-sm text-laputa-text">{label}</span>
-          <span className="text-body-sm text-laputa-text-bright font-mono">
+          <span className="text-body-sm text-lagado-text">{label}</span>
+          <span className="text-body-sm text-lagado-text-bright font-mono">
             {value}
           </span>
         </div>

@@ -56,12 +56,12 @@ export default function FirstLaunchModelSelection({
   };
  
   return (
-    <div className="min-h-screen bg-laputa-bg flex items-center justify-center px-4">
+    <div className="min-h-screen bg-lagado-bg flex items-center justify-center px-4">
       <div className="max-w-3xl w-full">
-        <h1 className="text-h1 text-laputa-text-bright font-bold mb-2">
+        <h1 className="text-h1 text-lagado-text-bright font-bold mb-2">
           Choose Your Model
         </h1>
-        <p className="text-body text-laputa-text-dim mb-8">
+        <p className="text-body text-lagado-text-dim mb-8">
           You can change this later in Settings
         </p>
  
@@ -74,8 +74,8 @@ export default function FirstLaunchModelSelection({
                 p-6 border rounded-sm cursor-pointer transition-all
                 ${
                   selectedModel === model.id
-                    ? "border-laputa-red bg-laputa-red-dim"
-                    : "border-laputa-border bg-laputa-surface hover:border-laputa-border-light"
+                    ? "border-lagado-red bg-lagado-red-dim"
+                    : "border-lagado-border bg-lagado-surface hover:border-lagado-border-light"
                 }
               `}
             >
@@ -86,35 +86,35 @@ export default function FirstLaunchModelSelection({
                 </div>
               )}
  
-              <h3 className="text-h3 text-laputa-text-bright font-bold mb-1">
+              <h3 className="text-h3 text-lagado-text-bright font-bold mb-1">
                 {model.name}
               </h3>
-              <p className="text-body-sm text-laputa-text-dim mb-4">
+              <p className="text-body-sm text-lagado-text-dim mb-4">
                 {model.description}
               </p>
  
               {/* Stats */}
               <div className="space-y-2 text-body-sm">
                 <div className="flex justify-between">
-                  <span className="text-laputa-text-dim">Size:</span>
+                  <span className="text-lagado-text-dim">Size:</span>
                   <span className="font-mono">{model.size}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-laputa-text-dim">RAM:</span>
+                  <span className="text-lagado-text-dim">RAM:</span>
                   <span className="font-mono">{model.ram}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-laputa-text-dim">Speed:</span>
+                  <span className="text-lagado-text-dim">Speed:</span>
                   <span className="font-mono">{model.speed}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-laputa-text-dim">Quality:</span>
+                  <span className="text-lagado-text-dim">Quality:</span>
                   <span className="font-mono">{model.quality}</span>
                 </div>
               </div>
  
               {model.requiresGPU && (
-                <div className="mt-3 pt-3 border-t border-laputa-border">
+                <div className="mt-3 pt-3 border-t border-lagado-border">
                   <Badge variant="warning">GPU REQUIRED</Badge>
                 </div>
               )}
@@ -126,7 +126,7 @@ export default function FirstLaunchModelSelection({
                   value={model.id}
                   checked={selectedModel === model.id}
                   onChange={() => setSelectedModel(model.id)}
-                  className="w-5 h-5 accent-laputa-red"
+                  className="w-5 h-5 accent-lagado-red"
                 />
               </div>
             </div>

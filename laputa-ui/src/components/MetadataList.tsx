@@ -16,9 +16,9 @@ export function MetadataList({ items, className }: MetadataListProps) {
     <div className={`space-y-2 ${className || ""}`}>
       {items.map((item, idx) => (
         <div key={idx} className="flex justify-between">
-          <span className="text-body-sm text-laputa-text-dim">{item.key}:</span>
+          <span className="text-body-sm text-lagado-text-dim">{item.key}:</span>
           <span
-            className={`text-body-sm text-laputa-text-bright ${
+            className={`text-body-sm text-lagado-text-bright ${
               item.mono ? "font-mono" : ""
             }`}
           >

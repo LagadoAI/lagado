@@ -16,7 +16,7 @@ impl LlamaCppAdapter {
             .to_string();
 
         Ok(LlamaCppAdapter {
-            base_url: "http://127.0.0.1:8080".to_string(),
+            base_url: crate::config::llama_base_url(),
             model_name,
             context_size,
         })

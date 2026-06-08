@@ -1,5 +1,5 @@
 use std::time::Instant;
-use laputa_agent::vm::{QemuMicrovmBackend, VmBackend, VmConfig};
+use lagado_agent::vm::{QemuMicrovmBackend, VmBackend, VmConfig};
 
 fn main() {
     let t0 = Instant::now();

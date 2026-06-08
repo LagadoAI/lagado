@@ -10,13 +10,13 @@ interface FormGroupProps {
 export function FormGroup({ label, children, required, error }: FormGroupProps) {
   return (
     <div className="mb-6">
-      <label className="block text-body-sm text-laputa-text-bright font-semibold mb-2">
+      <label className="block text-body-sm text-lagado-text-bright font-semibold mb-2">
         {label}
-        {required && <span className="text-laputa-red ml-1">*</span>}
+        {required && <span className="text-lagado-red ml-1">*</span>}
       </label>
       {children}
       {error && (
-        <p className="text-caption text-laputa-red mt-2">{error}</p>
+        <p className="text-caption text-lagado-red mt-2">{error}</p>
       )}
     </div>
   );

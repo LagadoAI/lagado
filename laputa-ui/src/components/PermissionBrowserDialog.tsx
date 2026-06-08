@@ -55,21 +55,21 @@ export function PermissionBrowserDialog({
  
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
-      <div className="absolute inset-0 bg-laputa-modal-overlay" onClick={onClose} />
+      <div className="absolute inset-0 bg-lagado-modal-overlay" onClick={onClose} />
  
-      <div className="relative bg-laputa-surface border border-laputa-border rounded-md p-6 max-w-3xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
-        <h2 className="text-h2 text-laputa-text-bright font-bold mb-6">
+      <div className="relative bg-lagado-surface border border-lagado-border rounded-md p-6 max-w-3xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
+        <h2 className="text-h2 text-lagado-text-bright font-bold mb-6">
           Select Permissions
         </h2>
  
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
           {/* File System */}
           <div>
-            <h3 className="text-h3 text-laputa-text-bright font-semibold mb-3">
+            <h3 className="text-h3 text-lagado-text-bright font-semibold mb-3">
               File System
             </h3>
-            <div className="bg-laputa-surface-2 border border-laputa-border rounded-sm p-3 space-y-2">
-              <p className="text-caption text-laputa-text-dim mb-2">/home/user/</p>
+            <div className="bg-lagado-surface-2 border border-lagado-border rounded-sm p-3 space-y-2">
+              <p className="text-caption text-lagado-text-dim mb-2">/home/user/</p>
               <Checkbox
                 label="Documents/"
                 checked={permissions.files.documents}
@@ -86,7 +86,7 @@ export function PermissionBrowserDialog({
                 onChange={(c) => updatePermission("files", "pictures", c)}
               />
               <Checkbox
-                label="Projects/laputa/"
+                label="Projects/lagado/"
                 checked={permissions.files.projects}
                 onChange={(c) => updatePermission("files", "projects", c)}
               />
@@ -100,10 +100,10 @@ export function PermissionBrowserDialog({
  
           {/* External Storage */}
           <div>
-            <h3 className="text-h3 text-laputa-text-bright font-semibold mb-3">
+            <h3 className="text-h3 text-lagado-text-bright font-semibold mb-3">
               External Storage
             </h3>
-            <div className="bg-laputa-surface-2 border border-laputa-border rounded-sm p-3">
+            <div className="bg-lagado-surface-2 border border-lagado-border rounded-sm p-3">
               <Checkbox
                 label="/mnt/usb_drive/data/"
                 checked={permissions.external.usbDrive}
@@ -117,10 +117,10 @@ export function PermissionBrowserDialog({
  
           {/* Applications */}
           <div>
-            <h3 className="text-h3 text-laputa-text-bright font-semibold mb-3">
+            <h3 className="text-h3 text-lagado-text-bright font-semibold mb-3">
               Applications
             </h3>
-            <div className="bg-laputa-surface-2 border border-laputa-border rounded-sm p-3 space-y-2">
+            <div className="bg-lagado-surface-2 border border-lagado-border rounded-sm p-3 space-y-2">
               <Checkbox
                 label="Firefox (read web, form fill)"
                 checked={permissions.apps.firefox}
@@ -151,10 +151,10 @@ export function PermissionBrowserDialog({
  
           {/* Operations */}
           <div>
-            <h3 className="text-h3 text-laputa-text-bright font-semibold mb-3">
+            <h3 className="text-h3 text-lagado-text-bright font-semibold mb-3">
               Operations
             </h3>
-            <div className="bg-laputa-surface-2 border border-laputa-border rounded-sm p-3 space-y-2">
+            <div className="bg-lagado-surface-2 border border-lagado-border rounded-sm p-3 space-y-2">
               <Checkbox
                 label="Read files"
                 checked={permissions.operations.read}
@@ -180,7 +180,7 @@ export function PermissionBrowserDialog({
         </div>
  
         {/* Actions */}
-        <div className="flex gap-3 pt-4 border-t border-laputa-border">
+        <div className="flex gap-3 pt-4 border-t border-lagado-border">
           <Button variant="secondary" size="md" onClick={onClose} className="flex-1">
             Cancel
           </Button>
