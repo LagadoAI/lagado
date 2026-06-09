@@ -1,9 +1,21 @@
- 
+
+import { useNavigate } from "react-router-dom";
+import { Header } from "../components/Header";
+import { Button } from "../components/Button";
+import { Card } from "../components/Card";
+
 export default function MCPManager() {
+  const navigate = useNavigate();
   return (
     <div className="min-h-screen bg-lagado-bg flex flex-col">
       <Header title="MCP Manager" />
- 
+
+      <div className="border-b border-lagado-border bg-lagado-surface px-4 py-3">
+        <button onClick={() => navigate("/chat")} className="px-3 py-1.5 text-body-sm text-lagado-text-dim hover:text-lagado-text border border-lagado-border rounded-md hover:border-lagado-red transition-colors">
+          ← Chat
+        </button>
+      </div>
+
       <div className="flex-1 p-6 max-w-5xl mx-auto w-full">
         <div className="flex justify-between items-center mb-6">
           <div>
@@ -12,7 +24,7 @@ export default function MCPManager() {
               Connected Tools (12)
             </p>
           </div>
-          <Button variant="primary" size="md">+ Add Tool</Button>
+          <Button variant="primary" size="md" onClick={() => navigate('/mcp/add')}>+ Add Tool</Button>
         </div>
  
         <div className="space-y-4">

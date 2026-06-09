@@ -1,5 +1,6 @@
- 
+
 import React, { useState, useRef, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { Header } from "../components/Header";
 import { Button } from "../components/Button";
  
@@ -9,6 +10,7 @@ interface TerminalLine {
 }
  
 export default function TerminalDefault() {
+  const navigate = useNavigate();
   const [lines, setLines] = useState<TerminalLine[]>([
     { type: "command", content: "user@lagado:~$ ls" },
     { type: "output", content: "Desktop  Documents  Downloads  Pictures" },
@@ -41,7 +43,13 @@ export default function TerminalDefault() {
   return (
     <div className="min-h-screen bg-lagado-bg flex flex-col">
       <Header title="Terminal" />
- 
+
+      <div className="border-b border-lagado-border bg-lagado-surface px-4 py-3">
+        <button onClick={() => navigate("/chat")} className="px-3 py-1.5 text-body-sm text-lagado-text-dim hover:text-lagado-text border border-lagado-border rounded-md hover:border-lagado-red transition-colors">
+          ← Chat
+        </button>
+      </div>
+
       <div className="flex-1 flex flex-col bg-black">
         {/* Tab bar */}
         <div className="flex border-b border-lagado-border bg-lagado-surface">

@@ -1,9 +1,24 @@
- 
+
+import { useNavigate } from "react-router-dom";
+import { Header } from "../components/Header";
+import { Card } from "../components/Card";
+import { Badge } from "../components/Badge";
+import { MetadataList } from "../components/MetadataList";
+import { Select } from "../components/Select";
+import { Button } from "../components/Button";
+
 export default function ServerManagement() {
+  const navigate = useNavigate();
   return (
     <div className="min-h-screen bg-lagado-bg flex flex-col">
       <Header title="Server & Models" />
- 
+
+      <div className="border-b border-lagado-border bg-lagado-surface px-4 py-3">
+        <button onClick={() => navigate("/chat")} className="px-3 py-1.5 text-body-sm text-lagado-text-dim hover:text-lagado-text border border-lagado-border rounded-md hover:border-lagado-red transition-colors">
+          ← Chat
+        </button>
+      </div>
+
       <div className="flex-1 p-6 max-w-3xl mx-auto w-full">
         <Card>
           <h2 className="text-h2 text-lagado-text-bright font-bold mb-6">Active Model</h2>

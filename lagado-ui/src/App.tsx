@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom';
 import { useState } from 'react';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import Awakening from './pages/Awakening';
@@ -24,12 +24,14 @@ import TerminalMultipleTabs from './pages/TerminalMultipleTabs';
 import TerminalAgentRunning from './pages/TerminalAgentRunning';
 import SettingsMain from './pages/SettingsMain';
 import MCPManager from './pages/MCPManager';
+import MCPAddTool from './pages/MCPAddTool';
 import ServerManagement from './pages/ServerManagement';
 import VMManager from './pages/VMManager';
 import './index.css';
 import { ChatProvider } from './hooks/use-chat-context';
 
 function AppRoutes({ isLoggedIn, setIsLoggedIn }: { isLoggedIn: boolean; setIsLoggedIn: (v: boolean) => void }) {
+  const navigate = useNavigate();
   // Show Awakening on first launch (before login)
   const hasAwakened = localStorage.getItem('lagado_awakened') === 'true'
   if (!hasAwakened) {
@@ -44,10 +46,10 @@ function AppRoutes({ isLoggedIn, setIsLoggedIn }: { isLoggedIn: boolean; setIsLo
     <ChatProvider>
       <Routes>
         <Route path="/awakening" element={<Awakening />} />
-        <Route path="/setup/welcome" element={<FirstLaunchWelcome onNext={() => {}} />} />
-        <Route path="/setup/system" element={<FirstLaunchSystemDetected onNext={() => {}} />} />
-        <Route path="/setup/models" element={<FirstLaunchModelSelection onNext={() => {}} />} />
-        <Route path="/setup/permissions" element={<FirstLaunchPermissionsSetup onComplete={() => {}} />} />
+        <Route path="/setup/welcome" element={<FirstLaunchWelcome onNext={() => navigate('/setup/system')} />} />
+        <Route path="/setup/system" element={<FirstLaunchSystemDetected onNext={() => navigate('/setup/models')} />} />
+        <Route path="/setup/models" element={<FirstLaunchModelSelection onNext={() => navigate('/setup/permissions')} />} />
+        <Route path="/setup/permissions" element={<FirstLaunchPermissionsSetup onComplete={() => navigate('/chat')} />} />
         <Route path="/chat" element={<ChatDefault />} />
         <Route path="/immersive" element={<ImmersiveDefault />} />
         <Route path="/immersive/typing" element={<ImmersiveTyping />} />
@@ -65,6 +67,7 @@ function AppRoutes({ isLoggedIn, setIsLoggedIn }: { isLoggedIn: boolean; setIsLo
         <Route path="/terminal/agent" element={<TerminalAgentRunning />} />
         <Route path="/settings" element={<SettingsMain />} />
         <Route path="/mcp" element={<MCPManager />} />
+        <Route path="/mcp/add" element={<MCPAddTool />} />
         <Route path="/server" element={<ServerManagement />} />
         <Route path="/vm" element={<VMManager />} />
         <Route path="/" element={<ChatDefault />} />

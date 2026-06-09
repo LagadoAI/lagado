@@ -1,5 +1,6 @@
- 
+
 import React, { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Header } from "../components/Header";
 import { Button } from "../components/Button";
 import { ProgressBar } from "../components/ProgressBar";
@@ -13,6 +14,7 @@ interface VaultFile {
 }
  
 export default function VaultDefault() {
+  const navigate = useNavigate();
   const [selectedFolder, setSelectedFolder] = useState("documents");
   const [searchTerm, setSearchTerm] = useState("");
  
@@ -32,7 +34,13 @@ export default function VaultDefault() {
   return (
     <div className="min-h-screen bg-lagado-bg flex flex-col">
       <Header title="Vault" />
- 
+
+      <div className="border-b border-lagado-border bg-lagado-surface px-4 py-3">
+        <button onClick={() => navigate("/chat")} className="px-3 py-1.5 text-body-sm text-lagado-text-dim hover:text-lagado-text border border-lagado-border rounded-md hover:border-lagado-red transition-colors">
+          ← Chat
+        </button>
+      </div>
+
       <div className="flex-1 flex">
         {/* Sidebar */}
         <div className="w-64 border-r border-lagado-border bg-lagado-surface p-4">

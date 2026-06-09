@@ -1,6 +1,7 @@
 // Code editor with Monaco
- 
+
 import React, { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Header } from "../components/Header";
 import { Button } from "../components/Button";
 import { FileTree } from "../components/FileTree";
@@ -25,11 +26,12 @@ const sampleFiles = [
 ];
  
 export default function CodePage() {
+  const navigate = useNavigate();
   const [selectedFile, setSelectedFile] = useState("test.py");
   const [code, setCode] = useState(`# Hello world example
 def greet(name):
     print(f"Hello, {name}!")
- 
+
 if __name__ == "__main__":
     greet("World")
 `);
@@ -37,7 +39,13 @@ if __name__ == "__main__":
   return (
     <div className="min-h-screen bg-lagado-bg flex flex-col">
       <Header title="Code" />
- 
+
+      <div className="border-b border-lagado-border bg-lagado-surface px-4 py-3">
+        <button onClick={() => navigate("/chat")} className="px-3 py-1.5 text-body-sm text-lagado-text-dim hover:text-lagado-text border border-lagado-border rounded-md hover:border-lagado-red transition-colors">
+          ← Chat
+        </button>
+      </div>
+
       <div className="flex-1 flex overflow-hidden">
         {/* File browser */}
         <div className="w-64 border-r border-lagado-border bg-lagado-surface p-4 overflow-y-auto">
