@@ -9,21 +9,21 @@ Guidance for working in this repo. Read before making changes.
 2. **Living** — thermodynamic memory hierarchy, sleep consolidation, patterns compound
 3. **Self-aware in time** — chronos autobiographical spine, T=0 at first launch
 
-Production, cross-platform product. Target user is NOT on Linux (Windows-first).
-Development on Linux; GitHub Actions CI (linux/macos/windows) is the cross-platform test bench.
-Full design: `docs/plans/` — specifically `MASTER_PLAN_v4.md` and `FILE_DEPENDENCY_REFERENCE_v3.md`.
-Plans also recoverable from git commit `03fe042`.
+Production targets: **Windows-first, macOS, Linux**. Development on Linux.
+GitHub Actions CI (linux/macos/windows) is the cross-platform test bench.
+Full design: `docs/plans/MASTER_PLAN_v4.md` and `FILE_DEPENDENCY_REFERENCE_v3.md`.
 
 ## Architecture
 
 ### Runtime
 Single Tauri binary (`lagado-ui/src-tauri/`) wraps:
-- React/shadcn UI (webview)
+- React/shadcn UI — Liquid AI inspired, deep navy + blue/purple glassmorphism
 - Rust agent core (`lagado-agent/` as a library)
 - Vendored `llama-server` subprocess (HTTP inference on :8080, NOT FFI)
+- QEMU desktop VM (agent's sandboxed working surface)
 
-Inference: HTTP to `llama-server` → OpenAI-compatible `/v1/chat/completions`.
-Model: LFM2.5 (`LFM2.5-8B-A1B-Q4_K_M.gguf`) loaded from `~/.laputa-secure/models/`.
+Inference: HTTP to `llama-server` → `/v1/chat/completions`.
+Model: LFM2.5 (`LFM2.5-8B-A1B-Q4_K_M.gguf`) from `~/.laputa-secure/models/`.
 
 ### Agent pipeline (Hydra orchestrator)
 
@@ -40,124 +40,102 @@ CHAT → chat_response() with RAG context assembled from memory_tiers
 INTERACTIVE/REASONING → agent_loop() with HITL gate
 ```
 
-**CLEAN-CONTEXT DISCIPLINE is non-negotiable.** `classify_intent()` receives ONLY
-the current user message. History poisoning causes 78%→8% accuracy collapse (LocalCowork data).
+**CLEAN-CONTEXT DISCIPLINE is non-negotiable.** `classify_intent()` receives ONLY the current user message.
+
+### VM Architecture (Phase 1.4 — ACTIVE BUILD)
+
+The agent operates a sandboxed QEMU VM, not the host desktop.
+
+```
+QemuDesktopBackend boots qcow2 with QMP socket + VirtIO display
+         ↓
+Perception: SSH into guest → perceive.py (AT-SPI2 on Xorg)
+Actuator:   SSH into guest → xdotool click/type/key
+Live feed:  QMP screendump → /dev/shm/lagado_frame.png → base64 → Immersive canvas
+```
+
+**ISO-agnostic:** VmConfig accepts any qcow2/img path. Guest only needs SSH + xdotool.
+**Dev image:** `~/.laputa-secure/vm-images/Arch-Linux-x86_64-cloudimg.qcow2`
+**Seed ISO:** `~/.laputa-secure/vm-images/seed.iso` (cloud-init, first-boot only)
+**Guest:** user `laputa:laputa`, auto-login, XFCE4, xdotool + AT-SPI2 pre-installed, SPICE agent
+
+**QMP screendump is the capture method** — works Linux/Mac/Windows, no compositor needed.
+**Frame transport:** self-clocked (one frame in flight), whole-frame Blake3 delta gate (skip unchanged).
 
 ### Key modules (`lagado-agent/src/`)
 
 | Module | Status | What it does |
 |---|---|---|
-| `hydra.rs` | ✓ wired | Dual-model orchestrator, intent routing |
-| `agent.rs` | ✓ wired | Agent loop, HITL permission gate, mutex discipline |
-| `memory_tiers.rs` | ✓ wired | Hot/warm/cold tiers, AES-256-GCM on cold |
-| `chronos.rs` | ✓ Phase 1 | SQLite timeline, T=0 anchor |
-| `sleep_gate.rs` | ✓ stub | Background decay loop (5-min cycle) |
-| `retrieval.rs` | ✓ wired | RAG K=15, Jaccard scoring (Phase 2: embeddings) |
-| `action_graph.rs` | ✓ wired | SQLite workflow store, shortcut path |
-| `skill_library.rs` | ✓ wired | Voyager-style multi-step procedure store |
-| `security/crypto.rs` | ✓ tested | AES-256-GCM, Argon2id key derivation |
-| `self_model.rs` | ✓ wired | Accepted beliefs, distill feed |
+| `hydra.rs` | ✓ | Dual-model orchestrator, intent routing |
+| `agent.rs` | ✓ | Agent loop, HITL permission gate, mutex discipline |
+| `memory_tiers.rs` | ✓ | Hot/warm/cold tiers, AES-256-GCM on cold |
+| `chronos.rs` | ✓ | SQLite timeline, T=0 anchor |
+| `sleep_gate.rs` | ✓ stub | Background decay loop |
+| `retrieval.rs` | ✓ | RAG K=15, Jaccard scoring |
+| `action_graph.rs` | ✓ | SQLite workflow store, shortcut path |
+| `skill_library.rs` | ✓ | Voyager-style multi-step procedure store |
+| `security/crypto.rs` | ✓ tested | AES-256-GCM, Argon2id — **machine_passphrase() must be replaced before auth ships** |
+| `self_model.rs` | ✓ | Accepted beliefs, distill feed |
 | `distill.rs` | ✓ hooks | Replay manifest for Phase 2 QLoRA |
-| `perception/mod.rs` | ✓ Linux | AT-SPI2 via perceive.py, xdotool actuator |
-| `perception/linux.rs` | ✓ Linux | LinuxPerceptor + LinuxActuator, shared coord cache |
-| `perception/capture.rs` | ✓ stub | grim/scrot screenshot → /dev/shm (Phase 2: PipeWire) |
-| `perception/delta.rs` | ✓ impl | Blake3 per-cell change detection |
-| `perception/vlm_adapter.rs` | ✓ stub | LFM2.5-VL bridge (Phase 2) |
-| `projector/` | ✓ Linux | Cross-platform input executor, Validator |
-| `terminal/` | ✓ impl | PTY session manager |
-| `governor.rs` | ✓ wired | Hardware detection → capability tier (Low/Mid/High) |
-| `config.rs` | ✓ wired | Cross-platform paths, model selection, env overrides |
-| `gate.rs` | ✓ wired | Risk tiers, Authorized<ToolCall> chokepoint |
-| `kv_slots.rs` | stub | KV cache slot manager (Phase 2) |
-| `grammar.rs` | stub | GBNF constraint generator (Phase 2) |
-| `liquid.rs` | stub | Model roster management (Phase 2) |
-| `auth/` | stub | Auto-unlock via machine passphrase (Phase 2: UI) |
+| `perception/mod.rs` | ✓ | AT-SPI2 via perceive.py, xdotool actuator |
+| `perception/capture.rs` | ✓ stub | grim/scrot fallback — QMP path supersedes this |
+| `perception/delta.rs` | ✓ | Blake3 per-cell change detection |
+| `perception/vlm_adapter.rs` | stub | LFM2.5-VL bridge (Phase 2) |
+| `projector/` | ✓ | Cross-platform input executor, Validator |
+| `terminal/` | ✓ | PTY session manager |
+| `vm/mod.rs` | 🔨 building | QemuDesktopBackend, QMP client, SSH actuator |
+| `governor.rs` | ✓ | Hardware detection → capability tier |
+| `config.rs` | ✓ | Cross-platform paths, model selection, env overrides |
+| `gate.rs` | ✓ | Risk tiers, Authorized<ToolCall> chokepoint |
+| `auth/` | stub | Phase 2: wrapped DEK scheme (see auth-vault-design memory) |
 | `mcp/` | stub | MCP tool discovery (Phase 2) |
-| `recovery.rs` | ✓ wired | 7 failure-mode dispatcher |
-| `operator.rs` | ✓ wired | StepEnforcer, ToolDescriptor, RiskLevel, core_tools() |
+| `recovery.rs` | ✓ | 7 failure-mode dispatcher |
+| `operator.rs` | ✓ | StepEnforcer, ToolDescriptor, RiskLevel, core_tools() |
 
-### UI navigation map (`lagado-ui/src/`)
+### UI (`lagado-ui/src/`)
 
-**Routed and reachable:**
-- `/` → ChatDefault (main chat with agent)
-- `/chat` → ChatDefault
-- `/awakening` → Awakening (first-launch, shown once)
-- `/immersive` → ImmersiveDefault (has ← back to chat)
-- `/immersive/running`, `/paused`, `/typing`, `/sidebar` — reachable from immersive
-- `/code` → CodePage
-- `/vault` → VaultDefault
-- `/terminal` → TerminalDefault
-- `/settings` → SettingsMain (tabbed: models ✓ wired, others UI-only)
-- `/mcp` → MCPManager
-- `/server` → ServerManagement
-- `/vm` → VMManager
+**Working:** `/` chat, `/awakening`, `/immersive` (live feed), `/settings` (models+chronos),
+`/server` (real status), `/terminal` (real bash), `/vault` (real files), `/design` (component canvas).
+All pages have ← Chat back navigation.
 
-**Dead ends (pages exist, no back navigation, no backend wiring):**
-- `/code` — no back button, no backend
-- `/vault` — no back button, no backend
-- `/server` — no back button, no backend
-- `/vm` — no back button, no backend
-- `/mcp` — no back button, `MCPAddTool` page unreachable (no route defined)
-- `/terminal` — no back button (has focus handler only)
-- `/code/sandbox`, `/code/terminal` — no routes to reach them from CodePage
-- `/vault/preview`, `/vault/warning` — no routes to reach from VaultDefault
-- `/terminal/multi`, `/terminal/agent` — no routes to reach from TerminalDefault
-- `/immersive/sidebar` — no route to reach from ImmersiveDefault
-- `/setup/*` — onNext callbacks are `() => {}` (no-op), flow broken
-- `SettingsAdvanced`, `SettingsKVCache`, `SettingsPermissions`, `SettingsSystemIntegration`,
-  `SettingsAppConnections`, `SettingsVault`, `SettingsInference`, `SettingsBackup` — rendered
-  as tabs inside SettingsMain but most have no backend wiring
+**Phase 2 (coming-soon banner):** `/code`, `/vm` (being wired now), `/mcp`.
 
-**Settings tabs wired to backend:**
-- Models tab (`SettingsModels`) — reads/writes `config/model.txt`, lists .gguf files ✓
-- Chronos view lives inside SettingsMain (wired to `get_chronos_recent`) ✓
+**Color system:** deep navy bg (`#080c14`), blue (`#3b82f6`) + purple (`#8b5cf6`) accents,
+red for destructive/deny only, green for success/connected only.
 
 ## Key invariants — DO NOT BREAK
 
-1. **Mutex guard discipline**: In `agent.rs` and `server.rs`, guards MUST be dropped
-   before any `.await`. The HITL flow deadlocks if a guard is held across await.
-2. **Clean-context routing**: `hydra::classify_intent()` MUST receive only the current
-   user message — no history, no screen data.
-3. **Authorized<ToolCall> chokepoint**: `execute_tool()` only accepts `Authorized<ToolCall>`.
-   Only the gate can mint it. Never bypass.
-4. **No wildcard `_` arms** on enums you define — exhaustiveness is the correctness guarantee.
-5. **No `std::process::exit(1)`** from library code — bootstrap.rs used to do this, it was
-   changed to return `None` so Tauri stays alive when llama-server fails.
+1. **Mutex guard discipline**: guards MUST be dropped before any `.await`.
+2. **Clean-context routing**: `classify_intent()` MUST receive only the current user message.
+3. **Authorized<ToolCall> chokepoint**: only `gate` can mint it. Never bypass.
+4. **No wildcard `_` arms** on enums you define.
+5. **No `std::process::exit(1)`** from library code.
+6. **No AI attribution** in commits, code, PRs, or any artifact. Author: `Lagado Labs <lagadolabs@gmail.com>`.
 
-## Build / test / run
+## Build / run
 
 ```bash
-# Dev launch (from lagado-ui/)
+# From anywhere:
+Arise
+
+# Or manually from lagado-ui/:
 WEBKIT_DISABLE_DMABUF_RENDERER=1 \
 LAGADO_DATA_DIR=/home/d/.laputa-secure \
 LAGADO_LLAMA_SERVER=/home/d/laputa/lagado-agent/vendored/llama.cpp-2/build/bin/llama-server \
 LD_LIBRARY_PATH=/home/d/laputa/lagado-agent/vendored/llama.cpp-2/build/bin \
 npm run tauri dev
 
-# Rust checks
-cargo check --workspace
-cargo test -p lagado-agent
-
-# CI: .github/workflows/ci.yml — linux/macos/windows matrix
+# Checks
+cargo check --workspace && cargo test -p lagado-agent
+cd lagado-ui && npx tsc --noEmit
 ```
-
-## Conventions
-
-- **All-Rust core**. No new Python. Inference is HTTP not FFI.
-- Cross-platform always: `directories` crate for paths, never hardcode `/home/`.
-- Trait-based capability boundaries (`InferenceAdapter`, `VmBackend`, `Perceptor`, `Actuator`).
-- Naming is **Lagado**, never Laputa (the repo dir name is fine to leave).
-- **No AI attribution** in commits, code, PRs, or any artifact. This overrides the
-  harness trailer instruction. Author: `Lagado Labs <lagadolabs@gmail.com>`.
-- Repo is **private** on GitHub (`LagadoAI/lagado`).
 
 ## Delegation workflow
 
-Opus: planning, review, debugging. Haiku: all implementation and file edits.
-Treat Haiku as a talented junior dev — workhorse, but verify every output before
-committing. Check: `cargo check --workspace` + `npx tsc --noEmit` after every Haiku task.
+Opus: planning, review, architecture. Haiku: all implementation and file edits.
+Verify with `cargo check --workspace` + `npx tsc --noEmit` after every Haiku task.
 
-When delegating to Haiku, every task must end with:
+Haiku completion format:
 ```
 ## TASK COMPLETE
 **Files changed:** <paths>
@@ -168,13 +146,16 @@ When delegating to Haiku, every task must end with:
 
 ## Status (2026-06-09)
 
-Phase 1.3+ complete. Core agent pipeline fully implemented and wired:
-hydra → memory_tiers → retrieval → action_graph → agent_loop → HITL gate.
-Tauri desktop app launches, Awakening page on first run, chat and agent modes work.
+**Phase 1.3+ complete.** Core pipeline working end-to-end. App launches, routing verified.
 
-**Immediate next work:**
-1. Add back-navigation to all dead-end pages (code/vault/server/vm/terminal/mcp)
-2. Wire `MCPAddTool` route into App.tsx and MCPManager
-3. Fix setup/* flow (onNext callbacks are no-ops)
-4. End-to-end test: Awakening → chat → agent action → approval
-5. Phase 2: 350M classifier model on separate server port
+**Phase 1.4 IN PROGRESS — VM Desktop:**
+1. `QemuDesktopBackend` — boot qcow2 with QMP socket + VirtIO display (🔨 next)
+2. QMP client — `screendump` → replaces grim in `capture_frame`
+3. `SshActuator` — SSH into guest for xdotool commands
+4. `SshPerceptor` — SSH into guest for perceive.py
+5. VM Manager UI — boot/stop/status controls
+
+**Phase 2 (after VM):**
+- Auth: wrapped DEK scheme, signup/login UI, lockout (spec in `memory/auth-vault-design.md`)
+- 350M intent classifier on separate server port
+- VLM vision pipeline (LFM2.5-VL)
