@@ -1,0 +1,229 @@
+use std::sync::Arc;
+use tokio::sync::{mpsc, Mutex};
+use crate::types::{PipelineError, Step, ToolCall};
+use crate::forge::Forge;
+use crate::operator::StepEnforcer;
+use crate::memory::Memory;
+use crate::inference::InferenceAdapter;
+use crate::perception::{Perceptor, Actuator};
+use crate::{chronos, config, envelope, gate};
+
+// ── State shared between WebSocket and agent ──────────────────────
+pub(crate) struct AgentState {
+    pub goal: String,
+    pub running: bool,
+    pub approval_tx: Option<mpsc::Sender<bool>>,
+    pub pending_id: Option<String>,
+}
+
+// ── Tool execution ────────────────────────────────────────────────
+async fn execute_tool(call: &ToolCall, actuator: &dyn Actuator) -> String {
+    match call {
+        ToolCall::Click { selector } => actuator.click(selector),
+        ToolCall::Type { selector, text } => actuator.type_text(selector, text),
+        ToolCall::Key { key } => actuator.key(key),
+        ToolCall::Wait { ms } => {
+            tokio::time::sleep(tokio::time::Duration::from_millis(*ms as u64)).await;
+            format!("Waited {}ms", ms)
+        }
+        ToolCall::Task { description } => format!("Task completed: {}", description),
+        ToolCall::Done { reason } => format!("Done: {}", reason),
+    }
+}
+
+// ── Permission request + await human approval ─────────────────────
+async fn request_and_await_approval(
+    confirm_type: &str, // "tap" | "typed"
+    tool_call: &ToolCall,
+    state: &Arc<Mutex<AgentState>>,
+    actuator: &dyn Actuator,
+    approval_rx: &mut mpsc::Receiver<bool>,
+    confirm_tx: &mpsc::Sender<String>,
+) -> String {
+    let desc = gate::describe(tool_call);
+    let tool_name = match tool_call {
+        ToolCall::Click { .. } => "click",
+        ToolCall::Type { .. } => "type",
+        ToolCall::Key { .. } => "key",
+        _ => "unknown",
+    };
+    let id = uuid::Uuid::new_v4().to_string();
+    chronos::log(&format!("confirm_requested: {confirm_type}: {desc}"));
+    let _ = confirm_tx
+        .send(envelope::make(
+            "permission",
+            envelope::PermissionPayload {
+                id: id.clone(),
+                type_: confirm_type.to_string(),
+                tool: tool_name.to_string(),
+                action: desc.clone(),
+                reason: "Write action requires confirmation".to_string(),
+                origin_surface: "immersive".to_string(),
+                origin_agent: "main".to_string(),
+            },
+        ))
+        .await;
+    // Set pending_id (lock, set, drop guard) BEFORE awaiting approval
+    {
+        state.lock().await.pending_id = Some(id);
+    }
+    let approved = approval_rx.recv().await.unwrap_or(false);
+    if approved {
+        let out = execute_tool(tool_call, actuator).await;
+        chronos::log(&format!("action: {desc} -> {out}"));
+        let _ = confirm_tx
+            .send(envelope::make(
+                "action_log",
+                envelope::ActionLogPayload {
+                    text: format!("{desc} -> {out}"),
+                },
+            ))
+            .await;
+        out
+    } else {
+        chronos::log(&format!("denied: {desc}"));
+        let _ = confirm_tx
+            .send(envelope::make(
+                "status",
+                envelope::StatusPayload {
+                    state: "denied".to_string(),
+                    detail: desc.clone(),
+                },
+            ))
+            .await;
+        format!("Denied by user: {:?}", tool_call)
+    }
+}
+
+// ── Agent loop ────────────────────────────────────────────────────
+pub(crate) async fn agent_loop(
+    state: Arc<Mutex<AgentState>>,
+    adapter: Arc<dyn InferenceAdapter>,
+    perceptor: Arc<dyn Perceptor>,
+    actuator: Arc<dyn Actuator>,
+    mut approval_rx: mpsc::Receiver<bool>,
+    confirm_tx: mpsc::Sender<String>,
+) {
+    let mut enforcer = StepEnforcer::new();
+    let mut memory = Memory::new(|steps| {
+        let actions: Vec<_> = steps.iter()
+            .filter_map(|s| s.action.as_ref())
+            .map(|a| format!("{:?}", a))
+            .collect();
+        actions.join(", ")
+    });
+
+    let goal = state.lock().await.goal.clone();
+    let system_prompt = config::system_prompt();
+    chronos::log(&format!("goal_received: {goal}"));
+    let _ = confirm_tx.send(envelope::make("status", envelope::StatusPayload {
+        state: "goal_received".to_string(),
+        detail: goal.clone(),
+    })).await;
+
+    loop {
+        {
+            let s = state.lock().await;
+            if !s.running { break; }
+        } // guard dropped here — safe to await below
+
+        if let Err(e) = enforcer.advance() {
+            tracing::warn!("Agent terminated: {:?}", e);
+            break;
+        }
+
+        let screen = perceptor.read_screen();
+        let context = memory.context_string();
+        let prompt = format!(
+            "{system_prompt}\n\n{context}\n\nScreen:\n{screen}\n\nGoal: {goal}\n\nWhat is your next action?"
+        );
+
+        let adapter_clone = adapter.clone();
+        let forge = Forge {
+            model_fn: Box::new(move |p: String| {
+                let adapter = adapter_clone.clone();
+                Box::pin(async move {
+                    tokio::task::spawn_blocking(move || {
+                        adapter.generate(&p, 2048, 0.2)
+                            .map_err(|e| PipelineError::ModelError(e))
+                    })
+                    .await
+                    .map_err(|e| PipelineError::ModelError(e.to_string()))?
+                })
+            }),
+        };
+
+        match forge.call_with_retry(&prompt, &enforcer).await {
+            Ok(tool_call) => {
+                tracing::info!("Step {}: {:?}", enforcer.step(), tool_call);
+
+                // state mutex is NOT held from here through approval_rx.recv()
+                let output = match gate::evaluate_action(&tool_call) {
+                    gate::Verdict::Allow => {
+                        let desc = gate::describe(&tool_call);
+                        let out = execute_tool(&tool_call, actuator.as_ref()).await;
+                        chronos::log(&format!("action: {desc} -> {out}"));
+                        let _ = confirm_tx.send(envelope::make("action_log", envelope::ActionLogPayload {
+                            text: format!("{desc} -> {out}"),
+                        })).await;
+                        out
+                    }
+                    gate::Verdict::ConfirmTap => {
+                        request_and_await_approval("tap", &tool_call, &state, actuator.as_ref(), &mut approval_rx, &confirm_tx).await
+                    }
+                    gate::Verdict::ConfirmTyped => {
+                        request_and_await_approval("typed", &tool_call, &state, actuator.as_ref(), &mut approval_rx, &confirm_tx).await
+                    }
+                    gate::Verdict::Block(reason) => {
+                        chronos::log(&format!("blocked: {reason}"));
+                        let _ = confirm_tx.send(envelope::make("status", envelope::StatusPayload {
+                            state: "blocked".to_string(),
+                            detail: reason.clone(),
+                        })).await;
+                        tracing::warn!("Action blocked: {}", reason);
+                        format!("Blocked: {}", reason)
+                    }
+                };
+
+                memory.push(Step {
+                    index: enforcer.step(),
+                    prompt: prompt.clone(),
+                    output,
+                    action: Some(tool_call.clone()),
+                });
+                if matches!(tool_call, ToolCall::Task { .. } | ToolCall::Done { .. }) {
+                    let reason = match &tool_call {
+                        ToolCall::Done { reason } => reason.clone(),
+                        ToolCall::Task { description } => description.clone(),
+                        _ => "completed".to_string(),
+                    };
+                    chronos::log(&format!("goal_done: {reason}"));
+                    let _ = confirm_tx.send(envelope::make("status", envelope::StatusPayload {
+                        state: "goal_done".to_string(),
+                        detail: reason,
+                    })).await;
+                    tracing::info!("Goal achieved.");
+                    break;
+                }
+            }
+            Err(e) => {
+                tracing::warn!("Pipeline error: {:?}", e);
+                memory.push(Step {
+                    index: enforcer.step(),
+                    prompt: prompt.clone(),
+                    output: format!("Error: {:?}", e),
+                    action: None,
+                });
+                if matches!(e, PipelineError::MaxRetriesExceeded | PipelineError::MaxStepsExceeded) {
+                    let detail = format!("{:?}", e);
+                    chronos::log(&format!("goal_aborted: {detail}"));
+                    let _ = confirm_tx.send(envelope::make("status", envelope::StatusPayload {
+                        state: "goal_aborted".to_string(),
+                        detail,
+                    })).await;
+                    break;
+                }
+            }
+        }
+    }
+}

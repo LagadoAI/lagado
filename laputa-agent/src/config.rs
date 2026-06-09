@@ -55,6 +55,21 @@ pub fn chronos_log() -> PathBuf {
     data_dir().join("chronos.log")
 }
 
+/// Agent system prompt. Resolves: LAGADO_SYSTEM_PROMPT (file path) ->
+/// `<data>/system_prompt.txt` -> the embedded default that ships with the binary.
+pub fn system_prompt() -> String {
+    if let Ok(p) = std::env::var("LAGADO_SYSTEM_PROMPT") {
+        if let Ok(s) = std::fs::read_to_string(&p) {
+            return s;
+        }
+    }
+    let data_file = data_dir().join("system_prompt.txt");
+    if let Ok(s) = std::fs::read_to_string(&data_file) {
+        return s;
+    }
+    include_str!("../prompts/system_prompt.txt").to_string()
+}
+
 pub fn llama_host() -> String {
     std::env::var("LAGADO_LLAMA_HOST").unwrap_or_else(|_| LLAMA_HOST.to_string())
 }
