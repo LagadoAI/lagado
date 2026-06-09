@@ -1,8 +1,10 @@
 import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import Awakening from './pages/Awakening';
 import LoginPage from './pages/LoginPage';
+import SignupPage from './pages/SignupPage';
 import FirstLaunchWelcome from './pages/FirstLaunchWelcome';
 import FirstLaunchSystemDetected from './pages/FirstLaunchSystemDetected';
 import FirstLaunchModelSelection from './pages/FirstLaunchModelSelection';
@@ -31,16 +33,47 @@ import VMManager from './pages/VMManager';
 import './index.css';
 import { ChatProvider } from './hooks/use-chat-context';
 
-function AppRoutes({ isLoggedIn, setIsLoggedIn }: { isLoggedIn: boolean; setIsLoggedIn: (v: boolean) => void }) {
-  const navigate = useNavigate();
-  // Show Awakening on first launch (before login)
-  const hasAwakened = localStorage.getItem('lagado_awakened') === 'true'
-  if (!hasAwakened) {
+type AuthState = 'loading' | 'awakening' | 'signup' | 'login' | 'app'
+
+function AppRoutes() {
+  const navigate = useNavigate()
+  const [authState, setAuthState] = useState<AuthState>('loading')
+
+  useEffect(() => {
+    const hasAwakened = localStorage.getItem('lagado_awakened') === 'true'
+    if (!hasAwakened) {
+      setAuthState('awakening')
+      return
+    }
+    invoke<{ needs_setup: boolean; locked: boolean }>('auth_check')
+      .then(info => {
+        setAuthState(info.needs_setup ? 'signup' : 'login')
+      })
+      .catch(() => setAuthState('login'))
+  }, [])
+
+  if (authState === 'loading') {
+    return <div className="min-h-screen bg-lagado-bg" />
+  }
+
+  if (authState === 'awakening') {
     return <Awakening />
   }
 
-  if (!isLoggedIn) {
-    return <LoginPage onLogin={() => setIsLoggedIn(true)} />;
+  if (authState === 'signup') {
+    return (
+      <Routes>
+        <Route path="*" element={<SignupPage onSignup={() => setAuthState('app')} />} />
+        <Route path="/setup/welcome" element={<FirstLaunchWelcome onNext={() => navigate('/setup/system')} />} />
+        <Route path="/setup/system" element={<FirstLaunchSystemDetected onNext={() => navigate('/setup/models')} />} />
+        <Route path="/setup/models" element={<FirstLaunchModelSelection onNext={() => navigate('/setup/permissions')} />} />
+        <Route path="/setup/permissions" element={<FirstLaunchPermissionsSetup onComplete={() => { setAuthState('app'); navigate('/chat') }} />} />
+      </Routes>
+    )
+  }
+
+  if (authState === 'login') {
+    return <LoginPage onLogin={() => setAuthState('app')} />
   }
 
   return (
@@ -75,16 +108,15 @@ function AppRoutes({ isLoggedIn, setIsLoggedIn }: { isLoggedIn: boolean; setIsLo
         <Route path="/" element={<ChatDefault />} />
       </Routes>
     </ChatProvider>
-  );
+  )
 }
 
 export default function App() {
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
   return (
     <BrowserRouter>
       <TooltipProvider>
-        <AppRoutes isLoggedIn={isLoggedIn} setIsLoggedIn={setIsLoggedIn} />
+        <AppRoutes />
       </TooltipProvider>
     </BrowserRouter>
-  );
+  )
 }

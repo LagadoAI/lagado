@@ -1,18 +1,12 @@
 use std::time::Instant;
-use lagado_agent::vm::{QemuMicrovmBackend, VmBackend, VmConfig};
+use lagado_agent::vm::{QemuDesktopBackend, VmBackend, VmConfig};
 
 fn main() {
     let t0 = Instant::now();
-    println!("[vm_proof] booting QEMU microvm...");
+    println!("[vm_proof] booting QEMU desktop VM...");
 
-    let backend = QemuMicrovmBackend::default();
-    let cfg = VmConfig {
-        vcpus: 1,
-        mem_mib: 128,
-        kernel: "/usr/lib/modules/6.18.31-1-cachyos-lts/vmlinuz".to_string(),
-        initrd: Some("/tmp/lagado-initrd.cpio.gz".to_string()),
-        cmdline: "console=ttyS0 panic=-1 quiet".to_string(),
-    };
+    let backend = QemuDesktopBackend::default();
+    let cfg = VmConfig::default();
 
     let mut handle = match backend.boot(&cfg) {
         Ok(h) => h,

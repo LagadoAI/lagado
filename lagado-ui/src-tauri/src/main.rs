@@ -10,6 +10,7 @@ use lagado_agent::{
     hydra,
     inference::{InferenceAdapter, llama_cpp::LlamaCppAdapter},
     perception::{Perceptor, Actuator},
+    vm::{QemuDesktopBackend, VmHandle, VmBackend, VmSshPort, DynamicActuator, DynamicPerceptor},
 };
 
 struct AppState {
@@ -18,6 +19,10 @@ struct AppState {
     perceptor: Arc<dyn Perceptor + Send + Sync>,
     actuator: Arc<dyn Actuator + Send + Sync>,
     _llama_child: Arc<Mutex<Option<std::process::Child>>>,
+    vm: Arc<Mutex<Option<VmHandle>>>,
+    vm_ssh_port: VmSshPort,
+    vm_backend: QemuDesktopBackend,
+    session_dek: Arc<Mutex<Option<Vec<u8>>>>,
 }
 
 #[tauri::command]
@@ -29,7 +34,6 @@ async fn send_goal(
     let (approval_tx, approval_rx) = mpsc::channel::<bool>(1);
     let (confirm_tx, mut confirm_rx) = mpsc::channel::<String>(32);
 
-    // Bridge: forward serialised envelope JSON → Tauri events
     let app_h = app.clone();
     tokio::spawn(async move {
         while let Some(msg) = confirm_rx.recv().await {
@@ -40,14 +44,13 @@ async fn send_goal(
         }
     });
 
-    // Check if paused and set up state — drop guard before await
     let is_paused = {
         let mut s = state.agent.lock().await;
         s.approval_tx = Some(approval_tx);
         s.pending_id = None;
         s.running = true;
-        false // paused state will be passed in from frontend in future; false for now
-    }; // guard dropped
+        false
+    };
 
     let agent_arc = state.agent.clone();
     let adapter = state.adapter.clone();
@@ -117,7 +120,7 @@ async fn send_approval(
             tracing::warn!("stale approval id ignored: {id}");
             (false, None)
         }
-    }; // guard dropped before await
+    };
     if matched {
         if let Some(tx) = tx {
             let _ = tx.send(approved).await;
@@ -178,7 +181,9 @@ async fn terminal_run(command: String) -> Result<String, String> {
     let output = std::process::Command::new("bash")
         .arg("-c")
         .arg(&command)
-        .current_dir(std::path::PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| "/".to_string())))
+        .current_dir(std::path::PathBuf::from(
+            std::env::var("HOME").unwrap_or_else(|_| "/".to_string())
+        ))
         .output()
         .map_err(|e| format!("failed to run command: {e}"))?;
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
@@ -197,7 +202,8 @@ fn terminal_get_cwd() -> String {
 fn vault_list_files(subfolder: String) -> Vec<serde_json::Value> {
     let base = std::path::PathBuf::from(
         std::env::var("LAGADO_DATA_DIR")
-            .unwrap_or_else(|_| format!("{}/.laputa-secure", std::env::var("HOME").unwrap_or_default()))
+            .unwrap_or_else(|_| format!("{}/.laputa-secure",
+                std::env::var("HOME").unwrap_or_default()))
     );
     let dir = if subfolder.is_empty() { base.clone() } else { base.join(&subfolder) };
 
@@ -226,7 +232,6 @@ fn vault_list_files(subfolder: String) -> Vec<serde_json::Value> {
 
 #[tauri::command]
 async fn get_server_status() -> serde_json::Value {
-    // Use reqwest (already a dep via lagado-agent) for the health check
     let healthy = tokio::time::timeout(
         std::time::Duration::from_secs(2),
         async { reqwest::get("http://127.0.0.1:8080/health").await.is_ok() }
@@ -242,36 +247,162 @@ async fn get_server_status() -> serde_json::Value {
     })
 }
 
-/// Capture one frame and return it as a base64-encoded PNG data URI.
-/// Returns "unchanged" if the frame is identical to the last (whole-frame Blake3 gate).
-/// The frontend skips the src swap on "unchanged" — no GC churn for idle screens.
 #[tauri::command]
-fn capture_frame() -> Result<String, String> {
-    #[cfg(target_os = "linux")]
-    {
-        use std::sync::Mutex as StdMutex;
-        static LAST_HASH: StdMutex<Option<[u8; 32]>> = StdMutex::new(None);
+async fn capture_frame(state: State<'_, Arc<AppState>>, source: Option<String>) -> Result<String, String> {
+    use std::sync::Mutex as StdMutex;
+    static LAST_HASH_VM: StdMutex<Option<[u8; 32]>> = StdMutex::new(None);
+    static LAST_HASH_HOST: StdMutex<Option<[u8; 32]>> = StdMutex::new(None);
 
-        let mut cap = lagado_agent::perception::capture::ScreenCapture::new();
-        cap.capture()?;
-        let bytes = cap.read_frame().ok_or("no frame captured")?;
+    const FRAME_PATH: &str = "/dev/shm/lagado_frame.png";
+    let use_host = source.as_deref() == Some("host");
 
-        // Whole-frame hash — skip IPC if nothing changed
-        let hash: [u8; 32] = *blake3::hash(&bytes).as_bytes();
-        {
-            let mut last = LAST_HASH.lock().unwrap();
-            if *last == Some(hash) {
-                return Ok("unchanged".to_string());
-            }
-            *last = Some(hash);
+    let bytes = if use_host {
+        tokio::task::spawn_blocking(|| {
+            let mut cap = lagado_agent::perception::capture::ScreenCapture::new();
+            cap.capture()?;
+            cap.read_frame().ok_or_else(|| "no frame captured".to_string())
+        }).await.map_err(|e| format!("spawn error: {e}"))??
+    } else {
+        let qmp_socket = {
+            let vm = state.vm.lock().await;
+            vm.as_ref().map(|h| h.qmp_socket.clone())
+        };
+        if let Some(socket) = qmp_socket {
+            tokio::task::spawn_blocking(move || {
+                if let Ok(mut qmp) = lagado_agent::vm::QmpClient::connect(&socket) {
+                    let _ = qmp.screendump(FRAME_PATH);
+                }
+            }).await.ok();
         }
+        std::fs::read(FRAME_PATH).map_err(|_| "no frame — VM not ready".to_string())?
+    };
 
-        use base64::Engine;
-        let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
-        Ok(format!("data:image/png;base64,{b64}"))
+    let last_hash = if use_host { &LAST_HASH_HOST } else { &LAST_HASH_VM };
+    let hash: [u8; 32] = *blake3::hash(&bytes).as_bytes();
+    {
+        let mut last = last_hash.lock().unwrap();
+        if *last == Some(hash) {
+            return Ok("unchanged".to_string());
+        }
+        *last = Some(hash);
     }
-    #[cfg(not(target_os = "linux"))]
-    Err("Screen capture not supported on this platform".to_string())
+
+    use base64::Engine;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+    Ok(format!("data:image/png;base64,{b64}"))
+}
+
+#[tauri::command]
+async fn vm_boot(state: State<'_, Arc<AppState>>) -> Result<serde_json::Value, String> {
+    let mut vm = state.vm.lock().await;
+    // If we have a handle, check if the process is still alive before refusing
+    if let Some(ref mut existing) = *vm {
+        match existing.child.try_wait() {
+            Ok(None) => return Err("VM already running".to_string()),
+            _ => { *vm = None; } // process died — clear and boot fresh
+        }
+    }
+    let cfg = lagado_agent::vm::VmConfig::default();
+    if !std::path::Path::new(&cfg.disk_image).exists() {
+        return Err(format!("Disk image not found: {}", cfg.disk_image));
+    }
+    let cfg_clone = lagado_agent::vm::VmConfig {
+        disk_image: cfg.disk_image.clone(),
+        seed_iso: cfg.seed_iso.clone(),
+        mem_mib: cfg.mem_mib,
+        vcpus: cfg.vcpus,
+        ssh_port: cfg.ssh_port,
+        qmp_socket: cfg.qmp_socket.clone(),
+    };
+    let backend = &state.vm_backend;
+    let ssh_port = cfg.ssh_port;
+    let handle = backend.boot(&cfg_clone)?;
+    *vm = Some(handle);
+    *state.vm_ssh_port.write().unwrap() = Some(ssh_port);
+    Ok(serde_json::json!({ "status": "booting", "ssh_port": ssh_port }))
+}
+
+#[tauri::command]
+async fn vm_stop(state: State<'_, Arc<AppState>>) -> Result<(), String> {
+    let handle = {
+        let mut vm = state.vm.lock().await;
+        vm.take()
+    };
+    if let Some(h) = handle {
+        let backend = &state.vm_backend;
+        backend.shutdown(h)?;
+    }
+    *state.vm_ssh_port.write().unwrap() = None;
+    Ok(())
+}
+
+#[tauri::command]
+async fn vm_status(state: State<'_, Arc<AppState>>) -> Result<serde_json::Value, String> {
+    let mut vm = state.vm.lock().await;
+    if let Some(ref mut handle) = *vm {
+        let running = matches!(handle.child.try_wait(), Ok(None));
+        if !running {
+            *vm = None;
+            *state.vm_ssh_port.write().unwrap() = None;
+            return Ok(serde_json::json!({ "running": false }));
+        }
+        Ok(serde_json::json!({ "running": true, "ssh_port": handle.ssh_port }))
+    } else {
+        Ok(serde_json::json!({ "running": false }))
+    }
+}
+
+#[tauri::command]
+fn auth_check() -> serde_json::Value {
+    let needs_setup = !lagado_agent::auth::keychain_exists();
+    let locked_secs = lagado_agent::auth::lockout_check();
+    serde_json::json!({
+        "needs_setup": needs_setup,
+        "locked": locked_secs > 0,
+        "locked_until_secs": if locked_secs > 0 { locked_secs } else { 0 },
+        "failures": lagado_agent::auth::lockout_failures(),
+    })
+}
+
+#[tauri::command]
+async fn auth_signup(
+    password: String,
+    recovery_phrase: String,
+    state: State<'_, Arc<AppState>>,
+) -> Result<(), String> {
+    if password.len() < 8 {
+        return Err("Password must be at least 8 characters".to_string());
+    }
+    if recovery_phrase.len() < 12 {
+        return Err("Recovery phrase must be at least 12 characters".to_string());
+    }
+    let dek = lagado_agent::auth::keychain_create(&password, &recovery_phrase)?;
+    *state.session_dek.lock().await = Some(dek);
+    Ok(())
+}
+
+#[tauri::command]
+async fn auth_login(
+    password: String,
+    state: State<'_, Arc<AppState>>,
+) -> Result<(), String> {
+    let dek = lagado_agent::auth::keychain_unlock(&password)?;
+    *state.session_dek.lock().await = Some(dek);
+    Ok(())
+}
+
+#[tauri::command]
+async fn auth_recover(
+    recovery_phrase: String,
+    new_password: String,
+    state: State<'_, Arc<AppState>>,
+) -> Result<(), String> {
+    if new_password.len() < 8 {
+        return Err("Password must be at least 8 characters".to_string());
+    }
+    let dek = lagado_agent::auth::keychain_recover(&recovery_phrase, &new_password)?;
+    *state.session_dek.lock().await = Some(dek);
+    Ok(())
 }
 
 fn main() {
@@ -287,21 +418,28 @@ fn main() {
     let llama_child: Arc<Mutex<Option<std::process::Child>>> = Arc::new(Mutex::new(None));
     let llama_for_setup = llama_child.clone();
 
+    let vm_ssh_port: VmSshPort = std::sync::Arc::new(std::sync::RwLock::new(None));
+
     #[cfg(target_os = "linux")]
     let (perceptor_impl, actuator_impl) = lagado_agent::perception::linux_pair();
     #[cfg(target_os = "linux")]
-    let perceptor: Arc<dyn lagado_agent::perception::Perceptor + Send + Sync> =
+    let host_perceptor: Arc<dyn lagado_agent::perception::Perceptor + Send + Sync> =
         Arc::new(perceptor_impl);
     #[cfg(target_os = "linux")]
-    let actuator: Arc<dyn lagado_agent::perception::Actuator + Send + Sync> =
+    let host_actuator: Arc<dyn lagado_agent::perception::Actuator + Send + Sync> =
         Arc::new(actuator_impl);
 
     #[cfg(not(target_os = "linux"))]
-    let perceptor: Arc<dyn lagado_agent::perception::Perceptor + Send + Sync> =
+    let host_perceptor: Arc<dyn lagado_agent::perception::Perceptor + Send + Sync> =
         Arc::new(lagado_agent::perception::MockPerceptor);
     #[cfg(not(target_os = "linux"))]
-    let actuator: Arc<dyn lagado_agent::perception::Actuator + Send + Sync> =
+    let host_actuator: Arc<dyn lagado_agent::perception::Actuator + Send + Sync> =
         Arc::new(lagado_agent::perception::MockActuator);
+
+    let perceptor: Arc<dyn lagado_agent::perception::Perceptor + Send + Sync> =
+        Arc::new(DynamicPerceptor { vm_port: vm_ssh_port.clone(), host: host_perceptor });
+    let actuator: Arc<dyn lagado_agent::perception::Actuator + Send + Sync> =
+        Arc::new(DynamicActuator { vm_port: vm_ssh_port.clone(), host: host_actuator });
 
     let state = Arc::new(AppState {
         agent: Arc::new(Mutex::new(AgentState {
@@ -314,6 +452,10 @@ fn main() {
         perceptor,
         actuator,
         _llama_child: llama_child,
+        vm: Arc::new(Mutex::new(None)),
+        vm_ssh_port: vm_ssh_port.clone(),
+        vm_backend: QemuDesktopBackend::default(),
+        session_dek: Arc::new(Mutex::new(None)),
     });
 
     tauri::Builder::default()
@@ -325,7 +467,14 @@ fn main() {
             Ok(())
         })
         .manage(state)
-        .invoke_handler(tauri::generate_handler![send_goal, send_chat, send_command, send_approval, initialize_timeline, get_active_model, set_active_model, list_models, get_chronos_recent, terminal_spawn, terminal_run, terminal_get_cwd, vault_list_files, get_server_status, capture_frame])
+        .invoke_handler(tauri::generate_handler![
+            send_goal, send_chat, send_command, send_approval,
+            initialize_timeline, get_active_model, set_active_model, list_models,
+            get_chronos_recent, terminal_spawn, terminal_run, terminal_get_cwd,
+            vault_list_files, get_server_status, capture_frame,
+            vm_boot, vm_stop, vm_status,
+            auth_check, auth_signup, auth_login, auth_recover,
+        ])
         .run(tauri::generate_context!())
         .expect("Lagado failed to start");
 }
