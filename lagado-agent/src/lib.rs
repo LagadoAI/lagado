@@ -18,6 +18,7 @@ pub mod memory_tiers;
 pub mod operator;
 pub mod perception;
 pub mod recovery;
+pub mod retrieval;
 pub mod sleep_gate;
 pub mod types;
 pub mod vm;

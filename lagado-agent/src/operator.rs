@@ -35,3 +35,50 @@ impl StepEnforcer {
 
     pub fn step(&self) -> usize { self.current_step }
 }
+
+/// A tool the agent can invoke, with description for retrieval scoring.
+#[derive(Debug, Clone)]
+pub struct ToolDescriptor {
+    pub name:        String,
+    pub description: String,
+    pub risk_level:  RiskLevel,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum RiskLevel {
+    Read,        // safe, auto-allow
+    Write,       // requires tap-confirm
+    Destructive, // requires typed-confirm
+}
+
+/// The canonical tool set available to the agent.
+/// Phase 2: merge with MCP-loaded tools at runtime.
+pub fn core_tools() -> Vec<ToolDescriptor> {
+    vec![
+        ToolDescriptor {
+            name: "click".into(),
+            description: "Click a UI element by ref_id. Use for buttons, links, checkboxes, menu items.".into(),
+            risk_level: RiskLevel::Write,
+        },
+        ToolDescriptor {
+            name: "type".into(),
+            description: "Type text into an editable field by ref_id. Use for text inputs, search boxes, forms.".into(),
+            risk_level: RiskLevel::Write,
+        },
+        ToolDescriptor {
+            name: "key".into(),
+            description: "Press a keyboard key (Return, Escape, Tab, Ctrl+c, etc).".into(),
+            risk_level: RiskLevel::Write,
+        },
+        ToolDescriptor {
+            name: "wait".into(),
+            description: "Wait a number of milliseconds before the next action. Use when waiting for page load or animation.".into(),
+            risk_level: RiskLevel::Read,
+        },
+        ToolDescriptor {
+            name: "done".into(),
+            description: "Signal the goal is complete with a short reason.".into(),
+            risk_level: RiskLevel::Read,
+        },
+    ]
+}

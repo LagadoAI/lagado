@@ -19,6 +19,7 @@ mod kv_slots;
 mod grammar;
 mod liquid;
 mod memory_tiers;
+mod retrieval;
 mod sleep_gate;
 
 fn main() {

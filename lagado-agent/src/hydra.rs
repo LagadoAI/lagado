@@ -14,8 +14,8 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use crate::action_graph::ActionGraph;
 use crate::inference::InferenceAdapter;
-use crate::memory_tiers::MemoryTiers;
 use crate::perception::{Perceptor, Actuator};
+use crate::retrieval::Retriever;
 use crate::{agent, config, envelope, governor};
 
 /// Intent classification result
@@ -138,13 +138,11 @@ pub async fn run(
 ) {
     let hydra = Hydra::from_governor(adapter.clone());
 
-    // Assemble context from memory tiers
+    // Assemble context via retriever (RAG K=15)
     let context = {
-        let db_path = config::data_dir().join("memory.db");
-        match MemoryTiers::open(&db_path) {
-            Ok(tiers) => tiers.assemble_context(hydra.context_budget()),
-            Err(_) => String::new(),
-        }
+        let retriever = Retriever::new(&config::data_dir());
+        let entries = retriever.retrieve_context(&message, 15);
+        Retriever::format_context(&entries)
     };
 
     // Action graph shortcut: known high-confidence workflow → skip classification
