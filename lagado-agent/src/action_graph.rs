@@ -125,6 +125,12 @@ impl ActionGraph {
         )
         .map_err(|e| format!("Schema creation failed: {e}"))?;
 
+        // Migration: add verified_success if not present (ignore error if column exists)
+        let _ = conn.execute(
+            "ALTER TABLE edges ADD COLUMN verified_success INTEGER NOT NULL DEFAULT 0",
+            [],
+        );
+
         Ok(Self {
             conn:  Arc::new(Mutex::new(conn)),
             cache: Arc::new(Mutex::new(HashMap::new())),

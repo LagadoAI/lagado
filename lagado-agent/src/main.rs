@@ -20,6 +20,8 @@ mod grammar;
 mod liquid;
 mod memory_tiers;
 mod retrieval;
+mod security;
+mod skill_library;
 mod sleep_gate;
 
 fn main() {

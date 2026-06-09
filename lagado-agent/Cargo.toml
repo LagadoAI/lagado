@@ -18,3 +18,7 @@ ureq = { version = "2", features = ["json"] }
 uuid = { version = "1", features = ["v4"] }
 directories = "5"
 log = "0.4"
+aes-gcm = "0.10"
+argon2 = "0.5"
+rand = "0.8"
+hostname = "0.3"
