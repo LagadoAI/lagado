@@ -17,3 +17,4 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 ureq = { version = "2", features = ["json"] }
 uuid = { version = "1", features = ["v4"] }
 directories = "5"
+log = "0.4"

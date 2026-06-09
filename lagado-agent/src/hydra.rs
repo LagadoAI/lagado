@@ -12,7 +12,9 @@
 
 use std::sync::Arc;
 use tokio::sync::mpsc;
+use crate::action_graph::ActionGraph;
 use crate::inference::InferenceAdapter;
+use crate::memory_tiers::MemoryTiers;
 use crate::perception::{Perceptor, Actuator};
 use crate::{agent, config, envelope, governor};
 
@@ -125,8 +127,8 @@ impl Hydra {
 /// Main entry point: route user message based on intent classification
 pub async fn run(
     message: String,
-    context: String,       // assembled from memory tiers (empty for now)
-    is_paused: bool,       // from AgentState — if true, always CHAT
+    _context_hint: String,  // caller-supplied hint (unused — we assemble from tiers)
+    is_paused: bool,        // if true, always CHAT
     state: Arc<tokio::sync::Mutex<agent::AgentState>>,
     adapter: Arc<dyn InferenceAdapter>,
     perceptor: Arc<dyn Perceptor>,
@@ -135,6 +137,28 @@ pub async fn run(
     confirm_tx: mpsc::Sender<String>,
 ) {
     let hydra = Hydra::from_governor(adapter.clone());
+
+    // Assemble context from memory tiers
+    let context = {
+        let db_path = config::data_dir().join("memory.db");
+        match MemoryTiers::open(&db_path) {
+            Ok(tiers) => tiers.assemble_context(hydra.context_budget()),
+            Err(_) => String::new(),
+        }
+    };
+
+    // Action graph shortcut: known high-confidence workflow → skip classification
+    let graph_path = config::data_dir().join("action_graph.db");
+    let state_hash = format!("{:x}", message.len()); // Phase 2: real screen hash
+    if let Ok(graph) = ActionGraph::open(&graph_path.to_string_lossy()) {
+        if let Ok(Some(known_action)) = graph.get_best_action(&state_hash, 0.65) {
+            tracing::info!("action_graph shortcut: {known_action}");
+            // Shortcut fires: set goal and jump straight to agent loop
+            { let mut s = state.lock().await; s.goal = message.clone(); s.running = true; }
+            agent::agent_loop(state, adapter, perceptor, actuator, approval_rx, confirm_tx).await;
+            return;
+        }
+    }
 
     // Classify intent (respecting pause state)
     let intent = if is_paused {
@@ -145,7 +169,6 @@ pub async fn run(
 
     match intent {
         Intent::Chat => {
-            // Conversational response — no tool loop
             let response = hydra.chat_response(&message, &context).await;
             let _ = confirm_tx
                 .send(envelope::make(

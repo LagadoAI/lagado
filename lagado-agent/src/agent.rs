@@ -6,6 +6,7 @@ use crate::operator::StepEnforcer;
 use crate::memory::Memory;
 use crate::inference::InferenceAdapter;
 use crate::perception::{Perceptor, Actuator};
+use crate::recovery::FailureType;
 use crate::{chronos, config, envelope, gate};
 
 // ── State shared between WebSocket and agent ──────────────────────
@@ -233,6 +234,11 @@ pub async fn agent_loop(
             }
             Err(e) => {
                 tracing::warn!("Pipeline error: {:?}", e);
+
+                // Classify failure for recovery observability
+                let failure_type = FailureType::from(&e);
+                tracing::info!("Failure classified: {}", failure_type);
+
                 memory.push(Step {
                     index: enforcer.step(),
                     prompt: prompt.clone(),

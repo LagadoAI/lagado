@@ -27,3 +27,11 @@ pub enum PipelineError {
     MaxStepsExceeded,
     ModelError(String),
 }
+
+/// Router decision from hydra — recorded in chronos
+#[derive(Debug, Clone)]
+pub struct RouterDecision {
+    pub intent:    String,   // "chat" | "interactive" | "reasoning"
+    pub message:   String,
+    pub timestamp: i64,
+}

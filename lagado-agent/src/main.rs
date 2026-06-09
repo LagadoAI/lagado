@@ -14,6 +14,12 @@ mod config;
 mod perception;
 mod agent;
 mod bootstrap;
+mod recovery;
+mod kv_slots;
+mod grammar;
+mod liquid;
+mod memory_tiers;
+mod sleep_gate;
 
 fn main() {
     // CLI dev entry point — starts llama-server only.
