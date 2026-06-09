@@ -40,3 +40,15 @@ pub fn describe(call: &ToolCall) -> String {
         ToolCall::Task { description } => format!("task(description=\"{}\")", description),
     }
 }
+
+/// Like `describe`, but with typed text redacted — for logs and persisted history.
+pub fn describe_redacted(call: &ToolCall) -> String {
+    match call {
+        ToolCall::Type { selector, text } => format!(
+            "type(selector=\"{}\", text=\"<redacted {} chars>\")",
+            selector,
+            text.chars().count()
+        ),
+        other => describe(other),
+    }
+}

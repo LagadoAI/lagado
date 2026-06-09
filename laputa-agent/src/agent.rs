@@ -41,6 +41,7 @@ async fn request_and_await_approval(
     confirm_tx: &mpsc::Sender<String>,
 ) -> String {
     let desc = gate::describe(tool_call);
+    let desc_safe = gate::describe_redacted(tool_call);
     let tool_name = match tool_call {
         ToolCall::Click { .. } => "click",
         ToolCall::Type { .. } => "type",
@@ -48,7 +49,7 @@ async fn request_and_await_approval(
         _ => "unknown",
     };
     let id = uuid::Uuid::new_v4().to_string();
-    chronos::log(&format!("confirm_requested: {confirm_type}: {desc}"));
+    chronos::log(&format!("confirm_requested: {confirm_type}: {desc_safe}"));
     let _ = confirm_tx
         .send(envelope::make(
             "permission",
@@ -70,24 +71,24 @@ async fn request_and_await_approval(
     let approved = approval_rx.recv().await.unwrap_or(false);
     if approved {
         let out = execute_tool(tool_call, actuator).await;
-        chronos::log(&format!("action: {desc} -> {out}"));
+        chronos::log(&format!("action: {desc_safe} -> {out}"));
         let _ = confirm_tx
             .send(envelope::make(
                 "action_log",
                 envelope::ActionLogPayload {
-                    text: format!("{desc} -> {out}"),
+                    text: format!("{desc_safe} -> {out}"),
                 },
             ))
             .await;
         out
     } else {
-        chronos::log(&format!("denied: {desc}"));
+        chronos::log(&format!("denied: {desc_safe}"));
         let _ = confirm_tx
             .send(envelope::make(
                 "status",
                 envelope::StatusPayload {
                     state: "denied".to_string(),
-                    detail: desc.clone(),
+                    detail: desc_safe.clone(),
                 },
             ))
             .await;
@@ -160,7 +161,7 @@ pub(crate) async fn agent_loop(
                 // state mutex is NOT held from here through approval_rx.recv()
                 let output = match gate::evaluate_action(&tool_call) {
                     gate::Verdict::Allow => {
-                        let desc = gate::describe(&tool_call);
+                        let desc = gate::describe_redacted(&tool_call);
                         let out = execute_tool(&tool_call, actuator.as_ref()).await;
                         chronos::log(&format!("action: {desc} -> {out}"));
                         let _ = confirm_tx.send(envelope::make("action_log", envelope::ActionLogPayload {

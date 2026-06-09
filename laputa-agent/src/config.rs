@@ -8,6 +8,17 @@ use directories::ProjectDirs;
 
 const DEFAULT_MODEL_FILE: &str = "LFM2.5-8B-A1B-Q4_K_M.gguf";
 
+/// Reads an env override ONLY in debug builds. Release builds ignore env-based
+/// path/binary/prompt overrides to remove a code-loading / tamper surface.
+#[cfg(debug_assertions)]
+fn dev_override(key: &str) -> Option<String> {
+    std::env::var(key).ok()
+}
+#[cfg(not(debug_assertions))]
+fn dev_override(_key: &str) -> Option<String> {
+    None
+}
+
 const LLAMA_HOST: &str = "127.0.0.1";
 const LLAMA_PORT: u16 = 8080;
 const WS_HOST: &str = "127.0.0.1";
@@ -22,7 +33,7 @@ fn project_dirs() -> Option<ProjectDirs> {
 
 /// Base data directory (models, binaries, logs). Override: LAGADO_DATA_DIR.
 pub fn data_dir() -> PathBuf {
-    if let Ok(p) = std::env::var("LAGADO_DATA_DIR") {
+    if let Some(p) = dev_override("LAGADO_DATA_DIR") {
         return PathBuf::from(p);
     }
     project_dirs()
@@ -32,7 +43,7 @@ pub fn data_dir() -> PathBuf {
 
 /// GGUF model path. Override: LAGADO_MODEL_PATH.
 pub fn model_path() -> PathBuf {
-    if let Ok(p) = std::env::var("LAGADO_MODEL_PATH") {
+    if let Some(p) = dev_override("LAGADO_MODEL_PATH") {
         return PathBuf::from(p);
     }
     data_dir().join("models").join(DEFAULT_MODEL_FILE)
@@ -40,7 +51,7 @@ pub fn model_path() -> PathBuf {
 
 /// llama-server binary path. Override: LAGADO_LLAMA_SERVER.
 pub fn llama_server_bin() -> PathBuf {
-    if let Ok(p) = std::env::var("LAGADO_LLAMA_SERVER") {
+    if let Some(p) = dev_override("LAGADO_LLAMA_SERVER") {
         return PathBuf::from(p);
     }
     let name = if cfg!(windows) { "llama-server.exe" } else { "llama-server" };
@@ -49,7 +60,7 @@ pub fn llama_server_bin() -> PathBuf {
 
 /// Append-only audit log path. Override: LAGADO_CHRONOS_LOG.
 pub fn chronos_log() -> PathBuf {
-    if let Ok(p) = std::env::var("LAGADO_CHRONOS_LOG") {
+    if let Some(p) = dev_override("LAGADO_CHRONOS_LOG") {
         return PathBuf::from(p);
     }
     data_dir().join("chronos.log")
@@ -58,7 +69,7 @@ pub fn chronos_log() -> PathBuf {
 /// Agent system prompt. Resolves: LAGADO_SYSTEM_PROMPT (file path) ->
 /// `<data>/system_prompt.txt` -> the embedded default that ships with the binary.
 pub fn system_prompt() -> String {
-    if let Ok(p) = std::env::var("LAGADO_SYSTEM_PROMPT") {
+    if let Some(p) = dev_override("LAGADO_SYSTEM_PROMPT") {
         if let Ok(s) = std::fs::read_to_string(&p) {
             return s;
         }

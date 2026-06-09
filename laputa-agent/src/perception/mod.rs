@@ -37,7 +37,7 @@ impl Actuator for MockActuator {
         format!("Clicked {selector}")
     }
     fn type_text(&self, selector: &str, text: &str) -> String {
-        format!("Typed '{text}' in {selector}")
+        format!("Typed {} chars into {}", text.chars().count(), selector)
     }
     fn key(&self, key: &str) -> String {
         format!("Pressed {key}")
@@ -52,7 +52,7 @@ mod tests {
     fn mock_actuator_describes_actions() {
         let a = MockActuator;
         assert_eq!(a.click("ref_3"), "Clicked ref_3");
-        assert_eq!(a.type_text("ref_5", "hi"), "Typed 'hi' in ref_5");
+        assert_eq!(a.type_text("ref_5", "hi"), "Typed 2 chars into ref_5");
         assert_eq!(a.key("Return"), "Pressed Return");
     }
 
