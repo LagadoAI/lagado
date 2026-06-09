@@ -243,14 +243,29 @@ async fn get_server_status() -> serde_json::Value {
 }
 
 /// Capture one frame and return it as a base64-encoded PNG data URI.
-/// The frontend uses this as `<img src={result}>` — no asset protocol needed.
+/// Returns "unchanged" if the frame is identical to the last (whole-frame Blake3 gate).
+/// The frontend skips the src swap on "unchanged" — no GC churn for idle screens.
 #[tauri::command]
 fn capture_frame() -> Result<String, String> {
     #[cfg(target_os = "linux")]
     {
+        use std::sync::Mutex as StdMutex;
+        static LAST_HASH: StdMutex<Option<[u8; 32]>> = StdMutex::new(None);
+
         let mut cap = lagado_agent::perception::capture::ScreenCapture::new();
         cap.capture()?;
         let bytes = cap.read_frame().ok_or("no frame captured")?;
+
+        // Whole-frame hash — skip IPC if nothing changed
+        let hash: [u8; 32] = *blake3::hash(&bytes).as_bytes();
+        {
+            let mut last = LAST_HASH.lock().unwrap();
+            if *last == Some(hash) {
+                return Ok("unchanged".to_string());
+            }
+            *last = Some(hash);
+        }
+
         use base64::Engine;
         let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
         Ok(format!("data:image/png;base64,{b64}"))

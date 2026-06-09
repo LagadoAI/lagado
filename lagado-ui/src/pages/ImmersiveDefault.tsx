@@ -12,28 +12,37 @@ export default function ImmersiveDefault() {
   const [captureError, setCaptureError] = useState(false)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  // Capture loop — each tick grabs a frame as a base64 data URI and swaps the img src
+  // Self-clocked capture loop — exactly one frame in flight at a time.
+  // Next capture starts only after the current frame finishes loading (onLoad).
+  // This bounds memory to one frame regardless of how slow capture gets.
+  const captureNext = useRef<(() => void) | null>(null)
+
   useEffect(() => {
     let alive = true
 
-    const tick = async () => {
+    const doCapture = async () => {
       if (!alive) return
       try {
-        const dataUri = await invoke<string>('capture_frame')
+        const result = await invoke<string>('capture_frame')
         setCaptureError(false)
-        setFrameSrc(dataUri)
+        if (result === 'unchanged') {
+          // Screen didn't change — skip the src swap, trigger next capture immediately
+          doCapture()
+        } else {
+          setFrameSrc(result)
+          // Next capture triggered by onLoad on the <img> element
+        }
       } catch {
         setCaptureError(true)
+        // On error, retry after a pause
+        setTimeout(() => { if (alive) doCapture() }, 500)
       }
     }
 
-    tick()
-    intervalRef.current = setInterval(tick, 150) // ~6fps
+    captureNext.current = doCapture
+    doCapture()
 
-    return () => {
-      alive = false
-      if (intervalRef.current) clearInterval(intervalRef.current)
-    }
+    return () => { alive = false; captureNext.current = null }
   }, [])
 
   const actionEntries = messages.filter(m => m.role === 'assistant')
@@ -48,6 +57,7 @@ export default function ImmersiveDefault() {
           alt="Desktop"
           className="absolute inset-0 w-full h-full object-cover pointer-events-none"
           draggable={false}
+          onLoad={() => captureNext.current?.()}
         />
       ) : (
         // Fallback while waiting for first frame or on capture error
