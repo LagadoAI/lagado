@@ -8,6 +8,7 @@ pub mod envelope;
 pub mod forge;
 pub mod gate;
 pub mod governor;
+pub mod hydra;
 pub mod inference;
 pub mod memory;
 pub mod operator;

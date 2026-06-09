@@ -52,7 +52,8 @@ fn rescue(raw: &str) -> Option<ToolCall> {
     } else if low.contains("done") {
         Some(ToolCall::Done { reason: any_quoted(raw).unwrap_or_else(|| "done".to_string()) })
     } else {
-        None
+        // No tool call detected — emit as conversational response
+        Some(ToolCall::Chat { text: raw.to_string() })
     }
 }
 

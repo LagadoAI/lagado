@@ -34,32 +34,34 @@ function AppRoutes({ isLoggedIn, setIsLoggedIn }: { isLoggedIn: boolean; setIsLo
   }
 
   return (
-    <Routes>
-      <Route path="/setup/welcome" element={<FirstLaunchWelcome onNext={() => {}} />} />
-      <Route path="/setup/system" element={<FirstLaunchSystemDetected onNext={() => {}} />} />
-      <Route path="/setup/models" element={<FirstLaunchModelSelection onNext={() => {}} />} />
-      <Route path="/setup/permissions" element={<FirstLaunchPermissionsSetup onComplete={() => {}} />} />
-      <Route path="/chat" element={<ChatDefault />} />
-      <Route path="/immersive" element={<ImmersiveDefault />} />
-      <Route path="/immersive/typing" element={<ImmersiveTyping />} />
-      <Route path="/immersive/running" element={<ImmersiveAgentRunning />} />
-      <Route path="/immersive/paused" element={<ImmersiveAgentPaused />} />
-      <Route path="/immersive/sidebar" element={<ImmersiveWithSidebar />} />
-      <Route path="/code" element={<CodePage />} />
-      <Route path="/code/sandbox" element={<CodeWithSandboxOutput />} />
-      <Route path="/code/terminal" element={<CodeWithTerminal />} />
-      <Route path="/vault" element={<VaultDefault />} />
-      <Route path="/vault/preview" element={<VaultFilePreview />} />
-      <Route path="/vault/warning" element={<VaultStorageWarning />} />
-      <Route path="/terminal" element={<TerminalDefault />} />
-      <Route path="/terminal/multi" element={<TerminalMultipleTabs />} />
-      <Route path="/terminal/agent" element={<TerminalAgentRunning />} />
-      <Route path="/settings" element={<SettingsMain />} />
-      <Route path="/mcp" element={<MCPManager />} />
-      <Route path="/server" element={<ServerManagement />} />
-      <Route path="/vm" element={<VMManager />} />
-      <Route path="/" element={<ChatDefault />} />
-    </Routes>
+    <ChatProvider>
+      <Routes>
+        <Route path="/setup/welcome" element={<FirstLaunchWelcome onNext={() => {}} />} />
+        <Route path="/setup/system" element={<FirstLaunchSystemDetected onNext={() => {}} />} />
+        <Route path="/setup/models" element={<FirstLaunchModelSelection onNext={() => {}} />} />
+        <Route path="/setup/permissions" element={<FirstLaunchPermissionsSetup onComplete={() => {}} />} />
+        <Route path="/chat" element={<ChatDefault />} />
+        <Route path="/immersive" element={<ImmersiveDefault />} />
+        <Route path="/immersive/typing" element={<ImmersiveTyping />} />
+        <Route path="/immersive/running" element={<ImmersiveAgentRunning />} />
+        <Route path="/immersive/paused" element={<ImmersiveAgentPaused />} />
+        <Route path="/immersive/sidebar" element={<ImmersiveWithSidebar />} />
+        <Route path="/code" element={<CodePage />} />
+        <Route path="/code/sandbox" element={<CodeWithSandboxOutput />} />
+        <Route path="/code/terminal" element={<CodeWithTerminal />} />
+        <Route path="/vault" element={<VaultDefault />} />
+        <Route path="/vault/preview" element={<VaultFilePreview />} />
+        <Route path="/vault/warning" element={<VaultStorageWarning />} />
+        <Route path="/terminal" element={<TerminalDefault />} />
+        <Route path="/terminal/multi" element={<TerminalMultipleTabs />} />
+        <Route path="/terminal/agent" element={<TerminalAgentRunning />} />
+        <Route path="/settings" element={<SettingsMain />} />
+        <Route path="/mcp" element={<MCPManager />} />
+        <Route path="/server" element={<ServerManagement />} />
+        <Route path="/vm" element={<VMManager />} />
+        <Route path="/" element={<ChatDefault />} />
+      </Routes>
+    </ChatProvider>
   );
 }
 
@@ -68,9 +70,7 @@ export default function App() {
   return (
     <BrowserRouter>
       <TooltipProvider>
-        <ChatProvider>
-          <AppRoutes isLoggedIn={isLoggedIn} setIsLoggedIn={setIsLoggedIn} />
-        </ChatProvider>
+        <AppRoutes isLoggedIn={isLoggedIn} setIsLoggedIn={setIsLoggedIn} />
       </TooltipProvider>
     </BrowserRouter>
   );

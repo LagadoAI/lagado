@@ -4,6 +4,7 @@ mod bracket_parser;
 mod forge;
 mod gate;
 mod governor;
+mod hydra;
 mod operator;
 mod memory;
 mod chronos;

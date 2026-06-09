@@ -28,6 +28,7 @@ async fn execute_tool(call: &ToolCall, actuator: &dyn Actuator) -> String {
         }
         ToolCall::Task { description } => format!("Task completed: {}", description),
         ToolCall::Done { reason } => format!("Done: {}", reason),
+        ToolCall::Chat { text } => text.clone(),
     }
 }
 
@@ -46,6 +47,7 @@ async fn request_and_await_approval(
         ToolCall::Click { .. } => "click",
         ToolCall::Type { .. } => "type",
         ToolCall::Key { .. } => "key",
+        ToolCall::Chat { .. } => "chat",
         _ => "unknown",
     };
     let id = uuid::Uuid::new_v4().to_string();
@@ -158,6 +160,21 @@ pub async fn agent_loop(
             Ok(tool_call) => {
                 tracing::info!("Step {}: {:?}", enforcer.step(), tool_call);
 
+                // Conversational response — emit as chat message and end this goal
+                if let ToolCall::Chat { ref text } = tool_call {
+                    chronos::log(&format!("chat_response: {}", &text[..text.len().min(80)]));
+                    let _ = confirm_tx.send(envelope::make("action_log", envelope::ActionLogPayload {
+                        text: text.clone(),
+                    })).await;
+                    memory.push(Step {
+                        index: enforcer.step(),
+                        prompt: prompt.clone(),
+                        output: text.clone(),
+                        action: Some(tool_call.clone()),
+                    });
+                    break;
+                }
+
                 // state mutex is NOT held from here through approval_rx.recv()
                 let output = match gate::evaluate_action(&tool_call) {
                     gate::Verdict::Allow => {
@@ -192,19 +209,26 @@ pub async fn agent_loop(
                     output,
                     action: Some(tool_call.clone()),
                 });
-                if matches!(tool_call, ToolCall::Task { .. } | ToolCall::Done { .. }) {
-                    let reason = match &tool_call {
-                        ToolCall::Done { reason } => reason.clone(),
-                        ToolCall::Task { description } => description.clone(),
-                        _ => "completed".to_string(),
-                    };
-                    chronos::log(&format!("goal_done: {reason}"));
-                    let _ = confirm_tx.send(envelope::make("status", envelope::StatusPayload {
-                        state: "goal_done".to_string(),
-                        detail: reason,
-                    })).await;
-                    tracing::info!("Goal achieved.");
-                    break;
+                match &tool_call {
+                    ToolCall::Done { reason } => {
+                        chronos::log(&format!("goal_done: {reason}"));
+                        let _ = confirm_tx.send(envelope::make("status", envelope::StatusPayload {
+                            state: "goal_done".to_string(),
+                            detail: reason.clone(),
+                        })).await;
+                        tracing::info!("Goal achieved.");
+                        break;
+                    }
+                    ToolCall::Task { description } => {
+                        chronos::log(&format!("goal_done: {description}"));
+                        let _ = confirm_tx.send(envelope::make("status", envelope::StatusPayload {
+                            state: "goal_done".to_string(),
+                            detail: description.clone(),
+                        })).await;
+                        tracing::info!("Goal achieved.");
+                        break;
+                    }
+                    _ => {}
                 }
             }
             Err(e) => {

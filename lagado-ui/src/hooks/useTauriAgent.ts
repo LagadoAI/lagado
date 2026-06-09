@@ -19,6 +19,7 @@ export interface PermissionRequest {
 export interface AgentSocket {
   connState:    ConnState;
   sendGoal:     (goal: string) => void;
+  sendChat:     (message: string) => void;
   sendCommand:  (cmd: AgentCmd) => void;
   sendApproval: (id: string, approved: boolean) => void;
   sendRaw:      (msg: string) => void;
@@ -38,6 +39,7 @@ export function useTauriAgent(options: AgentSocketOptions = {}): AgentSocket {
   optsRef.current = options;
 
   useEffect(() => {
+    let cancelled = false;
     const unlisteners: UnlistenFn[] = [];
 
     Promise.all([
@@ -53,13 +55,26 @@ export function useTauriAgent(options: AgentSocketOptions = {}): AgentSocket {
           detail: event.payload.detail ?? '',
         });
       }),
-    ]).then((fns) => unlisteners.push(...fns));
+    ]).then((fns) => {
+      if (cancelled) {
+        fns.forEach((fn) => fn()); // cleanup already ran — unlisten immediately
+      } else {
+        unlisteners.push(...fns);
+      }
+    });
 
-    return () => { unlisteners.forEach((fn) => fn()); };
+    return () => {
+      cancelled = true;
+      unlisteners.forEach((fn) => fn());
+    };
   }, []);
 
   const sendGoal = useCallback((goal: string) => {
     invoke('send_goal', { goal }).catch(console.error);
+  }, []);
+
+  const sendChat = useCallback((message: string) => {
+    invoke('send_chat', { message }).catch(console.error);
   }, []);
 
   const sendCommand = useCallback((cmd: AgentCmd) => {
@@ -74,5 +89,5 @@ export function useTauriAgent(options: AgentSocketOptions = {}): AgentSocket {
   const sendRaw   = useCallback((_msg: string) => {}, []);
   const disconnect = useCallback(() => {}, []);
 
-  return { connState, sendGoal, sendCommand, sendApproval, sendRaw, disconnect };
+  return { connState, sendGoal, sendChat, sendCommand, sendApproval, sendRaw, disconnect };
 }

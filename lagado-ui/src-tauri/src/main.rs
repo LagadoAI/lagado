@@ -4,9 +4,10 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
 use tauri::{State, Emitter};
 use lagado_agent::{
-    agent::{AgentState, agent_loop},
+    agent::AgentState,
     bootstrap::ensure_llama_server,
     config,
+    hydra,
     inference::{InferenceAdapter, llama_cpp::LlamaCppAdapter},
     perception::{MockPerceptor, MockActuator, Perceptor, Actuator},
 };
@@ -39,25 +40,51 @@ async fn send_goal(
         }
     });
 
-    // Update agent state — drop guard before spawn
-    let agent_arc = state.agent.clone();
-    {
-        let mut s = agent_arc.lock().await;
+    // Check if paused and set up state — drop guard before await
+    let is_paused = {
+        let mut s = state.agent.lock().await;
         s.approval_tx = Some(approval_tx);
         s.pending_id = None;
-        s.goal = goal;
         s.running = true;
-    } // guard dropped here
+        false // paused state will be passed in from frontend in future; false for now
+    }; // guard dropped
 
-    let agent_clone = agent_arc.clone();
+    let agent_arc = state.agent.clone();
     let adapter = state.adapter.clone();
     let perceptor = state.perceptor.clone();
     let actuator = state.actuator.clone();
 
     tokio::spawn(async move {
-        agent_loop(agent_clone, adapter, perceptor, actuator, approval_rx, confirm_tx).await;
+        hydra::run(
+            goal,
+            String::new(),
+            is_paused,
+            agent_arc,
+            adapter,
+            perceptor,
+            actuator,
+            approval_rx,
+            confirm_tx,
+        )
+        .await;
     });
 
+    Ok(())
+}
+
+#[tauri::command]
+async fn send_chat(
+    message: String,
+    state: State<'_, Arc<AppState>>,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    let adapter = state.adapter.clone();
+    let app_h = app.clone();
+    tokio::spawn(async move {
+        let hydra = hydra::Hydra::from_governor(adapter);
+        let response = hydra.chat_response(&message, "").await;
+        let _ = app_h.emit("action_log", serde_json::json!({ "text": response }));
+    });
     Ok(())
 }
 
@@ -134,7 +161,7 @@ fn main() {
             Ok(())
         })
         .manage(state)
-        .invoke_handler(tauri::generate_handler![send_goal, send_command, send_approval])
+        .invoke_handler(tauri::generate_handler![send_goal, send_chat, send_command, send_approval])
         .run(tauri::generate_context!())
         .expect("Lagado failed to start");
 }

@@ -81,11 +81,15 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   })
 
   const sendMessage = useCallback(({ text }: { text: string }) => {
-    if (!text.trim() || isPaused) return
+    if (!text.trim()) return
     const userMsg: Message = { id: crypto.randomUUID(), role: 'user', content: text }
     setMessages(prev => [...prev, userMsg])
     setStatus('submitted')
-    socket.sendGoal(text)
+    if (isPaused) {
+      socket.sendChat(text)   // paused = safe chat mode, no agent
+    } else {
+      socket.sendGoal(text)   // agent mode = hydra classifies and routes
+    }
   }, [isPaused, socket])
 
   const approve = useCallback((id: string) => {

@@ -9,6 +9,7 @@ pub enum ToolCall {
     Wait    { ms: u64 },
     Task    { description: String },
     Done    { reason: String },
+    Chat    { text: String },
 }
 
 #[derive(Debug, Clone)]

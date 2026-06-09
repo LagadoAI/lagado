@@ -60,15 +60,15 @@ pub async fn ensure_llama_server() -> Option<Child> {
                 .unwrap_or(false);
 
                 if !ready {
-                    tracing::error!("llama-server did not become ready within 60s — exiting.");
-                    std::process::exit(1);
+                    tracing::error!("llama-server did not become ready within 60s — inference unavailable.");
+                    return None;
                 }
                 tracing::info!("llama-server ready.");
                 Some(child)
             }
             Err(e) => {
-                tracing::error!("Failed to spawn llama-server: {e}");
-                std::process::exit(1);
+                tracing::error!("Failed to spawn llama-server: {e} — inference unavailable.");
+                None
             }
         }
     }

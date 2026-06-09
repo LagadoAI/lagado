@@ -17,7 +17,7 @@ pub enum Verdict {
 
 pub fn classify(call: &ToolCall) -> RiskTier {
     match call {
-        ToolCall::Wait { .. } | ToolCall::Done { .. } | ToolCall::Task { .. } => RiskTier::Read,
+        ToolCall::Wait { .. } | ToolCall::Done { .. } | ToolCall::Task { .. } | ToolCall::Chat { .. } => RiskTier::Read,
         ToolCall::Click { .. } | ToolCall::Key { .. } | ToolCall::Type { .. } => RiskTier::Write,
     }
 }
@@ -38,6 +38,7 @@ pub fn describe(call: &ToolCall) -> String {
         ToolCall::Wait { ms } => format!("wait(ms={})", ms),
         ToolCall::Done { reason } => format!("done(reason=\"{}\")", reason),
         ToolCall::Task { description } => format!("task(description=\"{}\")", description),
+        ToolCall::Chat { text } => format!("chat(\"{}\")", text),
     }
 }
 
