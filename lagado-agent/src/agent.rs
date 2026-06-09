@@ -111,6 +111,7 @@ pub async fn agent_loop(
     actuator: Arc<dyn Actuator>,
     mut approval_rx: mpsc::Receiver<bool>,
     confirm_tx: mpsc::Sender<String>,
+    memory_tiers: Arc<tokio::sync::Mutex<crate::memory_tiers::MemoryTiers>>,
 ) {
     let mut enforcer = StepEnforcer::new();
     let mut memory = Memory::new(|steps| {
@@ -145,6 +146,13 @@ pub async fn agent_loop(
 
     let goal = state.lock().await.goal.clone();
     let system_prompt = config::system_prompt();
+
+    // Pull cross-session episodic context from MemoryTiers (lock → extract → drop)
+    let episodic_context = {
+        let tiers = memory_tiers.lock().await;
+        tiers.assemble_context(2048)
+    };
+
     chronos::log(&format!("goal_received: {goal}"));
     let _ = confirm_tx.send(envelope::make("status", envelope::StatusPayload {
         state: "goal_received".to_string(),
@@ -164,8 +172,13 @@ pub async fn agent_loop(
 
         let screen = perceptor.read_screen();
         let context = memory.context_string();
+        let episodic_section = if episodic_context.is_empty() {
+            String::new()
+        } else {
+            format!("Past sessions:\n{episodic_context}\n\n")
+        };
         let prompt = format!(
-            "{system_prompt}\n\n{context}\n\nScreen:\n{screen}\n\nGoal: {goal}\n\nWhat is your next action?"
+            "{system_prompt}\n\n{episodic_section}{context}\n\nScreen:\n{screen}\n\nGoal: {goal}\n\nWhat is your next action?"
         );
 
         let adapter_clone = adapter.clone();
@@ -265,6 +278,11 @@ pub async fn agent_loop(
                             state: "goal_done".to_string(),
                             detail: reason.clone(),
                         })).await;
+                        // Persist episode to cold tier for cross-session recall
+                        {
+                            let mut tiers = memory_tiers.lock().await;
+                            let _ = tiers.push_episode(format!("Goal '{goal}': {reason}"));
+                        }
                         tracing::info!("Goal achieved.");
                         break;
                     }
@@ -274,6 +292,11 @@ pub async fn agent_loop(
                             state: "goal_done".to_string(),
                             detail: description.clone(),
                         })).await;
+                        // Persist episode to cold tier for cross-session recall
+                        {
+                            let mut tiers = memory_tiers.lock().await;
+                            let _ = tiers.push_episode(format!("Task '{goal}': {description}"));
+                        }
                         tracing::info!("Goal achieved.");
                         break;
                     }
@@ -317,6 +340,13 @@ pub async fn agent_loop(
                     }
                     let detail = format!("{:?}", e);
                     chronos::log(&format!("goal_aborted: {detail}"));
+                    // Persist abort to cold tier so future sessions avoid repeating the same failure
+                    {
+                        let mut tiers = memory_tiers.lock().await;
+                        let _ = tiers.push_episode(format!(
+                            "Aborted '{goal}' at step {}: {detail}", enforcer.step()
+                        ));
+                    }
                     let _ = confirm_tx.send(envelope::make("status", envelope::StatusPayload {
                         state: "goal_aborted".to_string(),
                         detail,

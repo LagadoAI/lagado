@@ -161,6 +161,28 @@ impl MemoryTiers {
         Ok(())
     }
 
+    /// Push a cross-session episode into COLD tier at full temperature.
+    /// Use for goal completions, aborts, and significant events that should
+    /// survive session restarts. Encrypted via active_key().
+    pub fn push_episode(&mut self, text: String) -> Result<(), String> {
+        let now = now_unix();
+        let id = Uuid::new_v4().to_string();
+
+        let passphrase = crate::auth::active_key();
+        let encrypted = crate::security::crypto::encrypt(text.as_bytes(), &passphrase)
+            .unwrap_or_else(|_| text.as_bytes().to_vec());
+        let stored_text = hex::encode(&encrypted);
+
+        self.db
+            .execute(
+                "INSERT INTO memory_entries (id, text, tier, temperature, created_at, accessed_at, access_count)
+                 VALUES (?1, ?2, 'cold', 1.0, ?3, ?4, 0)",
+                rusqlite::params![&id, &stored_text, now, now],
+            )
+            .map_err(|e| format!("Failed to insert episode: {}", e))?;
+        Ok(())
+    }
+
     /// Reinforce an entry by ID (increase temperature, update access metadata).
     pub fn reinforce(&mut self, id: &str) -> Result<(), String> {
         // Try hot tier first
@@ -213,13 +235,13 @@ impl MemoryTiers {
             )
             .map_err(|e| format!("Failed to decay SQLite entries: {}", e))?;
 
-        // Delete entries below threshold
+        // Delete only hot/warm entries below threshold — cold is the vault and must not decay out
         self.db
             .execute(
-                "DELETE FROM memory_entries WHERE temperature < 0.05",
+                "DELETE FROM memory_entries WHERE temperature < 0.05 AND tier != 'cold'",
                 [],
             )
-            .map_err(|e| format!("Failed to delete cold entries: {}", e))?;
+            .map_err(|e| format!("Failed to delete warm entries: {}", e))?;
 
         Ok(())
     }
@@ -307,6 +329,49 @@ impl MemoryTiers {
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn test_episode_persists_across_reopen() {
+        let db_file = "/tmp/test_episode_persist.db";
+        let _ = fs::remove_file(db_file);
+
+        // Session 1: push episode, close
+        {
+            let mut mem = MemoryTiers::open(db_file.as_ref()).expect("open failed");
+            mem.push_episode("Goal 'open browser': opened Firefox (5 steps)".to_string())
+                .expect("push_episode failed");
+        }
+
+        // Session 2: reopen from same path, assert episode survives
+        {
+            let mem = MemoryTiers::open(db_file.as_ref()).expect("reopen failed");
+            let ctx = mem.assemble_context(4096);
+            assert!(ctx.contains("open browser") || ctx.contains("opened Firefox"),
+                "episode not found in context after reopen: {ctx:?}");
+        }
+
+        let _ = fs::remove_file(db_file);
+    }
+
+    #[test]
+    fn test_decay_all_preserves_cold() {
+        let db_file = "/tmp/test_decay_cold.db";
+        let _ = fs::remove_file(db_file);
+
+        let mut mem = MemoryTiers::open(db_file.as_ref()).expect("open failed");
+        mem.push_episode("important vault entry".to_string()).expect("push failed");
+
+        // Decay 50 cycles — should NOT delete cold entry
+        for _ in 0..50 {
+            mem.decay_all(0.05).expect("decay failed");
+        }
+
+        let ctx = mem.assemble_context(4096);
+        assert!(ctx.contains("important vault entry"),
+            "cold entry was wrongly deleted by decay: {ctx:?}");
+
+        let _ = fs::remove_file(db_file);
+    }
 
     #[test]
     fn test_memory_tiers_basic() {

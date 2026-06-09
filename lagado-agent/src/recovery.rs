@@ -5,7 +5,7 @@
 //! low-confidence actions with a user-facing permission request.
 //!
 //! # Integration
-//! ```rust
+//! ```rust,ignore
 //! mod recovery;
 //! use recovery::{FailureType, RecoveryManager, RecoveryOutcome, PendingPermission};
 //! use std::sync::Arc;

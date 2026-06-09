@@ -9,7 +9,9 @@ use lagado_agent::{
     config,
     hydra,
     inference::{InferenceAdapter, llama_cpp::LlamaCppAdapter},
+    memory_tiers::MemoryTiers,
     perception::{Perceptor, Actuator, PerceptionCache},
+    sleep_gate::SleepGate,
     vm::{QemuDesktopBackend, VmHandle, VmBackend, VmSshPort, DynamicActuator, DynamicPerceptor},
 };
 
@@ -24,6 +26,7 @@ struct AppState {
     vm_backend: QemuDesktopBackend,
     session_dek: Arc<Mutex<Option<Vec<u8>>>>,
     ssh_cache: Arc<std::sync::Mutex<PerceptionCache>>,
+    memory_tiers: Arc<Mutex<MemoryTiers>>,
 }
 
 #[tauri::command]
@@ -57,6 +60,7 @@ async fn send_goal(
     let adapter = state.adapter.clone();
     let perceptor = state.perceptor.clone();
     let actuator = state.actuator.clone();
+    let memory_tiers = state.memory_tiers.clone();
 
     tokio::spawn(async move {
         hydra::run(
@@ -69,6 +73,7 @@ async fn send_goal(
             actuator,
             approval_rx,
             confirm_tx,
+            memory_tiers,
         )
         .await;
     });
@@ -434,6 +439,15 @@ fn main() {
             Err(e) => { eprintln!("inference adapter init failed: {e}"); std::process::exit(1); }
         };
 
+    let memory_db_path = config::data_dir().join("memory.db");
+    let memory_tiers: Arc<Mutex<MemoryTiers>> = Arc::new(Mutex::new(
+        MemoryTiers::open(&memory_db_path).unwrap_or_else(|e| {
+            eprintln!("memory_tiers init failed: {e}");
+            std::process::exit(1);
+        })
+    ));
+    let memory_for_setup = memory_tiers.clone();
+
     let llama_child: Arc<Mutex<Option<std::process::Child>>> = Arc::new(Mutex::new(None));
     let llama_for_setup = llama_child.clone();
 
@@ -478,6 +492,7 @@ fn main() {
         vm_backend: QemuDesktopBackend::default(),
         session_dek: Arc::new(Mutex::new(None)),
         ssh_cache,
+        memory_tiers,
     });
 
     tauri::Builder::default()
@@ -485,6 +500,13 @@ fn main() {
             tauri::async_runtime::spawn(async move {
                 let child = ensure_llama_server().await;
                 *llama_for_setup.lock().await = child;
+            });
+            // Start background memory consolidation loop (5-min decay cycles)
+            tauri::async_runtime::spawn(async move {
+                let gate = SleepGate::new(memory_for_setup);
+                let _handle = gate.start();
+                // Hold gate alive — task never exits, so gate Arc stays live
+                std::future::pending::<()>().await;
             });
             Ok(())
         })

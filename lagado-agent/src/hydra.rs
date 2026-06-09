@@ -136,6 +136,7 @@ pub async fn run(
     actuator: Arc<dyn Actuator>,
     approval_rx: mpsc::Receiver<bool>,
     confirm_tx: mpsc::Sender<String>,
+    memory_tiers: Arc<tokio::sync::Mutex<crate::memory_tiers::MemoryTiers>>,
 ) {
     let hydra = Hydra::from_governor(adapter.clone());
 
@@ -155,7 +156,7 @@ pub async fn run(
             tracing::info!("action_graph shortcut: {known_action}");
             // Shortcut fires: set goal and jump straight to agent loop
             { let mut s = state.lock().await; s.goal = message.clone(); s.running = true; }
-            agent::agent_loop(state, adapter, perceptor, actuator, approval_rx, confirm_tx).await;
+            agent::agent_loop(state, adapter, perceptor, actuator, approval_rx, confirm_tx, memory_tiers).await;
             return;
         }
     }
@@ -199,7 +200,7 @@ pub async fn run(
             } // guard dropped
 
             // Run the agent loop
-            agent::agent_loop(state, adapter, perceptor, actuator, approval_rx, confirm_tx).await;
+            agent::agent_loop(state, adapter, perceptor, actuator, approval_rx, confirm_tx, memory_tiers).await;
         }
     }
 }

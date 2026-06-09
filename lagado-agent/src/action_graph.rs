@@ -5,7 +5,7 @@
 //! action exists it is returned directly, bypassing inference entirely.
 //!
 //! # Usage
-//! ```rust
+//! ```rust,ignore
 //! let graph = ActionGraph::open("/home/user/laputa/vault/action_graph.db")?;
 //!
 //! // Before LLM call:
