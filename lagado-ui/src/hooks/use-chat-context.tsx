@@ -68,6 +68,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
     onStatus: useCallback((s: { state: string; detail: string }) => {
       if (!isMountedRef.current) return
+      // Only show meaningful status updates, not goal_received noise
+      if (s.state === 'goal_received') return; // suppress — hydra already handles routing
       const msg: Message = {
         id: crypto.randomUUID(),
         role: 'assistant',

@@ -8,6 +8,7 @@ import FirstLaunchSystemDetected from './pages/FirstLaunchSystemDetected';
 import FirstLaunchModelSelection from './pages/FirstLaunchModelSelection';
 import FirstLaunchPermissionsSetup from './pages/FirstLaunchPermissionsSetup';
 import ChatDefault from './pages/ChatDefault';
+import DesignSystem from './pages/DesignSystem';
 import ImmersiveDefault from './pages/ImmersiveDefault';
 import ImmersiveTyping from './pages/ImmersiveTyping';
 import ImmersiveAgentRunning from './pages/ImmersiveAgentRunning';
@@ -51,6 +52,7 @@ function AppRoutes({ isLoggedIn, setIsLoggedIn }: { isLoggedIn: boolean; setIsLo
         <Route path="/setup/models" element={<FirstLaunchModelSelection onNext={() => navigate('/setup/permissions')} />} />
         <Route path="/setup/permissions" element={<FirstLaunchPermissionsSetup onComplete={() => navigate('/chat')} />} />
         <Route path="/chat" element={<ChatDefault />} />
+        <Route path="/design" element={<DesignSystem />} />
         <Route path="/immersive" element={<ImmersiveDefault />} />
         <Route path="/immersive/typing" element={<ImmersiveTyping />} />
         <Route path="/immersive/running" element={<ImmersiveAgentRunning />} />

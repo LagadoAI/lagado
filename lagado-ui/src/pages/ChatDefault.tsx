@@ -55,17 +55,17 @@ useEffect(() => {
     : "Disconnected";
 
   const connDot =
-    connState === "connected" ? "bg-lagado-green"
-    : connState === "connecting" ? "bg-lagado-yellow"
-    : "bg-lagado-red";
+    connState === "connected"   ? "bg-lagado-green shadow-[0_0_8px_rgba(34,197,94,0.5)]"
+  : connState === "connecting"  ? "bg-lagado-yellow animate-pulse"
+  : "bg-lagado-red";
 
   return (
     <div className="h-screen bg-lagado-bg flex overflow-hidden">
       {/* SIDEBAR */}
       {showSidebar && (
-        <div className="w-64 bg-lagado-surface flex flex-col">
+        <div className="w-64 bg-lagado-surface/40 backdrop-blur-md border-r border-lagado-border/50 flex flex-col">
           <div className="p-3">
-            <button className="w-full px-3 py-2 bg-lagado-red text-white rounded-md text-body-sm font-semibold hover:bg-opacity-90 transition-colors">
+            <button className="w-full px-3 py-2 bg-gradient-to-r from-lagado-blue to-lagado-purple text-white rounded-md text-body-sm font-semibold hover:opacity-90 hover:shadow-[0_0_15px_rgba(139,92,246,0.3)] transition-all">
               + New conversation
             </button>
           </div>
@@ -144,19 +144,19 @@ useEffect(() => {
       {/* MAIN CHAT */}
       <div className="flex-1 flex flex-col">
         {/* Top bar */}
-        <div className="border-b border-lagado-border bg-lagado-surface px-4 py-3 flex items-center justify-between">
+        <div className="border-b border-lagado-border/50 bg-lagado-surface/60 backdrop-blur-md px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <button onClick={() => setShowSidebar(!showSidebar)} className="text-lagado-text hover:text-lagado-text-bright text-xl">
               ≡
             </button>
-            <h1 className="text-h3 text-lagado-text-bright font-semibold">Chat</h1>
+            <h1 className="text-h3 font-semibold bg-gradient-to-r from-lagado-blue to-lagado-purple bg-clip-text text-transparent">Chat</h1>
           </div>
 
           <div className="flex items-center gap-3">
             {isLoading && (
               <button
                 onClick={() => setIsPaused(!isPaused)}
-                className="px-3 py-1 rounded-md bg-lagado-surface-2 border border-lagado-border hover:border-lagado-blue text-body-sm text-lagado-text transition-colors"
+                className="px-3 py-1 rounded-md bg-lagado-surface-2 border border-lagado-border hover:border-lagado-blue hover:shadow-[0_0_10px_rgba(59,130,246,0.2)] text-body-sm text-lagado-text transition-all"
               >
                 {isPaused ? "Resume" : "Pause"}
               </button>
@@ -193,12 +193,17 @@ useEffect(() => {
               <div key={msg.id} className="group">
                 {msg.role === "assistant" ? (
                   <div className="flex gap-3">
-                    <div className="w-8 h-8 rounded-md bg-lagado-surface-2 border border-lagado-border flex-shrink-0" />
-                    <div className="flex-1">
-                      <p className="text-body text-lagado-text whitespace-pre-wrap leading-relaxed">
-                        {msg.content}
-                      </p>
-                      <div className="flex items-center gap-3 mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-lagado-blue to-lagado-purple flex-shrink-0 flex items-center justify-center shadow-[0_0_12px_rgba(139,92,246,0.3)]">
+                      <span className="text-white text-caption font-bold">L</span>
+                    </div>
+                    <div className="flex-1 max-w-2xl">
+                      <div className="relative bg-lagado-surface/60 backdrop-blur-md border border-lagado-border/60 rounded-2xl rounded-tl-sm p-4 shadow-lg">
+                        <div className="absolute left-0 top-4 bottom-4 w-0.5 rounded-full bg-gradient-to-b from-lagado-blue to-lagado-purple" />
+                        <p className="pl-4 text-body text-lagado-text whitespace-pre-wrap leading-relaxed">
+                          {msg.content}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-3 mt-2 pl-4 opacity-0 group-hover:opacity-100 transition-opacity">
                         <button onClick={() => copyMessage(msg.content)} className="text-caption text-lagado-text-dim hover:text-lagado-text">
                           Copy
                         </button>
@@ -214,8 +219,8 @@ useEffect(() => {
                 ) : (
                   <div className="flex justify-end">
                     <div className="max-w-2xl">
-                      <div className="bg-gradient-to-r from-lagado-blue to-lagado-purple text-white p-3 rounded-2xl rounded-tr-sm">
-                        <p className="text-body whitespace-pre-wrap">{msg.content}</p>
+                      <div className="bg-gradient-to-br from-lagado-blue to-lagado-purple text-white p-4 rounded-2xl rounded-tr-sm shadow-lg shadow-lagado-blue/20">
+                        <p className="text-body whitespace-pre-wrap leading-relaxed">{msg.content}</p>
                       </div>
                     </div>
                   </div>
@@ -224,8 +229,10 @@ useEffect(() => {
             ))}
             {isLoading && (
               <div className="flex gap-3">
-                <div className="w-8 h-8 rounded-md bg-lagado-surface-2 border border-lagado-border flex-shrink-0" />
-                <TypingAnimation />
+                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-lagado-blue to-lagado-purple flex-shrink-0 shadow-[0_0_12px_rgba(139,92,246,0.3)]" />
+                <div className="bg-lagado-surface/60 backdrop-blur-md border border-lagado-border/60 rounded-2xl rounded-tl-sm px-4 py-3">
+                  <TypingAnimation />
+                </div>
               </div>
             )}
             {pendingPermission && (
@@ -243,7 +250,7 @@ useEffect(() => {
         {/* Input */}
         <div className="border-t border-lagado-border bg-lagado-surface p-4">
           <div className="max-w-3xl mx-auto">
-            <div className="bg-lagado-surface-2 border border-lagado-border rounded-2xl p-3">
+            <div className="bg-lagado-surface/60 backdrop-blur-md border border-lagado-border/60 rounded-2xl p-3 focus-within:border-lagado-blue/60 focus-within:shadow-[0_0_20px_rgba(59,130,246,0.12)] transition-all duration-200">
               <textarea
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
@@ -260,7 +267,7 @@ useEffect(() => {
                   <div className="relative">
                     <button
                       onClick={() => setShowPlusMenu(!showPlusMenu)}
-                      className="w-7 h-7 rounded-full bg-lagado-surface border border-lagado-border hover:border-lagado-red text-lagado-text hover:text-lagado-red flex items-center justify-center transition-colors"
+                      className="w-7 h-7 rounded-full bg-lagado-surface border border-lagado-border hover:border-lagado-blue hover:text-lagado-blue flex items-center justify-center transition-colors"
                     >
                       +
                     </button>
@@ -313,9 +320,9 @@ useEffect(() => {
                 <button
                   onClick={handleSend}
                   disabled={!input.trim() || isLoading}
-                  className={`px-4 py-1.5 rounded-md text-body-sm font-semibold transition-colors ${
+                  className={`px-4 py-1.5 rounded-md text-body-sm font-semibold transition-all ${
                     input.trim() && !isLoading
-                      ? "bg-lagado-blue text-white hover:bg-opacity-90"
+                      ? "bg-gradient-to-r from-lagado-blue to-lagado-purple text-white hover:opacity-90 hover:shadow-[0_0_12px_rgba(139,92,246,0.3)]"
                       : "bg-lagado-surface border border-lagado-border text-lagado-text-dim cursor-not-allowed"
                   }`}
                 >
