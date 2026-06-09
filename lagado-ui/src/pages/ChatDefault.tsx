@@ -156,7 +156,7 @@ useEffect(() => {
             {isLoading && (
               <button
                 onClick={() => setIsPaused(!isPaused)}
-                className="px-3 py-1 rounded-md bg-lagado-surface-2 border border-lagado-border hover:border-lagado-red text-body-sm text-lagado-text transition-colors"
+                className="px-3 py-1 rounded-md bg-lagado-surface-2 border border-lagado-border hover:border-lagado-blue text-body-sm text-lagado-text transition-colors"
               >
                 {isPaused ? "Resume" : "Pause"}
               </button>
@@ -214,7 +214,7 @@ useEffect(() => {
                 ) : (
                   <div className="flex justify-end">
                     <div className="max-w-2xl">
-                      <div className="bg-lagado-red text-white p-3 rounded-2xl rounded-tr-sm">
+                      <div className="bg-gradient-to-r from-lagado-blue to-lagado-purple text-white p-3 rounded-2xl rounded-tr-sm">
                         <p className="text-body whitespace-pre-wrap">{msg.content}</p>
                       </div>
                     </div>
@@ -315,7 +315,7 @@ useEffect(() => {
                   disabled={!input.trim() || isLoading}
                   className={`px-4 py-1.5 rounded-md text-body-sm font-semibold transition-colors ${
                     input.trim() && !isLoading
-                      ? "bg-lagado-red text-white hover:bg-opacity-90"
+                      ? "bg-lagado-blue text-white hover:bg-opacity-90"
                       : "bg-lagado-surface border border-lagado-border text-lagado-text-dim cursor-not-allowed"
                   }`}
                 >

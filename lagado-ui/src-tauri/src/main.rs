@@ -160,6 +160,88 @@ fn get_chronos_recent(n: usize) -> Vec<serde_json::Value> {
     }
 }
 
+#[tauri::command]
+async fn terminal_spawn(session_id: String, shell: String) -> Result<(), String> {
+    let shell_path = if shell.is_empty() {
+        std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string())
+    } else { shell };
+    if std::path::Path::new(&shell_path).exists() {
+        tracing::info!("Terminal session {session_id} spawned with {shell_path}");
+        Ok(())
+    } else {
+        Err(format!("Shell not found: {shell_path}"))
+    }
+}
+
+#[tauri::command]
+async fn terminal_run(command: String) -> Result<String, String> {
+    let output = std::process::Command::new("bash")
+        .arg("-c")
+        .arg(&command)
+        .current_dir(std::path::PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| "/".to_string())))
+        .output()
+        .map_err(|e| format!("failed to run command: {e}"))?;
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    Ok(if stderr.is_empty() { stdout } else { format!("{stdout}{stderr}") })
+}
+
+#[tauri::command]
+fn terminal_get_cwd() -> String {
+    std::env::current_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|_| "~".to_string())
+}
+
+#[tauri::command]
+fn vault_list_files(subfolder: String) -> Vec<serde_json::Value> {
+    let base = std::path::PathBuf::from(
+        std::env::var("LAGADO_DATA_DIR")
+            .unwrap_or_else(|_| format!("{}/.laputa-secure", std::env::var("HOME").unwrap_or_default()))
+    );
+    let dir = if subfolder.is_empty() { base.clone() } else { base.join(&subfolder) };
+
+    std::fs::read_dir(&dir)
+        .ok()
+        .into_iter()
+        .flatten()
+        .filter_map(|e| e.ok())
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().to_string();
+            let meta = e.metadata().ok()?;
+            let size = if meta.is_file() {
+                let bytes = meta.len();
+                if bytes < 1024 { format!("{bytes} B") }
+                else if bytes < 1_048_576 { format!("{:.1} KB", bytes as f64 / 1024.0) }
+                else { format!("{:.1} MB", bytes as f64 / 1_048_576.0) }
+            } else { "—".to_string() };
+            Some(serde_json::json!({
+                "name": name,
+                "is_dir": meta.is_dir(),
+                "size": size,
+            }))
+        })
+        .collect()
+}
+
+#[tauri::command]
+async fn get_server_status() -> serde_json::Value {
+    // Use reqwest (already a dep via lagado-agent) for the health check
+    let healthy = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        async { reqwest::get("http://127.0.0.1:8080/health").await.is_ok() }
+    ).await.unwrap_or(false);
+
+    let model = lagado_agent::config::active_model();
+    serde_json::json!({
+        "running": healthy,
+        "model": model,
+        "host": "127.0.0.1",
+        "port": 8080,
+        "endpoint": "http://127.0.0.1:8080",
+    })
+}
+
 fn main() {
     tracing_subscriber::fmt::init();
 
@@ -211,7 +293,7 @@ fn main() {
             Ok(())
         })
         .manage(state)
-        .invoke_handler(tauri::generate_handler![send_goal, send_chat, send_command, send_approval, initialize_timeline, get_active_model, set_active_model, list_models, get_chronos_recent])
+        .invoke_handler(tauri::generate_handler![send_goal, send_chat, send_command, send_approval, initialize_timeline, get_active_model, set_active_model, list_models, get_chronos_recent, terminal_spawn, terminal_run, terminal_get_cwd, vault_list_files, get_server_status])
         .run(tauri::generate_context!())
         .expect("Lagado failed to start");
 }

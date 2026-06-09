@@ -97,7 +97,7 @@ export default function FirstLaunchSystemDetected({ onNext }: FirstLaunchSystemD
               </p>
               <p className="text-body-sm text-lagado-text">
                 Your system can run a balanced model. We'll suggest{" "}
-                <span className="font-mono">Qwen3-2.5B</span> on the next step.
+                <span className="font-mono">LFM2.5-8B</span> on the next step.
               </p>
             </div>
           </div>

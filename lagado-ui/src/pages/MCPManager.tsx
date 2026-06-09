@@ -16,6 +16,16 @@ export default function MCPManager() {
         </button>
       </div>
 
+      {/* Phase 2 coming soon banner */}
+      <div className="bg-lagado-blue bg-opacity-10 border-b border-lagado-blue border-opacity-30 px-4 py-3">
+        <div className="flex items-center gap-2 max-w-3xl">
+          <span className="text-lagado-blue text-sm">◆</span>
+          <span className="text-body-sm text-lagado-text">
+            This feature is coming in Phase 2. The interface is a preview.
+          </span>
+        </div>
+      </div>
+
       <div className="flex-1 p-6 max-w-5xl mx-auto w-full">
         <div className="flex justify-between items-center mb-6">
           <div>

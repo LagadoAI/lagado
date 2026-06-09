@@ -12,23 +12,38 @@ module.exports = {
       },
       colors: {
         lagado: {
-          bg: "#0f1117",
-          surface: "#1a1c23",
-          "surface-2": "#21242e",
-          border: "#30363d",
-          "border-light": "#3d4450",
-          text: "#c8ccd4",
-          "text-bright": "#ffffff",
-          "text-dim": "#6b7280",
-          red: "#e94560",
-          "red-dim": "rgba(233, 69, 96, 0.15)",
-          purple: "#6a5acd",
-          "purple-mid": "rgba(106, 90, 205, 0.25)",
-          green: "#22c55e",
-          yellow: "#f59e0b",
-          "glass-trans": "rgba(31, 41, 55, 0.2)",
-          "glass-opaque": "#21242e",
-          "modal-overlay": "rgba(15, 17, 23, 0.8)",
+          // Backgrounds — deep navy with slight blue tint (Liquid AI inspired)
+          bg:           "#080c14",
+          surface:      "#0d1220",
+          "surface-2":  "#131928",
+          border:       "#1e2d47",
+          "border-light":"#263852",
+
+          // Text
+          text:         "#c4cfe8",
+          "text-bright":"#e8eeff",
+          "text-dim":   "#4d6080",
+
+          // Primary accent — electric blue (interactive elements, focus rings, CTA)
+          blue:         "#3b82f6",
+          "blue-dim":   "rgba(59, 130, 246, 0.12)",
+          "blue-glow":  "rgba(59, 130, 246, 0.25)",
+
+          // Secondary accent — purple (hover states, secondary actions, Liquid brand)
+          purple:       "#8b5cf6",
+          "purple-dim": "rgba(139, 92, 246, 0.12)",
+          "purple-glow":"rgba(139, 92, 246, 0.25)",
+
+          // Status — keep semantic meaning
+          red:          "#ef4444",   // destructive / deny / error only
+          "red-dim":    "rgba(239, 68, 68, 0.12)",
+          green:        "#22c55e",   // connected / approved / success only
+          yellow:       "#f59e0b",   // warning / connecting
+
+          // Utility
+          "glass-trans":   "rgba(13, 18, 32, 0.6)",
+          "glass-opaque":  "#131928",
+          "modal-overlay": "rgba(8, 12, 20, 0.85)",
         },
       },
       fontFamily: {

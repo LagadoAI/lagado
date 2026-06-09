@@ -46,6 +46,16 @@ if __name__ == "__main__":
         </button>
       </div>
 
+      {/* Phase 2 coming soon banner */}
+      <div className="bg-lagado-blue bg-opacity-10 border-b border-lagado-blue border-opacity-30 px-4 py-3">
+        <div className="flex items-center gap-2 max-w-3xl">
+          <span className="text-lagado-blue text-sm">◆</span>
+          <span className="text-body-sm text-lagado-text">
+            This feature is coming in Phase 2. The interface is a preview.
+          </span>
+        </div>
+      </div>
+
       <div className="flex-1 flex overflow-hidden">
         {/* File browser */}
         <div className="w-64 border-r border-lagado-border bg-lagado-surface p-4 overflow-y-auto">

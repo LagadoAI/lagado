@@ -18,6 +18,16 @@ export default function VMManager() {
         </button>
       </div>
 
+      {/* Phase 2 coming soon banner */}
+      <div className="bg-lagado-blue bg-opacity-10 border-b border-lagado-blue border-opacity-30 px-4 py-3">
+        <div className="flex items-center gap-2 max-w-3xl">
+          <span className="text-lagado-blue text-sm">◆</span>
+          <span className="text-body-sm text-lagado-text">
+            This feature is coming in Phase 2. The interface is a preview.
+          </span>
+        </div>
+      </div>
+
       <div className="flex-1 p-6 max-w-3xl mx-auto w-full">
         <Card className="mb-4">
           <h2 className="text-h2 text-lagado-text-bright font-bold mb-4">Current VM</h2>

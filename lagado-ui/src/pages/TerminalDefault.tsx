@@ -1,6 +1,7 @@
 
 import React, { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { invoke } from '@tauri-apps/api/core';
 import { Header } from "../components/Header";
 import { Button } from "../components/Button";
  
@@ -12,10 +13,7 @@ interface TerminalLine {
 export default function TerminalDefault() {
   const navigate = useNavigate();
   const [lines, setLines] = useState<TerminalLine[]>([
-    { type: "command", content: "user@lagado:~$ ls" },
-    { type: "output", content: "Desktop  Documents  Downloads  Pictures" },
-    { type: "command", content: "user@lagado:~$ pwd" },
-    { type: "output", content: "/home/user" },
+    { type: "output", content: "Lagado terminal — type a command" },
   ]);
   const [currentInput, setCurrentInput] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
@@ -29,14 +27,20 @@ export default function TerminalDefault() {
     inputRef.current?.focus();
   }, []);
  
-  const handleCommand = (e: React.KeyboardEvent) => {
+  const handleCommand = async (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && currentInput.trim()) {
-      setLines((prev) => [
-        ...prev,
-        { type: "command", content: `user@lagado:~$ ${currentInput}` },
-        { type: "output", content: `Command executed: ${currentInput}` },
-      ]);
+      const cmd = currentInput.trim();
+      setLines((prev) => [...prev, { type: "command", content: `$ ${cmd}` }]);
       setCurrentInput("");
+      try {
+        const result = await invoke<string>("terminal_run", { command: cmd });
+        const output = result.trim();
+        if (output) {
+          setLines((prev) => [...prev, { type: "output", content: output }]);
+        }
+      } catch (err) {
+        setLines((prev) => [...prev, { type: "output", content: `Error: ${err}` }]);
+      }
     }
   };
  
@@ -80,7 +84,7 @@ export default function TerminalDefault() {
             </div>
           ))}
           <div className="text-lagado-green flex items-center">
-            user@lagado:~${" "}
+            ${" "}
             <input
               ref={inputRef}
               type="text"

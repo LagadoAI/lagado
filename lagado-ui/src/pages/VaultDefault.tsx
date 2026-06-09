@@ -1,35 +1,31 @@
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { invoke } from '@tauri-apps/api/core';
 import { Header } from "../components/Header";
 import { Button } from "../components/Button";
 import { ProgressBar } from "../components/ProgressBar";
  
 interface VaultFile {
-  id: string;
   name: string;
+  is_dir: boolean;
   size: string;
-  modified: Date;
-  type: "doc" | "image" | "code" | "archive";
 }
  
 export default function VaultDefault() {
   const navigate = useNavigate();
-  const [selectedFolder, setSelectedFolder] = useState("documents");
+  const [currentPath, setCurrentPath] = useState("");
+  const [realFiles, setRealFiles] = useState<VaultFile[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
- 
-  const folders = [
-    { id: "documents", name: "Documents", icon: "📄" },
-    { id: "images", name: "Images", icon: "🖼" },
-    { id: "code", name: "Code", icon: "💻" },
-    { id: "archives", name: "Archives", icon: "📦" },
-  ];
- 
-  const files: VaultFile[] = [
-    { id: "1", name: "project_brief.md", size: "2.3 KB", modified: new Date(), type: "doc" },
-    { id: "2", name: "presentation.pdf", size: "1.2 MB", modified: new Date(Date.now() - 86400000), type: "doc" },
-    { id: "3", name: "design_notes.png", size: "450 KB", modified: new Date(Date.now() - 86400000 * 3), type: "image" },
-  ];
+
+  useEffect(() => {
+    invoke<Array<{ name: string; is_dir: boolean; size: string }>>(
+      "vault_list_files",
+      { subfolder: currentPath }
+    )
+      .then(setRealFiles)
+      .catch(() => setRealFiles([]));
+  }, [currentPath]);
  
   return (
     <div className="min-h-screen bg-lagado-bg flex flex-col">
@@ -44,26 +40,10 @@ export default function VaultDefault() {
       <div className="flex-1 flex">
         {/* Sidebar */}
         <div className="w-64 border-r border-lagado-border bg-lagado-surface p-4">
-          <h3 className="text-h3 text-lagado-text-bright font-semibold mb-3">Folders</h3>
-          <div className="space-y-1">
-            {folders.map((folder) => (
-              <button
-                key={folder.id}
-                onClick={() => setSelectedFolder(folder.id)}
-                className={`w-full text-left px-3 py-2 rounded-sm flex items-center gap-2 transition-colors ${
-                  selectedFolder === folder.id
-                    ? "bg-lagado-surface-2 text-lagado-text-bright"
-                    : "text-lagado-text hover:bg-lagado-surface-2"
-                }`}
-              >
-                <span>{folder.icon}</span>
-                <span className="text-body-sm">{folder.name}</span>
-              </button>
-            ))}
+          <h3 className="text-h3 text-lagado-text-bright font-semibold mb-3">Path</h3>
+          <div className="text-body-sm text-lagado-text mb-4">
+            {currentPath || "~/.laputa-secure"}
           </div>
-          <Button variant="secondary" size="sm" className="w-full mt-4">
-            + Add Folder
-          </Button>
         </div>
  
         {/* Main content */}
@@ -82,19 +62,19 @@ export default function VaultDefault() {
           {/* File list */}
           <div className="flex-1 overflow-y-auto p-4">
             <div className="space-y-2">
-              {files.map((file) => (
+              {realFiles.map((file) => (
                 <div
-                  key={file.id}
+                  key={file.name}
                   className="flex items-center justify-between p-3 bg-lagado-surface border border-lagado-border rounded-sm hover:border-lagado-border-light transition-colors cursor-pointer"
                 >
                   <div className="flex items-center gap-3">
                     <span className="text-2xl">
-                      {file.type === "doc" ? "📄" : file.type === "image" ? "🖼" : "📦"}
+                      {file.is_dir ? "📁" : "📄"}
                     </span>
                     <div>
                       <div className="text-body text-lagado-text-bright">{file.name}</div>
                       <div className="text-caption text-lagado-text-dim">
-                        {file.size} • {file.modified.toLocaleDateString()}
+                        {file.size}
                       </div>
                     </div>
                   </div>

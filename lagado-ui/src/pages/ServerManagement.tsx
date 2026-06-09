@@ -1,77 +1,84 @@
+import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { invoke } from '@tauri-apps/api/core'
 
-import { useNavigate } from "react-router-dom";
-import { Header } from "../components/Header";
-import { Card } from "../components/Card";
-import { Badge } from "../components/Badge";
-import { MetadataList } from "../components/MetadataList";
-import { Select } from "../components/Select";
-import { Button } from "../components/Button";
+interface ServerStatus {
+  running: boolean
+  model: string
+  host: string
+  port: number
+  endpoint: string
+}
 
 export default function ServerManagement() {
-  const navigate = useNavigate();
+  const navigate = useNavigate()
+  const [status, setStatus] = useState<ServerStatus | null>(null)
+  const [checking, setChecking] = useState(true)
+
+  const check = () => {
+    setChecking(true)
+    invoke<ServerStatus>('get_server_status')
+      .then(s => { setStatus(s); setChecking(false) })
+      .catch(() => setChecking(false))
+  }
+
+  useEffect(() => { check() }, [])
+
   return (
     <div className="min-h-screen bg-lagado-bg flex flex-col">
-      <Header title="Server & Models" />
-
-      <div className="border-b border-lagado-border bg-lagado-surface px-4 py-3">
-        <button onClick={() => navigate("/chat")} className="px-3 py-1.5 text-body-sm text-lagado-text-dim hover:text-lagado-text border border-lagado-border rounded-md hover:border-lagado-red transition-colors">
+      <div className="border-b border-lagado-border bg-lagado-surface px-4 py-3 flex items-center gap-3">
+        <button onClick={() => navigate('/chat')} className="px-3 py-1.5 text-body-sm text-lagado-text-dim hover:text-lagado-text border border-lagado-border rounded-md hover:border-lagado-blue transition-colors">
           ← Chat
         </button>
+        <h1 className="text-h3 text-lagado-text-bright font-semibold">Server</h1>
       </div>
 
-      <div className="flex-1 p-6 max-w-3xl mx-auto w-full">
-        <Card>
-          <h2 className="text-h2 text-lagado-text-bright font-bold mb-6">Active Model</h2>
- 
-          <div className="bg-lagado-surface-2 border border-lagado-border rounded-sm p-4 mb-6">
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-body text-lagado-text-bright font-semibold">
-                Qwen3-2.5B-IQ4
+      <div className="flex-1 p-6 max-w-2xl">
+        <div className="bg-lagado-surface border border-lagado-border rounded-md p-6 mb-4">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-h3 text-lagado-text-bright font-semibold">llama-server</h2>
+            <div className="flex items-center gap-2">
+              <span className={`w-2 h-2 rounded-full ${checking ? 'bg-lagado-yellow' : status?.running ? 'bg-lagado-green' : 'bg-lagado-red'}`} />
+              <span className="text-body-sm text-lagado-text-dim">
+                {checking ? 'Checking...' : status?.running ? 'Running' : 'Stopped'}
               </span>
-              <Badge variant="success">ACTIVE</Badge>
             </div>
-            <MetadataList
-              items={[
-                { key: "Type", value: "Local" },
-                { key: "Size", value: "2.1 GB" },
-                { key: "Status", value: "Loaded" },
-                { key: "Performance", value: "4.2 tokens/s" },
-              ]}
-            />
           </div>
- 
-          <div className="space-y-4">
-            <div>
-              <label className="block text-body-sm text-lagado-text-dim mb-2">
-                Switch Model
-              </label>
-              <Select
-                value="qwen-2.5b"
-                onChange={() => {}}
-                options={[
-                  { value: "tinyllama", label: "TinyLlama-1B" },
-                  { value: "qwen-1b", label: "Qwen3-1B" },
-                  { value: "qwen-2.5b", label: "Qwen3-2.5B" },
-                  { value: "qwen-8b", label: "Qwen3-8B" },
-                ]}
-              />
+
+          {status && (
+            <div className="space-y-3 text-body-sm">
+              <div className="flex justify-between">
+                <span className="text-lagado-text-dim">Model</span>
+                <span className="font-mono text-lagado-text">{status.model}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-lagado-text-dim">Endpoint</span>
+                <span className="font-mono text-lagado-blue">{status.endpoint}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-lagado-text-dim">Port</span>
+                <span className="font-mono text-lagado-text">{status.port}</span>
+              </div>
             </div>
- 
-            <Button variant="secondary" size="md">Configure Cloud Model</Button>
+          )}
+
+          <div className="flex gap-3 mt-6">
+            <button onClick={check} className="px-4 py-2 border border-lagado-border text-lagado-text-dim text-body-sm rounded-md hover:border-lagado-blue hover:text-lagado-text transition-colors">
+              Refresh
+            </button>
+            <button
+              onClick={() => navigate('/settings')}
+              className="px-4 py-2 border border-lagado-border text-lagado-text-dim text-body-sm rounded-md hover:border-lagado-blue hover:text-lagado-text transition-colors"
+            >
+              Change Model
+            </button>
           </div>
-        </Card>
- 
-        <Card className="mt-4">
-          <h3 className="text-h3 text-lagado-text-bright font-bold mb-4">Storage</h3>
-          <MetadataList
-            items={[
-              { key: "Cold Storage", value: "1.4 GB" },
-              { key: "Hot Storage", value: "2.1 GB" },
-              { key: "Available", value: "6.5 GB" },
-            ]}
-          />
-        </Card>
+        </div>
+
+        <p className="text-caption text-lagado-text-dim">
+          llama-server is managed automatically by Lagado. It starts when you launch the app and stops when you close it.
+        </p>
       </div>
     </div>
-  );
+  )
 }

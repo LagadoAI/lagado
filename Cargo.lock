@@ -1965,6 +1965,7 @@ name = "lagado-tauri"
 version = "0.1.0"
 dependencies = [
  "lagado-agent",
+ "reqwest 0.12.28",
  "serde",
  "serde_json",
  "tauri",
