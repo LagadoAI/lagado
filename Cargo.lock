@@ -1964,6 +1964,7 @@ dependencies = [
 name = "lagado-tauri"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "lagado-agent",
  "reqwest 0.12.28",
  "serde",

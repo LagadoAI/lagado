@@ -242,6 +242,23 @@ async fn get_server_status() -> serde_json::Value {
     })
 }
 
+/// Capture one frame and return it as a base64-encoded PNG data URI.
+/// The frontend uses this as `<img src={result}>` — no asset protocol needed.
+#[tauri::command]
+fn capture_frame() -> Result<String, String> {
+    #[cfg(target_os = "linux")]
+    {
+        let mut cap = lagado_agent::perception::capture::ScreenCapture::new();
+        cap.capture()?;
+        let bytes = cap.read_frame().ok_or("no frame captured")?;
+        use base64::Engine;
+        let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+        Ok(format!("data:image/png;base64,{b64}"))
+    }
+    #[cfg(not(target_os = "linux"))]
+    Err("Screen capture not supported on this platform".to_string())
+}
+
 fn main() {
     tracing_subscriber::fmt::init();
 
@@ -293,7 +310,7 @@ fn main() {
             Ok(())
         })
         .manage(state)
-        .invoke_handler(tauri::generate_handler![send_goal, send_chat, send_command, send_approval, initialize_timeline, get_active_model, set_active_model, list_models, get_chronos_recent, terminal_spawn, terminal_run, terminal_get_cwd, vault_list_files, get_server_status])
+        .invoke_handler(tauri::generate_handler![send_goal, send_chat, send_command, send_approval, initialize_timeline, get_active_model, set_active_model, list_models, get_chronos_recent, terminal_spawn, terminal_run, terminal_get_cwd, vault_list_files, get_server_status, capture_frame])
         .run(tauri::generate_context!())
         .expect("Lagado failed to start");
 }

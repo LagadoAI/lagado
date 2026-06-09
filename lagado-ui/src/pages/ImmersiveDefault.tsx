@@ -1,4 +1,6 @@
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { invoke } from '@tauri-apps/api/core'
 import { ChatBox } from '@/components/ui/chat-box'
 import { SidePane } from '@/components/ui/side-pane'
 import { useChatContext } from '@/hooks/use-chat-context'
@@ -6,26 +8,66 @@ import { useChatContext } from '@/hooks/use-chat-context'
 export default function ImmersiveDefault() {
   const navigate = useNavigate()
   const { messages, isPaused, pendingPermission, approve, deny } = useChatContext()
+  const [frameSrc, setFrameSrc] = useState<string>('')
+  const [captureError, setCaptureError] = useState(false)
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  // Action entries for the SidePane feed
+  // Capture loop — each tick grabs a frame as a base64 data URI and swaps the img src
+  useEffect(() => {
+    let alive = true
+
+    const tick = async () => {
+      if (!alive) return
+      try {
+        const dataUri = await invoke<string>('capture_frame')
+        setCaptureError(false)
+        setFrameSrc(dataUri)
+      } catch {
+        setCaptureError(true)
+      }
+    }
+
+    tick()
+    intervalRef.current = setInterval(tick, 150) // ~6fps
+
+    return () => {
+      alive = false
+      if (intervalRef.current) clearInterval(intervalRef.current)
+    }
+  }, [])
+
   const actionEntries = messages.filter(m => m.role === 'assistant')
 
   return (
     <div className="h-screen bg-black overflow-hidden relative">
 
-      {/*
-        Phase 1: black canvas representing the desktop.
-        Phase 2: replace this div with a live screen capture feed
-        from /dev/shm/lagado_frame.png at 20Hz via the capture.rs backend.
-      */}
-      <div className="absolute inset-0 bg-black" />
+      {/* Live desktop feed */}
+      {frameSrc && !captureError ? (
+        <img
+          src={frameSrc}
+          alt="Desktop"
+          className="absolute inset-0 w-full h-full object-cover pointer-events-none"
+          draggable={false}
+        />
+      ) : (
+        // Fallback while waiting for first frame or on capture error
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-black">
+          {captureError ? (
+            <>
+              <p className="text-white/20 text-sm mb-1">Screen capture unavailable</p>
+              <p className="text-white/10 text-xs">Install grim (Wayland) or scrot (X11)</p>
+            </>
+          ) : (
+            <div className="w-2 h-2 rounded-full bg-white/10 animate-pulse" />
+          )}
+        </div>
+      )}
 
-      {/* Floating ChatBox — draggable, positioned by user */}
+      {/* Floating ChatBox — draggable by user */}
       <ChatBox className="fixed bottom-8 left-1/2 -translate-x-1/2 z-40" />
 
-      {/* SidePane — action feed + status passed as children */}
+      {/* SidePane — status, HITL approval, action feed */}
       <SidePane>
-        {/* Status */}
         <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs font-medium mb-3 w-fit ${
           isPaused
             ? 'border-yellow-500/40 bg-yellow-500/10 text-yellow-400'
@@ -41,7 +83,6 @@ export default function ImmersiveDefault() {
           {isPaused ? 'Paused' : pendingPermission ? 'Awaiting approval' : 'Running'}
         </div>
 
-        {/* HITL approval card */}
         {pendingPermission && (
           <div className="bg-white/5 border border-yellow-500/40 rounded-xl p-4 mb-3 shadow-[0_0_20px_rgba(245,158,11,0.1)]">
             <p className="text-xs text-yellow-400 font-semibold mb-1 tracking-wide">APPROVAL REQUIRED</p>
@@ -64,7 +105,6 @@ export default function ImmersiveDefault() {
           </div>
         )}
 
-        {/* Action feed */}
         {actionEntries.length > 0 && (
           <div className="space-y-2">
             <p className="text-xs text-white/30 uppercase tracking-wider mb-2">Actions</p>
