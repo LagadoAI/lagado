@@ -44,6 +44,12 @@ impl Actuator for MockActuator {
     }
 }
 
+#[cfg(target_os = "linux")]
+pub mod linux;
+
+#[cfg(target_os = "linux")]
+pub use linux::{LinuxPerceptor, LinuxActuator, linux_pair};
+
 #[cfg(test)]
 mod tests {
     use super::*;

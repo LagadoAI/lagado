@@ -9,7 +9,7 @@ use lagado_agent::{
     config,
     hydra,
     inference::{InferenceAdapter, llama_cpp::LlamaCppAdapter},
-    perception::{MockPerceptor, MockActuator, Perceptor, Actuator},
+    perception::{Perceptor, Actuator},
 };
 
 struct AppState {
@@ -139,6 +139,22 @@ fn main() {
     let llama_child: Arc<Mutex<Option<std::process::Child>>> = Arc::new(Mutex::new(None));
     let llama_for_setup = llama_child.clone();
 
+    #[cfg(target_os = "linux")]
+    let (perceptor_impl, actuator_impl) = lagado_agent::perception::linux_pair();
+    #[cfg(target_os = "linux")]
+    let perceptor: Arc<dyn lagado_agent::perception::Perceptor + Send + Sync> =
+        Arc::new(perceptor_impl);
+    #[cfg(target_os = "linux")]
+    let actuator: Arc<dyn lagado_agent::perception::Actuator + Send + Sync> =
+        Arc::new(actuator_impl);
+
+    #[cfg(not(target_os = "linux"))]
+    let perceptor: Arc<dyn lagado_agent::perception::Perceptor + Send + Sync> =
+        Arc::new(lagado_agent::perception::MockPerceptor);
+    #[cfg(not(target_os = "linux"))]
+    let actuator: Arc<dyn lagado_agent::perception::Actuator + Send + Sync> =
+        Arc::new(lagado_agent::perception::MockActuator);
+
     let state = Arc::new(AppState {
         agent: Arc::new(Mutex::new(AgentState {
             goal:        String::new(),
@@ -147,8 +163,8 @@ fn main() {
             pending_id:  None,
         })),
         adapter,
-        perceptor: Arc::new(MockPerceptor),
-        actuator:  Arc::new(MockActuator),
+        perceptor,
+        actuator,
         _llama_child: llama_child,
     });
 
