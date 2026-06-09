@@ -5,7 +5,7 @@ use tokio::sync::{mpsc, Mutex};
 use tauri::{State, Emitter};
 use lagado_agent::{
     agent::AgentState,
-    bootstrap::ensure_llama_server,
+    bootstrap::{ensure_llama_server, ensure_classifier_server},
     config,
     hydra,
     inference::{InferenceAdapter, llama_cpp::LlamaCppAdapter},
@@ -15,12 +15,23 @@ use lagado_agent::{
     vm::{QemuDesktopBackend, VmHandle, VmBackend, VmSshPort, DynamicActuator, DynamicPerceptor},
 };
 
+/// Kills and reaps the child process on drop — prevents server orphans on app exit.
+struct KillOnDrop(std::process::Child);
+
+impl Drop for KillOnDrop {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
 struct AppState {
     agent: Arc<Mutex<AgentState>>,
     adapter: Arc<dyn InferenceAdapter + Send + Sync>,
     perceptor: Arc<dyn Perceptor + Send + Sync>,
     actuator: Arc<dyn Actuator + Send + Sync>,
-    _llama_child: Arc<Mutex<Option<std::process::Child>>>,
+    _llama_child: Arc<Mutex<Option<KillOnDrop>>>,
+    _classifier_child: Arc<Mutex<Option<KillOnDrop>>>,
     vm: Arc<Mutex<Option<VmHandle>>>,
     vm_ssh_port: VmSshPort,
     vm_backend: QemuDesktopBackend,
@@ -448,8 +459,10 @@ fn main() {
     ));
     let memory_for_setup = memory_tiers.clone();
 
-    let llama_child: Arc<Mutex<Option<std::process::Child>>> = Arc::new(Mutex::new(None));
+    let llama_child: Arc<Mutex<Option<KillOnDrop>>> = Arc::new(Mutex::new(None));
     let llama_for_setup = llama_child.clone();
+    let classifier_child: Arc<Mutex<Option<KillOnDrop>>> = Arc::new(Mutex::new(None));
+    let classifier_for_setup = classifier_child.clone();
 
     let vm_ssh_port: VmSshPort = std::sync::Arc::new(std::sync::RwLock::new(None));
 
@@ -487,6 +500,7 @@ fn main() {
         perceptor,
         actuator,
         _llama_child: llama_child,
+        _classifier_child: classifier_child,
         vm: Arc::new(Mutex::new(None)),
         vm_ssh_port: vm_ssh_port.clone(),
         vm_backend: QemuDesktopBackend::default(),
@@ -497,15 +511,20 @@ fn main() {
 
     tauri::Builder::default()
         .setup(move |_app| {
+            // Start main 8B llama-server
             tauri::async_runtime::spawn(async move {
                 let child = ensure_llama_server().await;
-                *llama_for_setup.lock().await = child;
+                *llama_for_setup.lock().await = child.map(KillOnDrop);
+            });
+            // Start 350M classifier server (CPU-only, port 8081)
+            tauri::async_runtime::spawn(async move {
+                let child = ensure_classifier_server().await;
+                *classifier_for_setup.lock().await = child.map(KillOnDrop);
             });
             // Start background memory consolidation loop (5-min decay cycles)
             tauri::async_runtime::spawn(async move {
                 let gate = SleepGate::new(memory_for_setup);
                 let _handle = gate.start();
-                // Hold gate alive — task never exits, so gate Arc stays live
                 std::future::pending::<()>().await;
             });
             Ok(())

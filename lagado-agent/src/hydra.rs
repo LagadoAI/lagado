@@ -13,7 +13,7 @@
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use crate::action_graph::ActionGraph;
-use crate::inference::InferenceAdapter;
+use crate::inference::{InferenceAdapter, llama_cpp::LlamaCppAdapter};
 use crate::perception::{Perceptor, Actuator};
 use crate::retrieval::Retriever;
 use crate::{agent, config, envelope, governor};
@@ -44,15 +44,17 @@ pub struct HydraConfig {
 /// Dual-model orchestrator
 pub struct Hydra {
     pub adapter: Arc<dyn InferenceAdapter>,
+    /// 350M classifier (or falls back to adapter if classifier server isn't running)
+    pub classifier: Arc<dyn InferenceAdapter + Send + Sync>,
     pub config: HydraConfig,
 }
 
 impl Hydra {
-    /// Initialize Hydra from system governor detection
-    pub fn from_governor(adapter: Arc<dyn InferenceAdapter>) -> Self {
+    /// Initialize Hydra from system governor detection.
+    /// Checks port 8081 for a live classifier server — uses it if up, else falls back to adapter.
+    pub fn from_governor(adapter: Arc<dyn InferenceAdapter + Send + Sync>) -> Self {
         let server_config = governor::detect_and_plan(config::CONTEXT_SIZE);
 
-        // Derive capability tier from server config
         let capability = if server_config.n_gpu_layers > 0 && server_config.ctx >= 16384 {
             Capability::High
         } else if server_config.n_gpu_layers > 0 || server_config.ctx >= 8192 {
@@ -61,43 +63,65 @@ impl Hydra {
             Capability::Low
         };
 
+        // Try dedicated 350M classifier on port 8081 — ECONNREFUSED is immediate
+        let classifier_url = config::classifier_base_url();
+        let classifier: Arc<dyn InferenceAdapter + Send + Sync> =
+            if ureq::get(&format!("{}/health", classifier_url))
+                .timeout(std::time::Duration::from_millis(500))
+                .call()
+                .is_ok()
+            {
+                tracing::info!("Using 350M classifier on {classifier_url}");
+                Arc::new(LlamaCppAdapter::with_url(
+                    &classifier_url,
+                    config::CLASSIFIER_MODEL_FILE,
+                    config::CLASSIFIER_CONTEXT_SIZE,
+                ))
+            } else {
+                tracing::debug!("Classifier server not available — main model handles classification");
+                adapter.clone()
+            };
+
         Hydra {
             adapter,
+            classifier,
             config: HydraConfig { capability },
         }
     }
 
-    /// Classify user intent on a CLEAN PROMPT (no history, current message only)
+    /// Classify user intent on a CLEAN PROMPT (no history, current message only).
     ///
     /// CRITICAL: This function receives ONLY the current user message.
     /// Zero conversation history, zero screen data. This discipline is
     /// load-bearing and prevents history poisoning.
+    ///
+    /// Routes to the 350M classifier on port 8081 if available; falls back to the
+    /// main 8B adapter. The parser searches the full response (not just the first
+    /// word) to handle small-model preamble like "The answer is INTERACTIVE".
     pub async fn classify_intent(&self, message: &str) -> Intent {
+        // Few-shot prompt — empirically validated on 1.2B Instruct (~80% accuracy)
         let prompt = format!(
-            "You are a binary classifier. Classify the user's message.\n\
-             Reply with exactly one word: CHAT, INTERACTIVE, or REASONING.\n\
+            "Classify each message as CHAT, INTERACTIVE, or REASONING. One word only.\n\
              \n\
-             CHAT = conversation, question, greeting, thanks, opinion\n\
-             INTERACTIVE = requests to click, type, open, navigate, search, find, scroll, close anything on screen\n\
-             REASONING = complex analysis, planning, code writing, math, multi-step problem solving\n\
+             Examples:\n\
+             open Firefox → INTERACTIVE\n\
+             hello friend → CHAT\n\
+             write sorting code → REASONING\n\
+             click submit button → INTERACTIVE\n\
+             explain how TCP works → REASONING\n\
+             what time is it → CHAT\n\
+             navigate to settings → INTERACTIVE\n\
+             type my password → INTERACTIVE\n\
+             search for files → INTERACTIVE\n\
+             close this window → INTERACTIVE\n\
+             how are you today → CHAT\n\
              \n\
-             Message: {message}\n\
-             Classification:"
+             Now classify:\n\
+             {message} →"
         );
 
-        match self.adapter.generate(&prompt, 10, 0.0) {
-            Ok(response) => {
-                let trimmed = response.trim().to_uppercase();
-                let first_word = trimmed.split_whitespace().next().unwrap_or("");
-
-                if first_word.starts_with("INTERACTIVE") {
-                    Intent::Interactive
-                } else if first_word.starts_with("REASONING") {
-                    Intent::Reasoning
-                } else {
-                    Intent::Chat // safe default
-                }
-            }
+        match self.classifier.generate(&prompt, 10, 0.0) {
+            Ok(response) => parse_intent_label(&response),
             Err(_) => Intent::Chat, // safe default on error
         }
     }
@@ -123,6 +147,28 @@ impl Hydra {
             Capability::High => 8192,
         }
     }
+}
+
+/// Parse the classifier model's raw text output into an Intent.
+///
+/// Checks the first word first (fast path for well-behaved models), then scans
+/// the whole response for the label (handles small-model preamble like
+/// "The classification is INTERACTIVE"). INTERACTIVE > REASONING > CHAT priority.
+pub fn parse_intent_label(response: &str) -> Intent {
+    let upper = response.trim().to_uppercase();
+
+    // Fast path: first word is the label (expected from instruction-tuned models)
+    if let Some(first) = upper.split_whitespace().next() {
+        if first.starts_with("INTERACTIVE") { return Intent::Interactive; }
+        if first.starts_with("REASONING")   { return Intent::Reasoning; }
+        if first.starts_with("CHAT")        { return Intent::Chat; }
+    }
+
+    // Fallback: label appears anywhere in response (handles preamble from small models)
+    if upper.contains("INTERACTIVE") { return Intent::Interactive; }
+    if upper.contains("REASONING")   { return Intent::Reasoning; }
+
+    Intent::Chat // safe default
 }
 
 /// Main entry point: route user message based on intent classification
@@ -202,5 +248,37 @@ pub async fn run(
             // Run the agent loop
             agent::agent_loop(state, adapter, perceptor, actuator, approval_rx, confirm_tx, memory_tiers).await;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_intent_label, Intent};
+
+    #[test]
+    fn parser_first_word_labels() {
+        assert_eq!(parse_intent_label("INTERACTIVE"), Intent::Interactive);
+        assert_eq!(parse_intent_label("REASONING"), Intent::Reasoning);
+        assert_eq!(parse_intent_label("CHAT"), Intent::Chat);
+    }
+
+    #[test]
+    fn parser_handles_preamble() {
+        assert_eq!(parse_intent_label("The answer is INTERACTIVE"), Intent::Interactive);
+        assert_eq!(parse_intent_label("Classification: REASONING\n"), Intent::Reasoning);
+        assert_eq!(parse_intent_label("Sure, I'd say CHAT is appropriate."), Intent::Chat);
+    }
+
+    #[test]
+    fn parser_safe_default() {
+        assert_eq!(parse_intent_label(""), Intent::Chat);
+        assert_eq!(parse_intent_label("I don't know"), Intent::Chat);
+        assert_eq!(parse_intent_label("ERROR"), Intent::Chat);
+    }
+
+    #[test]
+    fn parser_priority_interactive_over_reasoning() {
+        // If a confused model emits both, INTERACTIVE wins (more impactful routing)
+        assert_eq!(parse_intent_label("INTERACTIVE or REASONING"), Intent::Interactive);
     }
 }

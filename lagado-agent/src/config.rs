@@ -7,6 +7,9 @@ use std::path::PathBuf;
 use directories::ProjectDirs;
 
 const DEFAULT_MODEL_FILE: &str = "LFM2.5-8B-A1B-Q4_K_M.gguf";
+pub const CLASSIFIER_MODEL_FILE: &str = "LFM2.5-1.2B-Instruct-Q4_K_M.gguf";
+pub const CLASSIFIER_CONTEXT_SIZE: usize = 512;
+const CLASSIFIER_PORT: u16 = 8081;
 
 /// Reads an env override ONLY in debug builds. Release builds ignore env-based
 /// path/binary/prompt overrides to remove a code-loading / tamper surface.
@@ -47,6 +50,22 @@ pub fn model_path() -> PathBuf {
         return PathBuf::from(p);
     }
     data_dir().join("models").join(DEFAULT_MODEL_FILE)
+}
+
+/// Path to the 350M classifier model. Override: LAGADO_CLASSIFIER_MODEL_PATH.
+pub fn classifier_model_path() -> PathBuf {
+    if let Some(p) = dev_override("LAGADO_CLASSIFIER_MODEL_PATH") {
+        return PathBuf::from(p);
+    }
+    data_dir().join("models").join(CLASSIFIER_MODEL_FILE)
+}
+
+pub fn classifier_port() -> u16 {
+    std::env::var("LAGADO_CLASSIFIER_PORT").ok().and_then(|s| s.parse().ok()).unwrap_or(CLASSIFIER_PORT)
+}
+
+pub fn classifier_base_url() -> String {
+    format!("http://{}:{}", llama_host(), classifier_port())
 }
 
 /// llama-server binary path. Override: LAGADO_LLAMA_SERVER.

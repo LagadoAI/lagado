@@ -1,5 +1,69 @@
-use std::process::{Child, Command};
+use std::process::{Child, Command, Stdio};
 use crate::{chronos, config, governor};
+
+/// Start a lightweight llama-server on port 8081 for intent classification.
+/// Uses the 350M model, CPU-only (preserves GPU for the 8B), ctx=512.
+/// Returns None if the model file doesn't exist or if a server is already running.
+pub async fn ensure_classifier_server() -> Option<Child> {
+    let model_path = config::classifier_model_path();
+    if !model_path.exists() {
+        tracing::info!("No classifier model at {:?} — skipping classifier server", model_path);
+        return None;
+    }
+
+    let already_up = tokio::task::spawn_blocking(|| {
+        ureq::get(&format!("{}/health", config::classifier_base_url())).call().is_ok()
+    })
+    .await
+    .unwrap_or(false);
+
+    if already_up {
+        tracing::info!("Classifier server already running — reusing.");
+        return None;
+    }
+
+    let mut cmd = Command::new(config::llama_server_bin());
+    cmd.args([
+        "-m", &model_path.to_string_lossy(),
+        "-c", &config::CLASSIFIER_CONTEXT_SIZE.to_string(),
+        "-ngl", "0",        // CPU-only — leave GPU headroom for the 8B model
+        "-t", "2",
+        "--parallel", "1",
+        "--host", &config::llama_host(),
+        "--port", &config::classifier_port().to_string(),
+    ]);
+    cmd.stdout(Stdio::null()).stderr(Stdio::null());
+
+    match cmd.spawn() {
+        Ok(child) => {
+            let ready = tokio::task::spawn_blocking(|| {
+                let agent = ureq::AgentBuilder::new()
+                    .timeout(std::time::Duration::from_secs(2))
+                    .build();
+                let url = format!("{}/health", config::classifier_base_url());
+                for _ in 0..30 {
+                    if agent.get(&url).call().is_ok() { return true; }
+                    std::thread::sleep(std::time::Duration::from_secs(1));
+                }
+                false
+            })
+            .await
+            .unwrap_or(false);
+
+            if ready {
+                tracing::info!("Classifier server ready on port {}", config::classifier_port());
+                Some(child)
+            } else {
+                tracing::warn!("Classifier server did not become ready within 30s — falling back to main model");
+                None
+            }
+        }
+        Err(e) => {
+            tracing::warn!("Failed to spawn classifier server: {e} — classification uses main model");
+            None
+        }
+    }
+}
 
 pub async fn ensure_llama_server() -> Option<Child> {
     // ── Governor: detect hardware, plan server config ─────────────

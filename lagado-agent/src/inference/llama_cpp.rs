@@ -21,6 +21,15 @@ impl LlamaCppAdapter {
             context_size,
         })
     }
+
+    /// Construct pointing at a custom base URL (e.g., classifier on port 8081).
+    pub fn with_url(base_url: &str, model_name: &str, context_size: usize) -> Self {
+        Self {
+            base_url: base_url.to_string(),
+            model_name: model_name.to_string(),
+            context_size,
+        }
+    }
 }
 
 impl InferenceAdapter for LlamaCppAdapter {
