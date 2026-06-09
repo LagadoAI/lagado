@@ -5,12 +5,12 @@ use tokio::sync::{mpsc, Mutex};
 use tauri::{State, Emitter};
 use lagado_agent::{
     agent::AgentState,
-    bootstrap::{ensure_llama_server, ensure_classifier_server},
+    bootstrap::{ensure_llama_server, ensure_classifier_server, ensure_vlm_server},
     config,
     hydra,
     inference::{InferenceAdapter, llama_cpp::LlamaCppAdapter},
     memory_tiers::MemoryTiers,
-    perception::{Perceptor, Actuator, PerceptionCache},
+    perception::{Perceptor, Actuator, PerceptionCache, VlmPerceptor, vlm_adapter::VlmAdapter},
     sleep_gate::SleepGate,
     vm::{QemuDesktopBackend, VmHandle, VmBackend, VmSshPort, DynamicActuator, DynamicPerceptor},
 };
@@ -32,6 +32,7 @@ struct AppState {
     actuator: Arc<dyn Actuator + Send + Sync>,
     _llama_child: Arc<Mutex<Option<KillOnDrop>>>,
     _classifier_child: Arc<Mutex<Option<KillOnDrop>>>,
+    _vlm_child: Arc<Mutex<Option<KillOnDrop>>>,
     vm: Arc<Mutex<Option<VmHandle>>>,
     vm_ssh_port: VmSshPort,
     vm_backend: QemuDesktopBackend,
@@ -463,6 +464,8 @@ fn main() {
     let llama_for_setup = llama_child.clone();
     let classifier_child: Arc<Mutex<Option<KillOnDrop>>> = Arc::new(Mutex::new(None));
     let classifier_for_setup = classifier_child.clone();
+    let vlm_child: Arc<Mutex<Option<KillOnDrop>>> = Arc::new(Mutex::new(None));
+    let vlm_for_setup = vlm_child.clone();
 
     let vm_ssh_port: VmSshPort = std::sync::Arc::new(std::sync::RwLock::new(None));
 
@@ -484,8 +487,18 @@ fn main() {
 
     let ssh_cache = Arc::new(std::sync::Mutex::new(PerceptionCache::new()));
 
-    let perceptor: Arc<dyn lagado_agent::perception::Perceptor + Send + Sync> =
+    let dynamic_perceptor: Arc<dyn lagado_agent::perception::Perceptor + Send + Sync> =
         Arc::new(DynamicPerceptor { vm_port: vm_ssh_port.clone(), ssh_cache: ssh_cache.clone(), host: host_perceptor });
+
+    // Wrap with VLM visual layer if the VLM server is running
+    let vlm = VlmAdapter::probe(&config::vlm_base_url());
+    let perceptor: Arc<dyn lagado_agent::perception::Perceptor + Send + Sync> =
+        Arc::new(VlmPerceptor {
+            inner: dynamic_perceptor,
+            vlm,
+            frame_path: config::FRAME_PATH.to_string(),
+        });
+
     let actuator: Arc<dyn lagado_agent::perception::Actuator + Send + Sync> =
         Arc::new(DynamicActuator { vm_port: vm_ssh_port.clone(), ssh_cache: ssh_cache.clone(), host: host_actuator });
 
@@ -501,6 +514,7 @@ fn main() {
         actuator,
         _llama_child: llama_child,
         _classifier_child: classifier_child,
+        _vlm_child: vlm_child,
         vm: Arc::new(Mutex::new(None)),
         vm_ssh_port: vm_ssh_port.clone(),
         vm_backend: QemuDesktopBackend::default(),
@@ -520,6 +534,11 @@ fn main() {
             tauri::async_runtime::spawn(async move {
                 let child = ensure_classifier_server().await;
                 *classifier_for_setup.lock().await = child.map(KillOnDrop);
+            });
+            // Start VLM server (vision, port 8082) — requires mmproj file
+            tauri::async_runtime::spawn(async move {
+                let child = ensure_vlm_server().await;
+                *vlm_for_setup.lock().await = child.map(KillOnDrop);
             });
             // Start background memory consolidation loop (5-min decay cycles)
             tauri::async_runtime::spawn(async move {

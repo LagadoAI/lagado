@@ -11,6 +11,11 @@ pub const CLASSIFIER_MODEL_FILE: &str = "LFM2.5-1.2B-Instruct-Q4_K_M.gguf";
 pub const CLASSIFIER_CONTEXT_SIZE: usize = 512;
 const CLASSIFIER_PORT: u16 = 8081;
 
+pub const VLM_MODEL_FILE: &str = "LFM2.5-VL-450M-F16.gguf";
+pub const VLM_MMPROJ_FILE: &str = "mmproj-LFM2.5-VL-450m-F16.gguf";
+pub const VLM_CONTEXT_SIZE: usize = 2048;
+const VLM_PORT: u16 = 8082;
+
 /// Reads an env override ONLY in debug builds. Release builds ignore env-based
 /// path/binary/prompt overrides to remove a code-loading / tamper surface.
 #[cfg(debug_assertions)]
@@ -67,6 +72,31 @@ pub fn classifier_port() -> u16 {
 pub fn classifier_base_url() -> String {
     format!("http://{}:{}", llama_host(), classifier_port())
 }
+
+pub fn vlm_model_path() -> PathBuf {
+    if let Some(p) = dev_override("LAGADO_VLM_MODEL_PATH") {
+        return PathBuf::from(p);
+    }
+    data_dir().join("models").join(VLM_MODEL_FILE)
+}
+
+pub fn vlm_mmproj_path() -> PathBuf {
+    if let Some(p) = dev_override("LAGADO_VLM_MMPROJ_PATH") {
+        return PathBuf::from(p);
+    }
+    data_dir().join("models").join(VLM_MMPROJ_FILE)
+}
+
+pub fn vlm_port() -> u16 {
+    std::env::var("LAGADO_VLM_PORT").ok().and_then(|s| s.parse().ok()).unwrap_or(VLM_PORT)
+}
+
+pub fn vlm_base_url() -> String {
+    format!("http://{}:{}", llama_host(), vlm_port())
+}
+
+/// Shared frame path for QMP screendump output (used by capture_frame and VlmPerceptor).
+pub const FRAME_PATH: &str = "/dev/shm/lagado_frame.png";
 
 /// llama-server binary path. Override: LAGADO_LLAMA_SERVER.
 pub fn llama_server_bin() -> PathBuf {

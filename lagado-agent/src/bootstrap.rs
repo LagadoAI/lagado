@@ -65,6 +65,77 @@ pub async fn ensure_classifier_server() -> Option<Child> {
     }
 }
 
+/// Start llama-server for the VLM (vision-language model) on port 8082.
+/// Requires both the VLM GGUF and its mmproj companion file.
+/// Skips silently if either file is absent — VlmAdapter falls back to text-only.
+pub async fn ensure_vlm_server() -> Option<Child> {
+    let model_path = config::vlm_model_path();
+    let mmproj_path = config::vlm_mmproj_path();
+
+    if !model_path.exists() {
+        tracing::info!("VLM model not found at {:?} — skipping VLM server", model_path);
+        return None;
+    }
+    if !mmproj_path.exists() {
+        tracing::info!("VLM mmproj not found at {:?} — skipping VLM server", mmproj_path);
+        return None;
+    }
+
+    let already_up = tokio::task::spawn_blocking(|| {
+        ureq::get(&format!("{}/health", config::vlm_base_url())).call().is_ok()
+    })
+    .await
+    .unwrap_or(false);
+
+    if already_up {
+        tracing::info!("VLM server already running — reusing.");
+        return None;
+    }
+
+    let mut cmd = Command::new(config::llama_server_bin());
+    cmd.args([
+        "-m", &model_path.to_string_lossy(),
+        "--mmproj", &mmproj_path.to_string_lossy(),
+        "-c", &config::VLM_CONTEXT_SIZE.to_string(),
+        "-ngl", "32",
+        "-t", "4",
+        "--parallel", "1",
+        "--host", &config::llama_host(),
+        "--port", &config::vlm_port().to_string(),
+    ]);
+    cmd.stdout(Stdio::null()).stderr(Stdio::null());
+
+    match cmd.spawn() {
+        Ok(child) => {
+            let ready = tokio::task::spawn_blocking(|| {
+                let agent = ureq::AgentBuilder::new()
+                    .timeout(std::time::Duration::from_secs(2))
+                    .build();
+                let url = format!("{}/health", config::vlm_base_url());
+                for _ in 0..30 {
+                    if agent.get(&url).call().is_ok() { return true; }
+                    std::thread::sleep(std::time::Duration::from_secs(1));
+                }
+                false
+            })
+            .await
+            .unwrap_or(false);
+
+            if ready {
+                tracing::info!("VLM server ready on port {}", config::vlm_port());
+                Some(child)
+            } else {
+                tracing::warn!("VLM server did not become ready within 30s — vision unavailable");
+                None
+            }
+        }
+        Err(e) => {
+            tracing::warn!("Failed to spawn VLM server: {e} — vision unavailable");
+            None
+        }
+    }
+}
+
 pub async fn ensure_llama_server() -> Option<Child> {
     // ── Governor: detect hardware, plan server config ─────────────
     let cfg = governor::detect_and_plan(config::CONTEXT_SIZE);

@@ -94,6 +94,34 @@ pub mod capture;
 pub mod delta;
 pub mod vlm_adapter;
 
+/// Wraps any Perceptor with a VLM layer that appends visual context to AT-SPI2 output.
+/// Reads the latest QMP frame from FRAME_PATH. Falls through to text-only when
+/// the VLM server is unavailable or the frame file doesn't exist.
+pub struct VlmPerceptor {
+    pub inner: Arc<dyn Perceptor + Send + Sync>,
+    pub vlm: vlm_adapter::VlmAdapter,
+    pub frame_path: String,
+}
+
+impl Perceptor for VlmPerceptor {
+    fn read_screen(&self) -> String {
+        let text = self.inner.read_screen();
+
+        if !self.vlm.is_available() {
+            return text;
+        }
+
+        let visual = std::fs::read(&self.frame_path)
+            .ok()
+            .and_then(|bytes| self.vlm.describe_screen(&bytes));
+
+        match visual {
+            Some(v) if !v.is_empty() => format!("{text}\n\n[Visual]\n{v}"),
+            _ => text,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
