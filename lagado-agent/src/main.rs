@@ -1,28 +1,33 @@
 mod action_graph;
-mod types;
+mod agent;
+mod auth;
+mod bootstrap;
 mod bracket_parser;
+mod chronos;
+mod config;
+mod distill;
+mod envelope;
 mod forge;
 mod gate;
 mod governor;
-mod hydra;
-mod operator;
-mod memory;
-mod chronos;
-mod envelope;
-mod inference;
-mod config;
-mod perception;
-mod agent;
-mod bootstrap;
-mod recovery;
-mod kv_slots;
 mod grammar;
+mod hydra;
+mod inference;
+mod kv_slots;
 mod liquid;
+mod mcp;
+mod memory;
 mod memory_tiers;
+mod operator;
+mod perception;
+mod projector;
+mod recovery;
 mod retrieval;
 mod security;
+mod self_model;
 mod skill_library;
 mod sleep_gate;
+mod types;
 
 fn main() {
     // CLI dev entry point — starts llama-server only.

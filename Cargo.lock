@@ -1900,6 +1900,7 @@ dependencies = [
  "argon2",
  "directories",
  "futures-util",
+ "hex",
  "hostname",
  "log",
  "rand",

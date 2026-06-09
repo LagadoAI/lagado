@@ -129,20 +129,27 @@ impl MemoryTiers {
         let now = now_unix();
         let entry = MemoryEntry {
             id: Uuid::new_v4().to_string(),
-            text,
+            text: text.clone(),
             tier: Tier::Cold,
             temperature: 0.5,
             created_at: now,
             accessed_at: now,
             access_count: 0,
         };
+
+        // Encrypt cold tier entry before storage
+        let passphrase = crate::security::crypto::machine_passphrase();
+        let encrypted = crate::security::crypto::encrypt(text.as_bytes(), &passphrase)
+            .unwrap_or_else(|_| text.as_bytes().to_vec());
+        let stored_text = hex::encode(&encrypted);
+
         self.db
             .execute(
                 "INSERT INTO memory_entries (id, text, tier, temperature, created_at, accessed_at, access_count)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                 rusqlite::params![
                     &entry.id,
-                    &entry.text,
+                    &stored_text,
                     entry.tier.as_str(),
                     entry.temperature,
                     entry.created_at,
@@ -243,23 +250,39 @@ impl MemoryTiers {
         // Warm/Cold entries from SQLite
         let mut stmt = match self
             .db
-            .prepare("SELECT text FROM memory_entries ORDER BY temperature DESC")
+            .prepare("SELECT text, tier FROM memory_entries ORDER BY temperature DESC")
         {
             Ok(s) => s,
             Err(_) => return result,
         };
 
-        let texts: Vec<String> = stmt
-            .query_map([], |row| row.get(0))
+        let entries: Vec<(String, String)> = stmt
+            .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
             .map(|rows| rows.filter_map(|r| r.ok()).collect())
             .unwrap_or_default();
 
+        let passphrase = crate::security::crypto::machine_passphrase();
         let mut db_chars = 0;
-        for text in texts {
+        for (raw_text, tier) in entries {
             if db_chars >= half_budget {
                 break;
             }
-            let line = format!("- {}\n", text);
+
+            // Decrypt cold entries only
+            let display_text = if tier == "cold" {
+                if let Ok(bytes) = hex::decode(&raw_text) {
+                    crate::security::crypto::decrypt(&bytes, &passphrase)
+                        .ok()
+                        .and_then(|b| String::from_utf8(b).ok())
+                        .unwrap_or(raw_text) // fallback to raw if decrypt fails
+                } else {
+                    raw_text
+                }
+            } else {
+                raw_text
+            };
+
+            let line = format!("- {}\n", display_text);
             if db_chars + line.len() <= half_budget {
                 result.push_str(&line);
                 db_chars += line.len();
