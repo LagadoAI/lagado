@@ -48,7 +48,7 @@ use crate::types::PipelineError;
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const QWEN_MODEL:          &str  = "Qwen3-8B-ShiningValiant3.IQ4_XS.gguf";
+const QWEN_MODEL:          &str  = "LFM2.5-8B-A1B-Q4_K_M.gguf";
 const RECOVERY_PREFIX:     &str  = "recovery";
 const DEFAULT_MIN_CONF:    f64   = 0.65;
 const PERM_TIMEOUT_SECS:   u64   = 30;

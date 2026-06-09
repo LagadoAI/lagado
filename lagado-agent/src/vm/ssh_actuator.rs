@@ -1,24 +1,20 @@
-use crate::perception::Actuator;
+use crate::perception::{Actuator, PerceptionCache, parse_ref_coords};
+use std::sync::{Arc, Mutex};
 
 pub struct SshActuator {
     pub host: String,
     pub port: u16,
     pub user: String,
-}
-
-impl Default for SshActuator {
-    fn default() -> Self {
-        Self {
-            host: "127.0.0.1".to_string(),
-            port: 2222,
-            user: "laputa".to_string(),
-        }
-    }
+    pub cache: Arc<Mutex<PerceptionCache>>,
 }
 
 impl SshActuator {
     pub fn new(host: &str, port: u16, user: &str) -> Self {
-        Self { host: host.to_string(), port, user: user.to_string() }
+        Self::with_cache(host, port, user, Arc::new(Mutex::new(PerceptionCache::new())))
+    }
+
+    pub fn with_cache(host: &str, port: u16, user: &str, cache: Arc<Mutex<PerceptionCache>>) -> Self {
+        Self { host: host.to_string(), port, user: user.to_string(), cache }
     }
 
     fn ssh_run(&self, cmd: &str) -> String {
@@ -41,14 +37,21 @@ impl SshActuator {
 
 impl Actuator for SshActuator {
     fn click(&self, selector: &str) -> String {
-        self.ssh_run(&format!("DISPLAY=:0 xdotool mousemove {selector} click 1"))
+        let coords = self.cache.lock().ok().and_then(|c| c.coords.get(selector).copied());
+        match coords {
+            Some((cx, cy)) => self.ssh_run(&format!(
+                "DISPLAY=:0 xdotool mousemove --sync {cx} {cy} click 1"
+            )),
+            None => format!("click failed: {selector} not in screen cache — call read_screen first"),
+        }
     }
 
-    fn type_text(&self, _selector: &str, text: &str) -> String {
+    fn type_text(&self, selector: &str, text: &str) -> String {
+        let _ = self.click(selector);
         self.ssh_run(&format!("DISPLAY=:0 xdotool type --clearmodifiers -- {text:?}"))
     }
 
     fn key(&self, key: &str) -> String {
-        self.ssh_run(&format!("DISPLAY=:0 xdotool key {key}"))
+        self.ssh_run(&format!("DISPLAY=:0 xdotool key --clearmodifiers {key}"))
     }
 }

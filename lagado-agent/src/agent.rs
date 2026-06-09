@@ -8,6 +8,10 @@ use crate::inference::InferenceAdapter;
 use crate::perception::{Perceptor, Actuator};
 use crate::recovery::FailureType;
 use crate::{chronos, config, envelope, gate};
+use crate::recovery::{RecoveryManager, RecoveryOutcome};
+use crate::action_graph::ActionGraph;
+use tokio::sync::Mutex as TokioMutex;
+use blake3;
 
 // ── State shared between WebSocket and agent ──────────────────────
 pub struct AgentState {
@@ -117,6 +121,28 @@ pub async fn agent_loop(
         actions.join(", ")
     });
 
+    // Screen hash for action-graph state key (read once per goal, used for recovery lookup)
+    let state_hash = {
+        let s = perceptor.read_screen();
+        format!("{}", blake3::hash(s.as_bytes()))
+    };
+
+    // Recovery manager — graph-backed + LLM-assisted failure recovery
+    let recovery_manager: Option<RecoveryManager> = {
+        let graph_path = crate::config::data_dir().join("action_graph.db");
+        ActionGraph::open(&graph_path.to_string_lossy()).ok().map(|g| {
+            RecoveryManager::new(
+                g,
+                None,
+                std::sync::Arc::new(TokioMutex::new(None)),
+                "http://127.0.0.1:8080/v1/chat/completions".to_string(),
+            )
+        })
+    };
+
+    // Sliding window of recent action descriptions for loop/deadlock detection
+    let mut recent_actions: Vec<String> = Vec::new();
+
     let goal = state.lock().await.goal.clone();
     let system_prompt = config::system_prompt();
     chronos::log(&format!("goal_received: {goal}"));
@@ -210,6 +236,28 @@ pub async fn agent_loop(
                     output,
                     action: Some(tool_call.clone()),
                 });
+
+                recent_actions.push(gate::describe(&tool_call));
+                if recent_actions.len() > 15 { recent_actions.remove(0); }
+
+                // Structural failure detection (loop / deadlock)
+                if let Some(structural) = FailureType::detect_structural(&recent_actions) {
+                    tracing::warn!("Structural failure detected: {structural}");
+                    if let Some(ref rm) = recovery_manager {
+                        let s = perceptor.read_screen();
+                        match rm.recover(&structural, &state_hash, &s, &recent_actions).await {
+                            Some(RecoveryOutcome::PromptInjection { text, .. }) => {
+                                tracing::info!("Recovery injection: {}", &text[..text.len().min(80)]);
+                                memory.push(Step { index: enforcer.step(), prompt: text, output: "recovery_injection".to_string(), action: None });
+                                continue;
+                            }
+                            _ => break,
+                        }
+                    } else {
+                        break;
+                    }
+                }
+
                 match &tool_call {
                     ToolCall::Done { reason } => {
                         chronos::log(&format!("goal_done: {reason}"));
@@ -234,10 +282,8 @@ pub async fn agent_loop(
             }
             Err(e) => {
                 tracing::warn!("Pipeline error: {:?}", e);
-
-                // Classify failure for recovery observability
                 let failure_type = FailureType::from(&e);
-                tracing::info!("Failure classified: {}", failure_type);
+                tracing::info!("Failure classified: {failure_type}");
 
                 memory.push(Step {
                     index: enforcer.step(),
@@ -245,7 +291,30 @@ pub async fn agent_loop(
                     output: format!("Error: {:?}", e),
                     action: None,
                 });
+
                 if matches!(e, PipelineError::MaxRetriesExceeded | PipelineError::MaxStepsExceeded) {
+                    // Try recovery before aborting
+                    if let Some(ref rm) = recovery_manager {
+                        let s = perceptor.read_screen();
+                        match rm.recover(&failure_type, &state_hash, &s, &recent_actions).await {
+                            Some(RecoveryOutcome::PromptInjection { text, .. }) => {
+                                tracing::info!("Recovery: prompt injection");
+                                memory.push(Step { index: enforcer.step(), prompt: text, output: "recovery_injection".to_string(), action: None });
+                                continue;
+                            }
+                            Some(RecoveryOutcome::MemoryReset { discard_steps }) => {
+                                tracing::info!("Recovery: memory reset ({discard_steps} steps)");
+                                // Phase 2: implement memory.discard_last(discard_steps)
+                                continue;
+                            }
+                            Some(RecoveryOutcome::HealedAction(action)) => {
+                                tracing::info!("Recovery: healed action from graph");
+                                memory.push(Step { index: enforcer.step(), prompt: action, output: "healed".to_string(), action: None });
+                                continue;
+                            }
+                            None => {}
+                        }
+                    }
                     let detail = format!("{:?}", e);
                     chronos::log(&format!("goal_aborted: {detail}"));
                     let _ = confirm_tx.send(envelope::make("status", envelope::StatusPayload {

@@ -17,6 +17,7 @@ use crate::inference::InferenceAdapter;
 use crate::perception::{Perceptor, Actuator};
 use crate::retrieval::Retriever;
 use crate::{agent, config, envelope, governor};
+use blake3;
 
 /// Intent classification result
 #[derive(Debug, Clone, PartialEq)]
@@ -147,7 +148,8 @@ pub async fn run(
 
     // Action graph shortcut: known high-confidence workflow → skip classification
     let graph_path = config::data_dir().join("action_graph.db");
-    let state_hash = format!("{:x}", message.len()); // Phase 2: real screen hash
+    let screen_snap = perceptor.read_screen();
+    let state_hash = format!("{}", blake3::hash(screen_snap.as_bytes()));
     if let Ok(graph) = ActionGraph::open(&graph_path.to_string_lossy()) {
         if let Ok(Some(known_action)) = graph.get_best_action(&state_hash, 0.65) {
             tracing::info!("action_graph shortcut: {known_action}");

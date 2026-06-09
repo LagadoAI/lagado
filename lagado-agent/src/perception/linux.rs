@@ -1,29 +1,7 @@
 //! linux.rs — Real Linux perception via AT-SPI2 screen reader and xdotool actuator.
 
-use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use regex::Regex;
-
-/// Shared state: last screen dump + ref → screen center coordinates.
-pub struct PerceptionCache {
-    pub screen_text: String,
-    pub coords: HashMap<String, (i32, i32)>, // ref_id → (cx, cy)
-}
-
-impl PerceptionCache {
-    pub fn new() -> Self {
-        Self {
-            screen_text: String::new(),
-            coords: HashMap::new(),
-        }
-    }
-}
-
-impl Default for PerceptionCache {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+use super::{PerceptionCache, parse_ref_coords};
 
 /// Linux-based perceptor: reads screen via perceive.py AT-SPI2 script.
 pub struct LinuxPerceptor {
@@ -92,34 +70,6 @@ impl crate::perception::Perceptor for LinuxPerceptor {
         }
         text
     }
-}
-
-/// Parse lines like `  ref_2  entry  "Search"  (200,300,200,30)  ...`
-/// to extract center coordinates for each ref_id.
-fn parse_ref_coords(screen: &str) -> HashMap<String, (i32, i32)> {
-    let mut map = HashMap::new();
-    // Match: ref_N anywhere on a line, followed by a (x,y,w,h) bbox
-    let re = match Regex::new(r"(ref_\w+).*?\((\d+),(\d+),(\d+),(\d+)\)") {
-        Ok(r) => r,
-        Err(e) => {
-            tracing::warn!("regex compilation failed: {e}");
-            return map;
-        }
-    };
-
-    for line in screen.lines() {
-        if let Some(caps) = re.captures(line) {
-            let ref_id = caps[1].to_string();
-            let x: i32 = caps[2].parse().unwrap_or(0);
-            let y: i32 = caps[3].parse().unwrap_or(0);
-            let w: i32 = caps[4].parse().unwrap_or(0);
-            let h: i32 = caps[5].parse().unwrap_or(0);
-            let cx = x + w / 2;
-            let cy = y + h / 2;
-            map.insert(ref_id, (cx, cy));
-        }
-    }
-    map
 }
 
 /// Linux-based actuator: uses xdotool to interact with the desktop.

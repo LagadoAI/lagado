@@ -9,7 +9,7 @@ use lagado_agent::{
     config,
     hydra,
     inference::{InferenceAdapter, llama_cpp::LlamaCppAdapter},
-    perception::{Perceptor, Actuator},
+    perception::{Perceptor, Actuator, PerceptionCache},
     vm::{QemuDesktopBackend, VmHandle, VmBackend, VmSshPort, DynamicActuator, DynamicPerceptor},
 };
 
@@ -23,6 +23,7 @@ struct AppState {
     vm_ssh_port: VmSshPort,
     vm_backend: QemuDesktopBackend,
     session_dek: Arc<Mutex<Option<Vec<u8>>>>,
+    ssh_cache: Arc<std::sync::Mutex<PerceptionCache>>,
 }
 
 #[tauri::command]
@@ -177,7 +178,10 @@ async fn terminal_spawn(session_id: String, shell: String) -> Result<(), String>
 }
 
 #[tauri::command]
-async fn terminal_run(command: String) -> Result<String, String> {
+async fn terminal_run(command: String, state: State<'_, Arc<AppState>>) -> Result<String, String> {
+    if state.session_dek.lock().await.is_none() {
+        return Err("unauthenticated".to_string());
+    }
     let output = std::process::Command::new("bash")
         .arg("-c")
         .arg(&command)
@@ -318,7 +322,19 @@ async fn vm_boot(state: State<'_, Arc<AppState>>) -> Result<serde_json::Value, S
     let ssh_port = cfg.ssh_port;
     let handle = backend.boot(&cfg_clone)?;
     *vm = Some(handle);
-    *state.vm_ssh_port.write().unwrap() = Some(ssh_port);
+    // Poll for SSH readiness in background — do NOT set vm_ssh_port until guest sshd is up
+    let port_ref = state.vm_ssh_port.clone();
+    tokio::spawn(async move {
+        for _ in 0..120u32 {
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            if tokio::net::TcpStream::connect(("127.0.0.1", ssh_port)).await.is_ok() {
+                *port_ref.write().unwrap() = Some(ssh_port);
+                tracing::info!("VM SSH ready on port {ssh_port}");
+                return;
+            }
+        }
+        tracing::warn!("VM SSH never became ready (120s timeout)");
+    });
     Ok(serde_json::json!({ "status": "booting", "ssh_port": ssh_port }))
 }
 
@@ -377,6 +393,7 @@ async fn auth_signup(
         return Err("Recovery phrase must be at least 12 characters".to_string());
     }
     let dek = lagado_agent::auth::keychain_create(&password, &recovery_phrase)?;
+    lagado_agent::auth::set_session_dek(dek.clone());
     *state.session_dek.lock().await = Some(dek);
     Ok(())
 }
@@ -387,6 +404,7 @@ async fn auth_login(
     state: State<'_, Arc<AppState>>,
 ) -> Result<(), String> {
     let dek = lagado_agent::auth::keychain_unlock(&password)?;
+    lagado_agent::auth::set_session_dek(dek.clone());
     *state.session_dek.lock().await = Some(dek);
     Ok(())
 }
@@ -401,6 +419,7 @@ async fn auth_recover(
         return Err("Password must be at least 8 characters".to_string());
     }
     let dek = lagado_agent::auth::keychain_recover(&recovery_phrase, &new_password)?;
+    lagado_agent::auth::set_session_dek(dek.clone());
     *state.session_dek.lock().await = Some(dek);
     Ok(())
 }
@@ -436,10 +455,12 @@ fn main() {
     let host_actuator: Arc<dyn lagado_agent::perception::Actuator + Send + Sync> =
         Arc::new(lagado_agent::perception::MockActuator);
 
+    let ssh_cache = Arc::new(std::sync::Mutex::new(PerceptionCache::new()));
+
     let perceptor: Arc<dyn lagado_agent::perception::Perceptor + Send + Sync> =
-        Arc::new(DynamicPerceptor { vm_port: vm_ssh_port.clone(), host: host_perceptor });
+        Arc::new(DynamicPerceptor { vm_port: vm_ssh_port.clone(), ssh_cache: ssh_cache.clone(), host: host_perceptor });
     let actuator: Arc<dyn lagado_agent::perception::Actuator + Send + Sync> =
-        Arc::new(DynamicActuator { vm_port: vm_ssh_port.clone(), host: host_actuator });
+        Arc::new(DynamicActuator { vm_port: vm_ssh_port.clone(), ssh_cache: ssh_cache.clone(), host: host_actuator });
 
     let state = Arc::new(AppState {
         agent: Arc::new(Mutex::new(AgentState {
@@ -456,6 +477,7 @@ fn main() {
         vm_ssh_port: vm_ssh_port.clone(),
         vm_backend: QemuDesktopBackend::default(),
         session_dek: Arc::new(Mutex::new(None)),
+        ssh_cache,
     });
 
     tauri::Builder::default()

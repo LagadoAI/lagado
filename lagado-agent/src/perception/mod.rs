@@ -4,6 +4,10 @@
 //! these traits. `MockPerceptor`/`MockActuator` let the agent core build and run
 //! on any OS and in CI with no desktop dependency.
 
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use regex::Regex;
+
 /// Reads the focused window's interactive elements as a text dump.
 pub trait Perceptor: Send + Sync {
     fn read_screen(&self) -> String;
@@ -42,6 +46,42 @@ impl Actuator for MockActuator {
     fn key(&self, key: &str) -> String {
         format!("Pressed {key}")
     }
+}
+
+/// Coordinate cache shared between a matched Perceptor/Actuator pair.
+pub struct PerceptionCache {
+    pub screen_text: String,
+    pub coords: HashMap<String, (i32, i32)>,
+}
+
+impl PerceptionCache {
+    pub fn new() -> Self {
+        Self { screen_text: String::new(), coords: HashMap::new() }
+    }
+}
+
+impl Default for PerceptionCache {
+    fn default() -> Self { Self::new() }
+}
+
+/// Parse `ref_N (x,y,w,h)` lines from perceive.py output into center coords.
+pub fn parse_ref_coords(screen: &str) -> HashMap<String, (i32, i32)> {
+    let mut map = HashMap::new();
+    let re = match Regex::new(r"(ref_\w+).*?\((\d+),(\d+),(\d+),(\d+)\)") {
+        Ok(r) => r,
+        Err(_) => return map,
+    };
+    for line in screen.lines() {
+        if let Some(caps) = re.captures(line) {
+            let ref_id = caps[1].to_string();
+            let x: i32 = caps[2].parse().unwrap_or(0);
+            let y: i32 = caps[3].parse().unwrap_or(0);
+            let w: i32 = caps[4].parse().unwrap_or(0);
+            let h: i32 = caps[5].parse().unwrap_or(0);
+            map.insert(ref_id, (x + w / 2, y + h / 2));
+        }
+    }
+    map
 }
 
 #[cfg(target_os = "linux")]

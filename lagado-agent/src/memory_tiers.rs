@@ -138,7 +138,7 @@ impl MemoryTiers {
         };
 
         // Encrypt cold tier entry before storage
-        let passphrase = crate::security::crypto::machine_passphrase();
+        let passphrase = crate::auth::active_key();
         let encrypted = crate::security::crypto::encrypt(text.as_bytes(), &passphrase)
             .unwrap_or_else(|_| text.as_bytes().to_vec());
         let stored_text = hex::encode(&encrypted);
@@ -261,7 +261,7 @@ impl MemoryTiers {
             .map(|rows| rows.filter_map(|r| r.ok()).collect())
             .unwrap_or_default();
 
-        let passphrase = crate::security::crypto::machine_passphrase();
+        let passphrase = crate::auth::active_key();
         let mut db_chars = 0;
         for (raw_text, tier) in entries {
             if db_chars >= half_budget {

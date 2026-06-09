@@ -3,6 +3,22 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 use rand::RngCore;
 use aes_gcm::aead::OsRng;
+use std::sync::RwLock;
+
+static SESSION_DEK: RwLock<Option<Vec<u8>>> = RwLock::new(None);
+
+/// Set the in-memory session DEK after successful login/signup.
+pub fn set_session_dek(dek: Vec<u8>) {
+    if let Ok(mut g) = SESSION_DEK.write() { *g = Some(dek); }
+}
+
+/// Return the active encryption key: session DEK if set, else machine passphrase fallback.
+pub fn active_key() -> Vec<u8> {
+    SESSION_DEK.read()
+        .ok()
+        .and_then(|g| g.clone())
+        .unwrap_or_else(|| crate::security::crypto::machine_passphrase())
+}
 
 const MAX_FAILURES: u32 = 3;
 const LOCKOUT_SECS: u64 = 600;

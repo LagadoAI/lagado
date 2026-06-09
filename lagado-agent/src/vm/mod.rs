@@ -1,6 +1,8 @@
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, RwLock};
 
+use crate::perception::PerceptionCache;
+
 mod qmp;
 pub mod ssh_actuator;
 pub mod ssh_perceptor;
@@ -55,33 +57,35 @@ pub type VmSshPort = Arc<RwLock<Option<u16>>>;
 /// Routes actuator calls through SSH when a VM is active, host impl otherwise.
 pub struct DynamicActuator {
     pub vm_port: VmSshPort,
+    pub ssh_cache: Arc<std::sync::Mutex<PerceptionCache>>,
     pub host: Arc<dyn crate::perception::Actuator + Send + Sync>,
 }
 
 /// Routes perceptor calls through SSH when a VM is active, host impl otherwise.
 pub struct DynamicPerceptor {
     pub vm_port: VmSshPort,
+    pub ssh_cache: Arc<std::sync::Mutex<PerceptionCache>>,
     pub host: Arc<dyn crate::perception::Perceptor + Send + Sync>,
 }
 
 impl crate::perception::Actuator for DynamicActuator {
     fn click(&self, selector: &str) -> String {
         if let Some(port) = *self.vm_port.read().unwrap_or_else(|e| e.into_inner()) {
-            SshActuator::new("127.0.0.1", port, "laputa").click(selector)
+            SshActuator::with_cache("127.0.0.1", port, "laputa", self.ssh_cache.clone()).click(selector)
         } else {
             self.host.click(selector)
         }
     }
     fn type_text(&self, selector: &str, text: &str) -> String {
         if let Some(port) = *self.vm_port.read().unwrap_or_else(|e| e.into_inner()) {
-            SshActuator::new("127.0.0.1", port, "laputa").type_text(selector, text)
+            SshActuator::with_cache("127.0.0.1", port, "laputa", self.ssh_cache.clone()).type_text(selector, text)
         } else {
             self.host.type_text(selector, text)
         }
     }
     fn key(&self, key: &str) -> String {
         if let Some(port) = *self.vm_port.read().unwrap_or_else(|e| e.into_inner()) {
-            SshActuator::new("127.0.0.1", port, "laputa").key(key)
+            SshActuator::with_cache("127.0.0.1", port, "laputa", self.ssh_cache.clone()).key(key)
         } else {
             self.host.key(key)
         }
@@ -91,7 +95,7 @@ impl crate::perception::Actuator for DynamicActuator {
 impl crate::perception::Perceptor for DynamicPerceptor {
     fn read_screen(&self) -> String {
         if let Some(port) = *self.vm_port.read().unwrap_or_else(|e| e.into_inner()) {
-            SshPerceptor::new("127.0.0.1", port, "laputa").read_screen()
+            SshPerceptor::with_cache("127.0.0.1", port, "laputa", self.ssh_cache.clone()).read_screen()
         } else {
             self.host.read_screen()
         }

@@ -18,8 +18,23 @@ pub enum Verdict {
 pub fn classify(call: &ToolCall) -> RiskTier {
     match call {
         ToolCall::Wait { .. } | ToolCall::Done { .. } | ToolCall::Task { .. } | ToolCall::Chat { .. } => RiskTier::Read,
-        ToolCall::Click { .. } | ToolCall::Key { .. } | ToolCall::Type { .. } => RiskTier::Write,
+        ToolCall::Click { .. } | ToolCall::Key { .. } => RiskTier::Write,
+        ToolCall::Type { text, .. } => {
+            if is_destructive_text(text) { RiskTier::Destructive } else { RiskTier::Write }
+        }
     }
+}
+
+fn is_destructive_text(text: &str) -> bool {
+    let t = text.to_lowercase();
+    // Shell commands that destroy data or system state
+    let patterns = [
+        "rm -rf", "rm -r /", "mkfs", "dd if=", "format c:",
+        ":(){:|:&};:", "chmod -r 000", "> /dev/sda",
+        "drop table", "drop database", "truncate table",
+        "del /f /s /q", "rd /s /q",
+    ];
+    patterns.iter().any(|p| t.contains(p))
 }
 
 pub fn evaluate_action(call: &ToolCall) -> Verdict {
