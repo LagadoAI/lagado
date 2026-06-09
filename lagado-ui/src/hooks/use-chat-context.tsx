@@ -1,7 +1,7 @@
 import { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react'
 import type { ReactNode } from 'react'
-import { useAgentSocket } from './useAgentSocket'
-import type { PermissionRequest, ConnState } from './useAgentSocket'
+import { useTauriAgent } from './useTauriAgent'
+import type { PermissionRequest, ConnState } from './useTauriAgent'
 
 export interface Message {
   id: string
@@ -53,7 +53,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     localStorage.setItem('ui-opacity', opacity.toString())
   }, [])
 
-  const socket = useAgentSocket({
+  const socket = useTauriAgent({
     onPermissionRequest: useCallback((req: PermissionRequest) => {
       if (!isMountedRef.current) return
       setPendingPermission(req)

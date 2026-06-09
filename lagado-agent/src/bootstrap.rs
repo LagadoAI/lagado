@@ -1,7 +1,7 @@
 use std::process::{Child, Command};
 use crate::{chronos, config, governor};
 
-pub(crate) async fn ensure_llama_server() -> Option<Child> {
+pub async fn ensure_llama_server() -> Option<Child> {
     // ── Governor: detect hardware, plan server config ─────────────
     let cfg = governor::detect_and_plan(config::CONTEXT_SIZE);
     chronos::log(&format!(

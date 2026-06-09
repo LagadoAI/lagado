@@ -1,0 +1,3 @@
+[workspace]
+members = ["lagado-agent", "lagado-ui/src-tauri"]
+resolver = "2"

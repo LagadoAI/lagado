@@ -9,7 +9,7 @@ use crate::perception::{Perceptor, Actuator};
 use crate::{chronos, config, envelope, gate};
 
 // ── State shared between WebSocket and agent ──────────────────────
-pub(crate) struct AgentState {
+pub struct AgentState {
     pub goal: String,
     pub running: bool,
     pub approval_tx: Option<mpsc::Sender<bool>>,
@@ -97,7 +97,7 @@ async fn request_and_await_approval(
 }
 
 // ── Agent loop ────────────────────────────────────────────────────
-pub(crate) async fn agent_loop(
+pub async fn agent_loop(
     state: Arc<Mutex<AgentState>>,
     adapter: Arc<dyn InferenceAdapter>,
     perceptor: Arc<dyn Perceptor>,

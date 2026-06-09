@@ -2,9 +2,9 @@ use super::InferenceAdapter;
 use std::path::Path;
 
 pub struct LlamaCppAdapter {
-    base_url: String,
-    model_name: String,
-    context_size: usize,
+    pub base_url: String,
+    pub model_name: String,
+    pub context_size: usize,
 }
 
 impl LlamaCppAdapter {
