@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { useState } from 'react';
 import { TooltipProvider } from '@/components/ui/tooltip';
+import Awakening from './pages/Awakening';
 import LoginPage from './pages/LoginPage';
 import FirstLaunchWelcome from './pages/FirstLaunchWelcome';
 import FirstLaunchSystemDetected from './pages/FirstLaunchSystemDetected';
@@ -29,6 +30,12 @@ import './index.css';
 import { ChatProvider } from './hooks/use-chat-context';
 
 function AppRoutes({ isLoggedIn, setIsLoggedIn }: { isLoggedIn: boolean; setIsLoggedIn: (v: boolean) => void }) {
+  // Show Awakening on first launch (before login)
+  const hasAwakened = localStorage.getItem('lagado_awakened') === 'true'
+  if (!hasAwakened) {
+    return <Awakening />
+  }
+
   if (!isLoggedIn) {
     return <LoginPage onLogin={() => setIsLoggedIn(true)} />;
   }
@@ -36,6 +43,7 @@ function AppRoutes({ isLoggedIn, setIsLoggedIn }: { isLoggedIn: boolean; setIsLo
   return (
     <ChatProvider>
       <Routes>
+        <Route path="/awakening" element={<Awakening />} />
         <Route path="/setup/welcome" element={<FirstLaunchWelcome onNext={() => {}} />} />
         <Route path="/setup/system" element={<FirstLaunchSystemDetected onNext={() => {}} />} />
         <Route path="/setup/models" element={<FirstLaunchModelSelection onNext={() => {}} />} />

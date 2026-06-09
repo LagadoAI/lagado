@@ -1,68 +1,77 @@
- 
+import React, { useState, useEffect } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { Card } from "../components/Card";
+import { Button } from "../components/Button";
+import { Checkbox } from "../components/Checkbox";
+import { Badge } from "../components/Badge";
+
 function SettingsModels() {
-  const [activeModel, setActiveModel] = useState("qwen-2.5b");
+  const [models, setModels] = useState<string[]>([]);
+  const [activeModel, setActiveModelState] = useState<string>("");
+  const [timeline, setTimeline] = useState<Array<{ timestamp: number; active_goal: string; last_action: string }>>([]);
   const [autoSwitch, setAutoSwitch] = useState(false);
- 
-  const installedModels = [
-    { id: "tinyllama", name: "TinyLlama-1B-Q4", size: "300 MB", status: "cold" },
-    { id: "qwen-1b", name: "Qwen3-1B-Q4", size: "500 MB", status: "cold" },
-    { id: "qwen-2.5b", name: "Qwen3-2.5B-IQ4", size: "1.8 GB", status: "active" },
-  ];
+
+  useEffect(() => {
+    invoke<string[]>("list_models")
+      .then(setModels)
+      .catch(() => {});
+    invoke<string>("get_active_model")
+      .then(setActiveModelState)
+      .catch(() => {});
+    invoke<any[]>("get_chronos_recent", { n: 10 })
+      .then(setTimeline)
+      .catch(() => {});
+  }, []);
+
+  const handleModelChange = (filename: string) => {
+    invoke("set_active_model", { filename })
+      .then(() => setActiveModelState(filename))
+      .catch(console.error);
+  };
  
   return (
-    <Card>
-      <h2 className="text-h2 text-lagado-text-bright font-bold mb-6">Models</h2>
- 
-      <div className="space-y-6">
-        <div>
-          <label className="block text-body-sm text-lagado-text-dim mb-2">Active Model</label>
-          <Select
-            value={activeModel}
-            onChange={setActiveModel}
-            options={installedModels.map((m) => ({ value: m.id, label: m.name }))}
-          />
-        </div>
- 
-        <div>
-          <Checkbox
-            label="Auto-switch model based on task complexity"
-            checked={autoSwitch}
-            onChange={setAutoSwitch}
-          />
-        </div>
- 
-        <div>
-          <h3 className="text-h3 text-lagado-text-bright font-semibold mb-3">Installed Models</h3>
-          <div className="space-y-2">
-            {installedModels.map((model) => (
-              <div
-                key={model.id}
-                className="bg-lagado-surface-2 border border-lagado-border rounded-sm p-4 flex items-center justify-between"
+    <div className="space-y-8">
+      <Card>
+        <h2 className="text-h2 text-lagado-text-bright font-bold mb-6">Active Model</h2>
+        <div className="space-y-2">
+          {models.length === 0 ? (
+            <p className="text-lagado-text-dim text-body-sm">No models found in models directory.</p>
+          ) : (
+            models.map((m) => (
+              <button
+                key={m}
+                onClick={() => handleModelChange(m)}
+                className={`w-full text-left px-4 py-3 rounded-md border text-body-sm transition-colors ${
+                  m === activeModel
+                    ? "border-lagado-red bg-lagado-red bg-opacity-10 text-lagado-text-bright"
+                    : "border-lagado-border text-lagado-text hover:border-lagado-red"
+                }`}
               >
-                <div>
-                  <div className="text-body text-lagado-text-bright font-semibold">{model.name}</div>
-                  <div className="flex items-center gap-3 mt-1 text-body-sm text-lagado-text-dim">
-                    <span>Size: {model.size}</span>
-                    <Badge variant={model.status === "active" ? "success" : "default"}>
-                      {model.status === "active" ? "ACTIVE" : "COLD"}
-                    </Badge>
-                  </div>
-                </div>
-                <div className="flex gap-2">
-                  <Button variant="secondary" size="sm">
-                    {model.status === "active" ? "In Use" : "Activate"}
-                  </Button>
-                  <Button variant="secondary" size="sm">Remove</Button>
-                </div>
+                {m} {m === activeModel && <span className="text-lagado-red ml-2">● active</span>}
+              </button>
+            ))
+          )}
+        </div>
+      </Card>
+
+      <Card>
+        <h2 className="text-h2 text-lagado-text-bright font-bold mb-6">Recent Timeline</h2>
+        {timeline.length === 0 ? (
+          <p className="text-lagado-text-dim text-body-sm">No timeline entries yet.</p>
+        ) : (
+          <div className="space-y-2">
+            {timeline.map((entry, i) => (
+              <div key={i} className="px-4 py-2 bg-lagado-surface-2 rounded-md border border-lagado-border">
+                <p className="text-body-sm text-lagado-text-bright truncate">{entry.active_goal}</p>
+                <p className="text-caption text-lagado-text-dim">{entry.last_action}</p>
+                <p className="text-caption text-lagado-text-dim opacity-50">
+                  {new Date(entry.timestamp * 1000).toLocaleString()}
+                </p>
               </div>
             ))}
           </div>
-        </div>
- 
-        <Button variant="primary" size="md">
-          + Browse Models
-        </Button>
-      </div>
-    </Card>
+        )}
+      </Card>
+    </div>
   );
 }

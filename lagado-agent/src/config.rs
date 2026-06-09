@@ -100,3 +100,41 @@ pub fn ws_port() -> u16 {
 pub fn ws_addr() -> String {
     format!("{}:{}", ws_host(), ws_port())
 }
+
+/// Read the active model filename from data_dir/config/model.txt.
+/// Falls back to DEFAULT_MODEL_FILE if the file doesn't exist.
+pub fn active_model() -> String {
+    if let Some(p) = dev_override("LAGADO_MODEL_PATH") {
+        return p;
+    }
+    let config_file = data_dir().join("config").join("model.txt");
+    if let Ok(s) = std::fs::read_to_string(&config_file) {
+        let trimmed = s.trim().to_string();
+        if !trimmed.is_empty() {
+            return trimmed;
+        }
+    }
+    DEFAULT_MODEL_FILE.to_string()
+}
+
+/// Write the active model filename to data_dir/config/model.txt.
+pub fn set_active_model(filename: &str) -> Result<(), String> {
+    let config_dir = data_dir().join("config");
+    std::fs::create_dir_all(&config_dir).map_err(|e| e.to_string())?;
+    std::fs::write(config_dir.join("model.txt"), filename).map_err(|e| e.to_string())
+}
+
+/// List all .gguf files in the models directory.
+pub fn available_models() -> Vec<String> {
+    let models_dir = data_dir().join("models");
+    std::fs::read_dir(&models_dir)
+        .ok()
+        .into_iter()
+        .flatten()
+        .filter_map(|e| e.ok())
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().to_string();
+            if name.ends_with(".gguf") { Some(name) } else { None }
+        })
+        .collect()
+}

@@ -126,6 +126,40 @@ async fn send_approval(
     Ok(())
 }
 
+#[tauri::command]
+async fn initialize_timeline() -> Result<(), String> {
+    lagado_agent::chronos::initialize_timeline("default");
+    Ok(())
+}
+
+#[tauri::command]
+fn get_active_model() -> String {
+    lagado_agent::config::active_model()
+}
+
+#[tauri::command]
+fn set_active_model(filename: String) -> Result<(), String> {
+    lagado_agent::config::set_active_model(&filename)
+}
+
+#[tauri::command]
+fn list_models() -> Vec<String> {
+    lagado_agent::config::available_models()
+}
+
+#[tauri::command]
+fn get_chronos_recent(n: usize) -> Vec<serde_json::Value> {
+    match lagado_agent::chronos::ChronosDb::open() {
+        Ok(db) => db.recent(n).into_iter().map(|s| serde_json::json!({
+            "timestamp": s.timestamp,
+            "active_goal": s.active_goal,
+            "last_action": s.last_action,
+            "confidence": s.confidence,
+        })).collect(),
+        Err(_) => vec![],
+    }
+}
+
 fn main() {
     tracing_subscriber::fmt::init();
 
@@ -177,7 +211,7 @@ fn main() {
             Ok(())
         })
         .manage(state)
-        .invoke_handler(tauri::generate_handler![send_goal, send_chat, send_command, send_approval])
+        .invoke_handler(tauri::generate_handler![send_goal, send_chat, send_command, send_approval, initialize_timeline, get_active_model, set_active_model, list_models, get_chronos_recent])
         .run(tauri::generate_context!())
         .expect("Lagado failed to start");
 }
