@@ -50,6 +50,10 @@ pub mod linux;
 #[cfg(target_os = "linux")]
 pub use linux::{LinuxPerceptor, LinuxActuator, linux_pair};
 
+pub mod capture;
+pub mod delta;
+pub mod vlm_adapter;
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -27,6 +27,7 @@ mod security;
 mod self_model;
 mod skill_library;
 mod sleep_gate;
+mod terminal;
 mod types;
 
 fn main() {

@@ -23,3 +23,5 @@ argon2 = "0.5"
 rand = "0.8"
 hostname = "0.3"
 hex = "0.4"
+blake3 = "1"
+nix = { version = "0.27", features = ["fs", "process", "term", "ioctl"] }
