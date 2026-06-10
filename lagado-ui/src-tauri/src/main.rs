@@ -5,15 +5,17 @@ use tokio::sync::{mpsc, Mutex};
 use tauri::{State, Emitter};
 use lagado_agent::{
     agent::AgentState,
-    bootstrap::{ensure_llama_server, ensure_classifier_server, ensure_vlm_server},
+    bootstrap::{ensure_llama_server, ensure_classifier_server},
     config,
     hydra,
     inference::{InferenceAdapter, llama_cpp::LlamaCppAdapter},
     memory_tiers::MemoryTiers,
-    perception::{Perceptor, Actuator, PerceptionCache, VlmPerceptor, vlm_adapter::VlmAdapter},
+    perception::{Perceptor, Actuator, PerceptionCache},
     sleep_gate::SleepGate,
     vm::{QemuDesktopBackend, VmHandle, VmBackend, VmSshPort, DynamicActuator, DynamicPerceptor},
 };
+#[cfg(target_os = "linux")]
+use lagado_agent::vision::VisualEncoder;
 
 /// Kills and reaps the child process on drop — prevents server orphans on app exit.
 struct KillOnDrop(std::process::Child);
@@ -32,7 +34,8 @@ struct AppState {
     actuator: Arc<dyn Actuator + Send + Sync>,
     _llama_child: Arc<Mutex<Option<KillOnDrop>>>,
     _classifier_child: Arc<Mutex<Option<KillOnDrop>>>,
-    _vlm_child: Arc<Mutex<Option<KillOnDrop>>>,
+    #[cfg(target_os = "linux")]
+    visual_encoder: Option<Arc<VisualEncoder>>,
     vm: Arc<Mutex<Option<VmHandle>>>,
     vm_ssh_port: VmSshPort,
     vm_backend: QemuDesktopBackend,
@@ -73,6 +76,8 @@ async fn send_goal(
     let perceptor = state.perceptor.clone();
     let actuator = state.actuator.clone();
     let memory_tiers = state.memory_tiers.clone();
+    #[cfg(target_os = "linux")]
+    let visual_encoder = state.visual_encoder.clone();
 
     tokio::spawn(async move {
         hydra::run(
@@ -86,6 +91,7 @@ async fn send_goal(
             approval_rx,
             confirm_tx,
             memory_tiers,
+            #[cfg(target_os = "linux")] visual_encoder,
         )
         .await;
     });
@@ -464,8 +470,6 @@ fn main() {
     let llama_for_setup = llama_child.clone();
     let classifier_child: Arc<Mutex<Option<KillOnDrop>>> = Arc::new(Mutex::new(None));
     let classifier_for_setup = classifier_child.clone();
-    let vlm_child: Arc<Mutex<Option<KillOnDrop>>> = Arc::new(Mutex::new(None));
-    let vlm_for_setup = vlm_child.clone();
 
     let vm_ssh_port: VmSshPort = std::sync::Arc::new(std::sync::RwLock::new(None));
 
@@ -487,20 +491,31 @@ fn main() {
 
     let ssh_cache = Arc::new(std::sync::Mutex::new(PerceptionCache::new()));
 
-    let dynamic_perceptor: Arc<dyn lagado_agent::perception::Perceptor + Send + Sync> =
-        Arc::new(DynamicPerceptor { vm_port: vm_ssh_port.clone(), ssh_cache: ssh_cache.clone(), host: host_perceptor });
-
-    // Wrap with VLM visual layer if the VLM server is running
-    let vlm = VlmAdapter::probe(&config::vlm_base_url());
     let perceptor: Arc<dyn lagado_agent::perception::Perceptor + Send + Sync> =
-        Arc::new(VlmPerceptor {
-            inner: dynamic_perceptor,
-            vlm,
-            frame_path: config::FRAME_PATH.to_string(),
-        });
+        Arc::new(DynamicPerceptor { vm_port: vm_ssh_port.clone(), ssh_cache: ssh_cache.clone(), host: host_perceptor });
 
     let actuator: Arc<dyn lagado_agent::perception::Actuator + Send + Sync> =
         Arc::new(DynamicActuator { vm_port: vm_ssh_port.clone(), ssh_cache: ssh_cache.clone(), host: host_actuator });
+
+    // Load in-process visual encoder (Linux only). Gracefully absent if model files missing.
+    #[cfg(target_os = "linux")]
+    let visual_encoder: Option<Arc<VisualEncoder>> = {
+        let model_p  = config::vlm_model_path();
+        let mmproj_p = config::vlm_mmproj_path();
+        if model_p.exists() && mmproj_p.exists() {
+            match VisualEncoder::load(
+                &model_p.to_string_lossy(),
+                &mmproj_p.to_string_lossy(),
+                true,
+            ) {
+                Ok(enc) => { tracing::info!("VisualEncoder ready"); Some(Arc::new(enc)) }
+                Err(e)  => { tracing::warn!("VisualEncoder failed to load: {e}"); None }
+            }
+        } else {
+            tracing::info!("VLM model files absent — visual embedding disabled");
+            None
+        }
+    };
 
     let state = Arc::new(AppState {
         agent: Arc::new(Mutex::new(AgentState {
@@ -514,7 +529,8 @@ fn main() {
         actuator,
         _llama_child: llama_child,
         _classifier_child: classifier_child,
-        _vlm_child: vlm_child,
+        #[cfg(target_os = "linux")]
+        visual_encoder,
         vm: Arc::new(Mutex::new(None)),
         vm_ssh_port: vm_ssh_port.clone(),
         vm_backend: QemuDesktopBackend::default(),
@@ -530,15 +546,10 @@ fn main() {
                 let child = ensure_llama_server().await;
                 *llama_for_setup.lock().await = child.map(KillOnDrop);
             });
-            // Start 350M classifier server (CPU-only, port 8081)
+            // Start 1.2B classifier server (CPU-only, port 8081)
             tauri::async_runtime::spawn(async move {
                 let child = ensure_classifier_server().await;
                 *classifier_for_setup.lock().await = child.map(KillOnDrop);
-            });
-            // Start VLM server (vision, port 8082) — requires mmproj file
-            tauri::async_runtime::spawn(async move {
-                let child = ensure_vlm_server().await;
-                *vlm_for_setup.lock().await = child.map(KillOnDrop);
             });
             // Start background memory consolidation loop (5-min decay cycles)
             tauri::async_runtime::spawn(async move {

@@ -30,3 +30,5 @@ pub mod sleep_gate;
 pub mod terminal;
 pub mod types;
 pub mod vm;
+#[cfg(target_os = "linux")]
+pub mod vision;

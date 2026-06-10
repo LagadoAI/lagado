@@ -75,11 +75,18 @@ impl MemoryTiers {
                 temperature REAL NOT NULL,
                 created_at INTEGER NOT NULL,
                 accessed_at INTEGER NOT NULL,
-                access_count INTEGER NOT NULL
+                access_count INTEGER NOT NULL,
+                embedding BLOB
             )",
             [],
         )
         .map_err(|e| format!("Failed to create memory_entries table: {}", e))?;
+
+        // Migrate existing DBs that don't have the embedding column yet
+        let _ = db.execute(
+            "ALTER TABLE memory_entries ADD COLUMN embedding BLOB",
+            [],
+        );
 
         Ok(MemoryTiers {
             hot: Vec::new(),
@@ -161,6 +168,26 @@ impl MemoryTiers {
         Ok(())
     }
 
+    /// Push a cross-session episode and return its UUID for later embedding attachment.
+    pub fn push_episode_id(&mut self, text: String) -> Result<String, String> {
+        let now = now_unix();
+        let id = Uuid::new_v4().to_string();
+
+        let passphrase = crate::auth::active_key();
+        let encrypted = crate::security::crypto::encrypt(text.as_bytes(), &passphrase)
+            .unwrap_or_else(|_| text.as_bytes().to_vec());
+        let stored_text = hex::encode(&encrypted);
+
+        self.db
+            .execute(
+                "INSERT INTO memory_entries (id, text, tier, temperature, created_at, accessed_at, access_count)
+                 VALUES (?1, ?2, 'cold', 1.0, ?3, ?4, 0)",
+                rusqlite::params![&id, &stored_text, now, now],
+            )
+            .map_err(|e| format!("Failed to insert episode: {}", e))?;
+        Ok(id)
+    }
+
     /// Push a cross-session episode into COLD tier at full temperature.
     /// Use for goal completions, aborts, and significant events that should
     /// survive session restarts. Encrypted via active_key().
@@ -181,6 +208,87 @@ impl MemoryTiers {
             )
             .map_err(|e| format!("Failed to insert episode: {}", e))?;
         Ok(())
+    }
+
+    /// Store a visual embedding for an already-persisted episode.
+    /// `embedding` is a mean-pooled float vector (n_embd dims) stored as raw bytes.
+    pub fn store_visual_embedding(&mut self, episode_id: &str, embedding: &[f32]) -> Result<(), String> {
+        let bytes: Vec<u8> = embedding.iter()
+            .flat_map(|f| f.to_le_bytes())
+            .collect();
+        self.db.execute(
+            "UPDATE memory_entries SET embedding = ?1 WHERE id = ?2",
+            rusqlite::params![bytes, episode_id],
+        ).map_err(|e| format!("store_visual_embedding: {e}"))?;
+        Ok(())
+    }
+
+    /// Return the text of the top-K cold episodes most visually similar to `query`.
+    /// Loads all cold embeddings into RAM and runs cosine similarity in Rust.
+    /// Decrypts episode text before returning.
+    pub fn find_similar_by_embedding(&self, query: &[f32], top_k: usize) -> Vec<String> {
+        if query.is_empty() || top_k == 0 {
+            return Vec::new();
+        }
+
+        let mut stmt = match self.db.prepare(
+            "SELECT text, embedding FROM memory_entries WHERE tier = 'cold' AND embedding IS NOT NULL"
+        ) {
+            Ok(s) => s,
+            Err(_) => return Vec::new(),
+        };
+
+        let rows: Vec<(String, Vec<u8>)> = stmt
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, Vec<u8>>(1)?))
+            })
+            .map(|r| r.filter_map(|x| x.ok()).collect())
+            .unwrap_or_default();
+
+        let passphrase = crate::auth::active_key();
+
+        let mut scored: Vec<(f32, String)> = rows
+            .into_iter()
+            .filter_map(|(raw_text, embd_bytes)| {
+                // Decode embedding bytes → &[f32]
+                if embd_bytes.len() % 4 != 0 {
+                    return None;
+                }
+                let stored: Vec<f32> = embd_bytes
+                    .chunks_exact(4)
+                    .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+                    .collect();
+
+                if stored.len() != query.len() {
+                    return None;
+                }
+
+                #[cfg(target_os = "linux")]
+                let sim = crate::vision::cosine_similarity(query, &stored);
+                #[cfg(not(target_os = "linux"))]
+                let sim = {
+                    let dot: f32 = query.iter().zip(&stored).map(|(a, b)| a * b).sum();
+                    let na: f32 = query.iter().map(|x| x * x).sum::<f32>().sqrt();
+                    let nb: f32 = stored.iter().map(|x| x * x).sum::<f32>().sqrt();
+                    if na == 0.0 || nb == 0.0 { 0.0 } else { dot / (na * nb) }
+                };
+
+                // Decrypt the text
+                let text = if let Ok(bytes) = hex::decode(&raw_text) {
+                    crate::security::crypto::decrypt(&bytes, &passphrase)
+                        .ok()
+                        .and_then(|b| String::from_utf8(b).ok())
+                        .unwrap_or(raw_text)
+                } else {
+                    raw_text
+                };
+
+                Some((sim, text))
+            })
+            .collect();
+
+        scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+        scored.into_iter().take(top_k).map(|(_, t)| t).collect()
     }
 
     /// Reinforce an entry by ID (increase temperature, update access metadata).

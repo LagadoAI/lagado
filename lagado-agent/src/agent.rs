@@ -112,6 +112,8 @@ pub async fn agent_loop(
     mut approval_rx: mpsc::Receiver<bool>,
     confirm_tx: mpsc::Sender<String>,
     memory_tiers: Arc<tokio::sync::Mutex<crate::memory_tiers::MemoryTiers>>,
+    #[cfg(target_os = "linux")]
+    visual_encoder: Option<Arc<crate::vision::VisualEncoder>>,
 ) {
     let mut enforcer = StepEnforcer::new();
     let mut memory = Memory::new(|steps| {
@@ -278,10 +280,12 @@ pub async fn agent_loop(
                             state: "goal_done".to_string(),
                             detail: reason.clone(),
                         })).await;
-                        // Persist episode to cold tier for cross-session recall
                         {
                             let mut tiers = memory_tiers.lock().await;
-                            let _ = tiers.push_episode(format!("Goal '{goal}': {reason}"));
+                            if let Ok(episode_id) = tiers.push_episode_id(format!("Goal '{goal}': {reason}")) {
+                                #[cfg(target_os = "linux")]
+                                store_visual_snapshot(&visual_encoder, &mut tiers, &episode_id);
+                            }
                         }
                         tracing::info!("Goal achieved.");
                         break;
@@ -292,10 +296,12 @@ pub async fn agent_loop(
                             state: "goal_done".to_string(),
                             detail: description.clone(),
                         })).await;
-                        // Persist episode to cold tier for cross-session recall
                         {
                             let mut tiers = memory_tiers.lock().await;
-                            let _ = tiers.push_episode(format!("Task '{goal}': {description}"));
+                            if let Ok(episode_id) = tiers.push_episode_id(format!("Task '{goal}': {description}")) {
+                                #[cfg(target_os = "linux")]
+                                store_visual_snapshot(&visual_encoder, &mut tiers, &episode_id);
+                            }
                         }
                         tracing::info!("Goal achieved.");
                         break;
@@ -340,12 +346,14 @@ pub async fn agent_loop(
                     }
                     let detail = format!("{:?}", e);
                     chronos::log(&format!("goal_aborted: {detail}"));
-                    // Persist abort to cold tier so future sessions avoid repeating the same failure
                     {
                         let mut tiers = memory_tiers.lock().await;
-                        let _ = tiers.push_episode(format!(
+                        if let Ok(episode_id) = tiers.push_episode_id(format!(
                             "Aborted '{goal}' at step {}: {detail}", enforcer.step()
-                        ));
+                        )) {
+                            #[cfg(target_os = "linux")]
+                            store_visual_snapshot(&visual_encoder, &mut tiers, &episode_id);
+                        }
                     }
                     let _ = confirm_tx.send(envelope::make("status", envelope::StatusPayload {
                         state: "goal_aborted".to_string(),
@@ -355,5 +363,23 @@ pub async fn agent_loop(
                 }
             }
         }
+    }
+}
+
+/// Encode the current FRAME_PATH PNG and attach the embedding to the given episode.
+/// Runs synchronously — called at episode boundaries only (not every perception tick).
+#[cfg(target_os = "linux")]
+fn store_visual_snapshot(
+    encoder: &Option<Arc<crate::vision::VisualEncoder>>,
+    tiers: &mut crate::memory_tiers::MemoryTiers,
+    episode_id: &str,
+) {
+    let enc = match encoder { Some(e) => e, None => return };
+    let png = match std::fs::read(crate::config::FRAME_PATH) {
+        Ok(b) => b,
+        Err(_) => return,
+    };
+    if let Some(embd) = enc.encode_png(&png) {
+        let _ = tiers.store_visual_embedding(episode_id, &embd);
     }
 }

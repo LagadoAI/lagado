@@ -29,6 +29,8 @@ mod skill_library;
 mod sleep_gate;
 mod terminal;
 mod types;
+#[cfg(target_os = "linux")]
+mod vision;
 
 fn main() {
     // CLI dev entry point — starts llama-server only.
