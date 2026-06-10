@@ -194,7 +194,7 @@ Verify with `cargo check --workspace` + `npx tsc --noEmit` after every Haiku tas
 
 ## Status (2026-06-10)
 
-**Phase 1.4 COMPLETE. Phase 2 COMPLETE. Phase 3.1 COMPLETE. Phase 3.2 COMPLETE. Phase 3.3 COMPLETE. Phase 3.4 COMPLETE.**
+**Phase 1.4 COMPLETE. Phase 2 COMPLETE. Phase 3.1 COMPLETE. Phase 3.2 COMPLETE. Phase 3.3 COMPLETE. Phase 3.4 COMPLETE. Phase 3.5 COMPLETE.**
 
 ### What works end-to-end
 - App launches → auth gate → signup or login → chat
@@ -210,5 +210,4 @@ Verify with `cargo check --workspace` + `npx tsc --noEmit` after every Haiku tas
 - VLM subprocess retired; vision now in-process FFI only
 
 ### Phase 3 remaining
-- **3.5:** `security/sandbox.rs` — seccomp/cgroups for QEMU + agent subprocesses
 - **3.6:** MCP tool discovery (34 tools)

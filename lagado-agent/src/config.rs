@@ -173,6 +173,51 @@ pub fn set_active_model(filename: &str) -> Result<(), String> {
     std::fs::write(config_dir.join("model.txt"), filename).map_err(|e| e.to_string())
 }
 
+/// Maximum memory (bytes) the llama-server process may use.
+///
+/// Derived from the active model file size: a GGUF file is roughly equal to the
+/// model's in-RAM weight footprint, so `file_size × 1.5` gives the weights plus
+/// headroom for KV cache and IO buffers. This is model-agnostic — swap in a 3B
+/// or a 70B model and the cap adjusts automatically.
+///
+/// Override: LAGADO_LLAMA_MEMORY_MAX_GIB (integer GiB). Fallback: 8 GiB when
+/// the model file is absent (e.g. CI or first launch before download).
+pub fn llama_memory_max_bytes() -> u64 {
+    if let Some(gib) = std::env::var("LAGADO_LLAMA_MEMORY_MAX_GIB")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+    {
+        return gib * 1024 * 1024 * 1024;
+    }
+    // GGUF file size ≈ weight footprint; add 50% for KV cache + overhead
+    if let Ok(meta) = std::fs::metadata(model_path()) {
+        let file_bytes = meta.len();
+        if file_bytes > 0 {
+            return file_bytes + file_bytes / 2;
+        }
+    }
+    8 * 1024 * 1024 * 1024 // fallback: 8 GiB
+}
+
+/// Maximum memory (bytes) the classifier server process may use.
+/// Override: LAGADO_CLASSIFIER_MEMORY_MAX_GIB (integer GiB).
+/// Otherwise derived from the classifier model file size × 1.5, same logic as above.
+pub fn classifier_memory_max_bytes() -> u64 {
+    if let Some(gib) = std::env::var("LAGADO_CLASSIFIER_MEMORY_MAX_GIB")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+    {
+        return gib * 1024 * 1024 * 1024;
+    }
+    if let Ok(meta) = std::fs::metadata(classifier_model_path()) {
+        let file_bytes = meta.len();
+        if file_bytes > 0 {
+            return file_bytes + file_bytes / 2;
+        }
+    }
+    2 * 1024 * 1024 * 1024 // fallback: 2 GiB
+}
+
 /// List all .gguf files in the models directory.
 pub fn available_models() -> Vec<String> {
     let models_dir = data_dir().join("models");

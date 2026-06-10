@@ -138,8 +138,19 @@ impl VmBackend for QemuDesktopBackend {
         if let Some(ref iso) = cfg.seed_iso {
             cmd.args(["-cdrom", iso]);
         }
+        // QEMU's native seccomp sandbox — Linux-only; safe no-op on other platforms
+        cmd.args(crate::security::sandbox::qemu_sandbox_args());
         cmd.stdout(Stdio::null()).stderr(Stdio::null());
         let child = cmd.spawn().map_err(|e| format!("qemu-system-x86_64 spawn failed: {e}"))?;
+
+        // cgroup v2 memory + pid limits — best-effort, logged on failure
+        {
+            let mem_cap = (cfg.mem_mib as u64 + cfg.mem_mib as u64 / 2) * 1024 * 1024;
+            if let Err(e) = crate::security::sandbox::apply_limits(child.id(), "qemu", mem_cap, 512) {
+                tracing::warn!("sandbox: qemu: {e}");
+            }
+        }
+
         Ok(VmHandle {
             child,
             qmp_socket: cfg.qmp_socket.clone(),

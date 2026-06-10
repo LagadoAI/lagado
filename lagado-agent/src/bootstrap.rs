@@ -59,6 +59,13 @@ pub async fn ensure_classifier_server() -> Option<Child> {
 
     match cmd.spawn() {
         Ok(child) => {
+            if let Err(e) = crate::security::sandbox::apply_limits(
+                child.id(), "classifier",
+                config::classifier_memory_max_bytes(),
+                256,
+            ) {
+                tracing::warn!("sandbox: classifier: {e}");
+            }
             let ready = tokio::task::spawn_blocking(|| {
                 let url = config::classifier_base_url();
                 for _ in 0..30 {
@@ -193,6 +200,13 @@ pub async fn ensure_llama_server() -> Option<Child> {
     cmd.args(&args);
     match cmd.spawn() {
         Ok(child) => {
+            if let Err(e) = crate::security::sandbox::apply_limits(
+                child.id(), "llama",
+                config::llama_memory_max_bytes(),
+                256,
+            ) {
+                tracing::warn!("sandbox: llama: {e}");
+            }
             let ready = tokio::task::spawn_blocking(|| {
                 let url = config::llama_base_url();
                 for _ in 0..60 {
