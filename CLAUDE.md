@@ -147,7 +147,9 @@ Frame (PNG) → vision/shim.c (lagado_encode_image) → mean-pooled n_embd vecto
 | `security/sandbox.rs` | ✓ | cgroup v2 memory+pid limits (Linux), QEMU -sandbox flag, cleanup_stale |
 | `config.rs` | ✓ | Paths, FRAME_PATH, server config; llama/classifier_memory_max_bytes() from model file size × 1.5 (model-agnostic) |
 | `gate.rs` | ✓ | Read/Write/Destructive tiers; ConfirmTyped for destructive text |
-| `mcp/` | stub | MCP tool discovery (Phase 3.6) |
+| `mcp/client.rs` | ✓ | MCP stdio client — discover_tools() one-shot + parse_tools_list() pure fn |
+| `tools/mod.rs` | ✓ | ToolRegistry, TrustLevel, ToolBackend, 44 builtin entries, discover_mcp_tools() async |
+| `tools/executor.rs` | ✓ | Native Rust executor for 42 tools; SOCKS5-aware HTTP; DDG/SearXNG web search |
 | `operator.rs` | ✓ | StepEnforcer, ToolDescriptor, RiskLevel |
 
 ### UI (`lagado-ui/src/`)
@@ -195,7 +197,7 @@ Verify with `cargo check --workspace` + `npx tsc --noEmit` after every Haiku tas
 
 ## Status (2026-06-10)
 
-**Phase 1.4 COMPLETE. Phase 2 COMPLETE. Phase 3.1 COMPLETE. Phase 3.2 COMPLETE. Phase 3.3 COMPLETE. Phase 3.4 COMPLETE. Phase 3.5 COMPLETE.**
+**Phase 1.4 COMPLETE. Phase 2 COMPLETE. Phase 3.1 COMPLETE. Phase 3.2 COMPLETE. Phase 3.3 COMPLETE. Phase 3.4 COMPLETE. Phase 3.5 COMPLETE. Phase 3.6 COMPLETE.**
 
 ### What works end-to-end
 - App launches → auth gate → signup or login → chat
@@ -206,33 +208,18 @@ Verify with `cargo check --workspace` + `npx tsc --noEmit` after every Haiku tas
 - SleepGate decays hot/warm every 5min; cold tier never deleted
 - 1.2B classifier on :8081 handles intent classification (few-shot, ~80% accuracy)
 - Visual encoder runs in-process via libmtmd FFI; embeddings stored in MemoryTiers; cosine retrieval active
-- 2 server child processes (main 8B + 1.2B classifier) use KillOnDrop (defined in `bootstrap.rs`) — no orphans on app exit
-- ServerGuard polls /health every 10s; declares crash after 3 consecutive failures; restarts and retries indefinitely; emits `server_crashed`/`server_restarted`/`server_restart_failed` tauri events
-- VLM subprocess retired; vision now in-process FFI only
-- GPU detection: NVIDIA (nvidia-smi) + AMD (DRM sysfs); conservative binary fit (vram_free ≥ model×1.1 → ngl=99, else CPU); moe_experts_on_cpu wired to --cpu-moe for MoE models; vram_fit_fraction() on ServerConfig ready for Phase 3.x GGUF parser
-- cgroup v2 sandbox: apply_limits on llama/classifier/qemu; QEMU -sandbox seccomp flag; cleanup_stale at startup; memory caps from model file size × 1.5 (model-agnostic, env overrideable)
+- 2 server child processes (main 8B + 1.2B classifier) use KillOnDrop — no orphans on app exit
+- ServerGuard polls /health every 10s; auto-restart + emits tauri events
+- GPU detection: NVIDIA + AMD; conservative binary fit; moe_experts_on_cpu wired to --cpu-moe
+- cgroup v2 sandbox + QEMU -sandbox seccomp; model-agnostic memory caps
+- 44 bundled native Rust tools: filesystem, git, system, text/util, web (DDG+SearXNG, Tor-native), clipboard, VM, memory
+- Confidence gating: geometric mean of logprobs gates uncertain actions through HITL regardless of trust level
+- ToolRegistry: TrustLevel per tool, gate wired; tool_config.json for user overrides + MCP server installs
+- MCP stdio client: auto-discovers tools from user-added servers at startup (10s timeout, non-fatal)
+- Tool retrieval in prompt: top-10 per step by Jaccard scoring — never flat-dumps full catalog
+- 95 lib tests
 
-### Phase 3 remaining
-- **3.6:** MCP tool discovery + 50+ tool system. Design settled, two user decisions pending before implementation starts (see below).
-
-### Phase 3.6 design — ready to implement once user answers two questions
-
-**Architecture decided (advisor-reviewed):**
-- `ToolCall::Invoke { name: String, args: serde_json::Map<String, Value> }` — one generic variant added to the enum. All existing match arms add one explicit `Invoke` arm (no wildcard). Bracket parser extended: any unrecognised `name(args)` → Invoke.
-- `ToolRegistry` — central catalog mapping `name → { description, risk_level, backend, enabled, trust_level }`. Gate looks up risk by name for Invoke calls (maintains gate invariant #3).
-- `TrustLevel { Auto, Tap, Typed, Disabled }` — per-tool override, explicit opt-in for Auto (never default). Saved in `~/.laputa-secure/config/tool_config.json`.
-- `ToolBackend { Native, Mcp { cmd: Vec<String>, location: ServerLocation } }` where `ServerLocation { Host, Guest }`.
-- MCP transport: **stdio subprocess** (no new localhost port — sovereignty).
-- Tool retrieval: top-K relevant tools per step via `retrieval.rs` scoring. Never flat-dump 54 tool descriptions (tanks 8B selection accuracy).
-- No hand-coded 54 Rust executors — MCP servers supply tool implementations. Small native backend for VM-only tools (screenshot, vm_command) that have no MCP equivalent.
-
-**Implementation sequence:**
-1. `ToolCall::Invoke` + bracket parser + all match sites + gate-by-name lookup
-2. `ToolRegistry` + `tool_config.json` schema + `TrustLevel`
-3. MCP stdio client: `tools/list` → registry. Pure parse fn, unit-tested.
-4. One gated Invoke end-to-end (prove both host-HITL and guest-caged paths)
-5. More servers + tool retrieval in prompt
-
-**Two user decisions still needed (answer in next session):**
-1. **MCP runtime**: Allow Node.js/Python MCP servers on host (full ecosystem, supply-chain trade-off) vs guest-only (full containment, harder setup) vs Rust-only (no external runtimes, curated set)?
-2. **Bundled servers**: Which MCP servers auto-start out-of-the-box? Candidates: filesystem (10 tools), memory (5 tools), fetch/web (2 tools), git (9 tools).
+### Remaining / next session
+- Settings UI: tool manager (view/enable/disable, change trust levels), marketplace catalog browser, search backend config
+- GGUF parser for MoE detection (flips moe_experts_on_cpu, enables partial GPU offload)
+- Tool manager Tauri commands: get_tools, set_tool_trust, toggle_tool_enabled
