@@ -263,15 +263,7 @@ impl MemoryTiers {
                     return None;
                 }
 
-                #[cfg(target_os = "linux")]
                 let sim = crate::vision::cosine_similarity(query, &stored);
-                #[cfg(not(target_os = "linux"))]
-                let sim = {
-                    let dot: f32 = query.iter().zip(&stored).map(|(a, b)| a * b).sum();
-                    let na: f32 = query.iter().map(|x| x * x).sum::<f32>().sqrt();
-                    let nb: f32 = stored.iter().map(|x| x * x).sum::<f32>().sqrt();
-                    if na == 0.0 || nb == 0.0 { 0.0 } else { dot / (na * nb) }
-                };
 
                 // Decrypt the text
                 let text = if let Ok(bytes) = hex::decode(&raw_text) {

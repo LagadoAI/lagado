@@ -14,7 +14,6 @@ use lagado_agent::{
     sleep_gate::SleepGate,
     vm::{QemuDesktopBackend, VmHandle, VmBackend, VmSshPort, DynamicActuator, DynamicPerceptor},
 };
-#[cfg(target_os = "linux")]
 use lagado_agent::vision::VisualEncoder;
 
 /// Kills and reaps the child process on drop — prevents server orphans on app exit.
@@ -34,7 +33,6 @@ struct AppState {
     actuator: Arc<dyn Actuator + Send + Sync>,
     _llama_child: Arc<Mutex<Option<KillOnDrop>>>,
     _classifier_child: Arc<Mutex<Option<KillOnDrop>>>,
-    #[cfg(target_os = "linux")]
     visual_encoder: Option<Arc<VisualEncoder>>,
     vm: Arc<Mutex<Option<VmHandle>>>,
     vm_ssh_port: VmSshPort,
@@ -76,7 +74,6 @@ async fn send_goal(
     let perceptor = state.perceptor.clone();
     let actuator = state.actuator.clone();
     let memory_tiers = state.memory_tiers.clone();
-    #[cfg(target_os = "linux")]
     let visual_encoder = state.visual_encoder.clone();
 
     tokio::spawn(async move {
@@ -91,7 +88,7 @@ async fn send_goal(
             approval_rx,
             confirm_tx,
             memory_tiers,
-            #[cfg(target_os = "linux")] visual_encoder,
+            visual_encoder,
         )
         .await;
     });
@@ -497,8 +494,8 @@ fn main() {
     let actuator: Arc<dyn lagado_agent::perception::Actuator + Send + Sync> =
         Arc::new(DynamicActuator { vm_port: vm_ssh_port.clone(), ssh_cache: ssh_cache.clone(), host: host_actuator });
 
-    // Load in-process visual encoder (Linux only). Gracefully absent if model files missing.
-    #[cfg(target_os = "linux")]
+    // Load in-process visual encoder. Returns None gracefully if model files are absent
+    // or on non-Linux platforms (VisualEncoder::load returns Err there).
     let visual_encoder: Option<Arc<VisualEncoder>> = {
         let model_p  = config::vlm_model_path();
         let mmproj_p = config::vlm_mmproj_path();
@@ -529,7 +526,6 @@ fn main() {
         actuator,
         _llama_child: llama_child,
         _classifier_child: classifier_child,
-        #[cfg(target_os = "linux")]
         visual_encoder,
         vm: Arc::new(Mutex::new(None)),
         vm_ssh_port: vm_ssh_port.clone(),

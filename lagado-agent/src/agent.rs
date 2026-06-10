@@ -112,7 +112,6 @@ pub async fn agent_loop(
     mut approval_rx: mpsc::Receiver<bool>,
     confirm_tx: mpsc::Sender<String>,
     memory_tiers: Arc<tokio::sync::Mutex<crate::memory_tiers::MemoryTiers>>,
-    #[cfg(target_os = "linux")]
     visual_encoder: Option<Arc<crate::vision::VisualEncoder>>,
 ) {
     let mut enforcer = StepEnforcer::new();
@@ -155,6 +154,29 @@ pub async fn agent_loop(
         tiers.assemble_context(2048)
     };
 
+    // Visual similarity context: encode current frame → find top-3 most visually
+    // Visual similarity context: encode current frame → find top-3 past episodes with
+    // similar visual context. Runs once per invocation. No-op when encoder absent.
+    let visual_context: String = {
+        match (&visual_encoder, std::fs::read(crate::config::FRAME_PATH)) {
+            (Some(enc), Ok(png)) => {
+                let enc2 = enc.clone();
+                let embd = tokio::task::spawn_blocking(move || enc2.encode_png(&png))
+                    .await
+                    .unwrap_or(None);
+                if let Some(embd) = embd {
+                    let tiers = memory_tiers.lock().await;
+                    let similar = tiers.find_similar_by_embedding(&embd, 3);
+                    drop(tiers);
+                    similar.join("\n- ")
+                } else {
+                    String::new()
+                }
+            }
+            _ => String::new(),
+        }
+    };
+
     chronos::log(&format!("goal_received: {goal}"));
     let _ = confirm_tx.send(envelope::make("status", envelope::StatusPayload {
         state: "goal_received".to_string(),
@@ -179,8 +201,13 @@ pub async fn agent_loop(
         } else {
             format!("Past sessions:\n{episodic_context}\n\n")
         };
+        let visual_section = if visual_context.is_empty() {
+            String::new()
+        } else {
+            format!("Visually similar past sessions:\n- {visual_context}\n\n")
+        };
         let prompt = format!(
-            "{system_prompt}\n\n{episodic_section}{context}\n\nScreen:\n{screen}\n\nGoal: {goal}\n\nWhat is your next action?"
+            "{system_prompt}\n\n{episodic_section}{visual_section}{context}\n\nScreen:\n{screen}\n\nGoal: {goal}\n\nWhat is your next action?"
         );
 
         let adapter_clone = adapter.clone();
@@ -280,13 +307,11 @@ pub async fn agent_loop(
                             state: "goal_done".to_string(),
                             detail: reason.clone(),
                         })).await;
-                        {
+                        let episode_id = {
                             let mut tiers = memory_tiers.lock().await;
-                            if let Ok(episode_id) = tiers.push_episode_id(format!("Goal '{goal}': {reason}")) {
-                                #[cfg(target_os = "linux")]
-                                store_visual_snapshot(&visual_encoder, &mut tiers, &episode_id);
-                            }
-                        }
+                            tiers.push_episode_id(format!("Goal '{goal}': {reason}")).ok()
+                        };
+                        encode_and_store_async(episode_id, &visual_encoder, memory_tiers.clone());
                         tracing::info!("Goal achieved.");
                         break;
                     }
@@ -296,13 +321,11 @@ pub async fn agent_loop(
                             state: "goal_done".to_string(),
                             detail: description.clone(),
                         })).await;
-                        {
+                        let episode_id = {
                             let mut tiers = memory_tiers.lock().await;
-                            if let Ok(episode_id) = tiers.push_episode_id(format!("Task '{goal}': {description}")) {
-                                #[cfg(target_os = "linux")]
-                                store_visual_snapshot(&visual_encoder, &mut tiers, &episode_id);
-                            }
-                        }
+                            tiers.push_episode_id(format!("Task '{goal}': {description}")).ok()
+                        };
+                        encode_and_store_async(episode_id, &visual_encoder, memory_tiers.clone());
                         tracing::info!("Goal achieved.");
                         break;
                     }
@@ -346,15 +369,13 @@ pub async fn agent_loop(
                     }
                     let detail = format!("{:?}", e);
                     chronos::log(&format!("goal_aborted: {detail}"));
-                    {
+                    let episode_id = {
                         let mut tiers = memory_tiers.lock().await;
-                        if let Ok(episode_id) = tiers.push_episode_id(format!(
+                        tiers.push_episode_id(format!(
                             "Aborted '{goal}' at step {}: {detail}", enforcer.step()
-                        )) {
-                            #[cfg(target_os = "linux")]
-                            store_visual_snapshot(&visual_encoder, &mut tiers, &episode_id);
-                        }
-                    }
+                        )).ok()
+                    };
+                    encode_and_store_async(episode_id, &visual_encoder, memory_tiers.clone());
                     let _ = confirm_tx.send(envelope::make("status", envelope::StatusPayload {
                         state: "goal_aborted".to_string(),
                         detail,
@@ -366,20 +387,24 @@ pub async fn agent_loop(
     }
 }
 
-/// Encode the current FRAME_PATH PNG and attach the embedding to the given episode.
-/// Runs synchronously — called at episode boundaries only (not every perception tick).
-#[cfg(target_os = "linux")]
-fn store_visual_snapshot(
+/// Spawn a background task that encodes the current frame and stores the embedding.
+/// Lock is held only for the brief store call — encode runs outside the lock.
+/// No-op when encoder is None (non-Linux or model files absent).
+fn encode_and_store_async(
+    episode_id: Option<String>,
     encoder: &Option<Arc<crate::vision::VisualEncoder>>,
-    tiers: &mut crate::memory_tiers::MemoryTiers,
-    episode_id: &str,
+    memory_tiers: Arc<tokio::sync::Mutex<crate::memory_tiers::MemoryTiers>>,
 ) {
-    let enc = match encoder { Some(e) => e, None => return };
-    let png = match std::fs::read(crate::config::FRAME_PATH) {
-        Ok(b) => b,
-        Err(_) => return,
-    };
-    if let Some(embd) = enc.encode_png(&png) {
-        let _ = tiers.store_visual_embedding(episode_id, &embd);
-    }
+    let id = match episode_id { Some(id) => id, None => return };
+    let enc = match encoder { Some(e) => e.clone(), None => return };
+    tokio::spawn(async move {
+        let png = match std::fs::read(crate::config::FRAME_PATH) { Ok(b) => b, Err(_) => return };
+        let embd = tokio::task::spawn_blocking(move || enc.encode_png(&png))
+            .await
+            .unwrap_or(None);
+        if let Some(embd) = embd {
+            let mut tiers = memory_tiers.lock().await;
+            let _ = tiers.store_visual_embedding(&id, &embd);
+        }
+    });
 }
