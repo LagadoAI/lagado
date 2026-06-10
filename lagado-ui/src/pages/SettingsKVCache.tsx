@@ -1,12 +1,18 @@
- 
-function SettingsKVCache() {
+import React, { useState } from "react";
+import { Card } from "../components/Card";
+import { Radio } from "../components/Radio";
+import { Alert } from "../components/Alert";
+import { Select } from "../components/Select";
+import { Button } from "../components/Button";
+
+export default function SettingsKVCache() {
   const [cacheLocation, setCacheLocation] = useState("auto");
   const [cacheSize, setCacheSize] = useState("auto");
- 
+
   return (
     <Card>
       <h2 className="text-h2 text-lagado-text-bright font-bold mb-6">KV Cache Configuration</h2>
- 
+
       <div className="space-y-6">
         <div>
           <label className="block text-body-sm text-lagado-text-dim mb-3">Cache Location</label>
@@ -41,7 +47,7 @@ function SettingsKVCache() {
               checked={cacheLocation === "split"}
               onChange={() => setCacheLocation("split")}
               label="Split VRAM + RAM"
-              description="Best of both - ⚠ Configurable"
+              description="Best of both - configurable"
             />
             <Radio
               name="kvcache"
@@ -49,17 +55,17 @@ function SettingsKVCache() {
               checked={cacheLocation === "off-gpu"}
               onChange={() => setCacheLocation("off-gpu")}
               label="Off-GPU for MoE"
-              description="⚠ Advanced: For Mixture-of-Experts models"
+              description="Advanced: For Mixture-of-Experts models"
             />
           </div>
         </div>
- 
+
         <Alert
           type="warning"
           title="Performance Impact"
           message="Changing KV cache location may impact performance. Test before applying."
         />
- 
+
         <div>
           <label className="block text-body-sm text-lagado-text-dim mb-2">Cache Size</label>
           <Select
@@ -74,7 +80,7 @@ function SettingsKVCache() {
             ]}
           />
         </div>
- 
+
         <Button variant="primary" size="md">Apply Settings</Button>
       </div>
     </Card>

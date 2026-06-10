@@ -86,3 +86,18 @@
 ::-webkit-scrollbar-thumb:hover {
   background: #6b7280;
 }
+
+/* ── HyperLoader keyframes ─────────────────────────────────────────────────── */
+@keyframes hcSpin   { to { transform: rotate(360deg); } }
+@keyframes hcTorus  { to { transform: rotate(-360deg); } }
+@keyframes hcInvert { 0%, 100% { transform: scale(0.30) rotate(0deg); }
+                      50%       { transform: scale(1)    rotate(180deg); } }
+
+.hc-g      { transform-box: fill-box; transform-origin: center; }
+.hc-spin   { animation: hcSpin   3.4s linear infinite; }
+.hc-torus  { animation: hcTorus  2.6s linear infinite; }
+.hc-invert { animation: hcInvert 2.2s ease-in-out infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .hc-spin, .hc-torus, .hc-invert { animation: none; }
+}

@@ -1,18 +1,23 @@
- 
-function SettingsSystemIntegration() {
+import React, { useState } from "react";
+import { Card } from "../components/Card";
+import { Checkbox } from "../components/Checkbox";
+import { Alert } from "../components/Alert";
+import { Select } from "../components/Select";
+import { Button } from "../components/Button";
+
+export default function SettingsSystemIntegration() {
   const [showTray, setShowTray] = useState(true);
   const [enableURL, setEnableURL] = useState(true);
   const [confirmActions, setConfirmActions] = useState(true);
   const [enableClipboard, setEnableClipboard] = useState(true);
   const [autoDetect, setAutoDetect] = useState(true);
   const [clearTimeout, setClearTimeout] = useState("5");
- 
+
   return (
     <Card>
       <h2 className="text-h2 text-lagado-text-bright font-bold mb-6">System Integration</h2>
- 
+
       <div className="space-y-8">
-        {/* System Tray */}
         <div>
           <h3 className="text-h3 text-lagado-text-bright font-semibold mb-3">System Tray</h3>
           <div className="space-y-3">
@@ -33,8 +38,7 @@ function SettingsSystemIntegration() {
             />
           </div>
         </div>
- 
-        {/* URL Handler */}
+
         <div>
           <h3 className="text-h3 text-lagado-text-bright font-semibold mb-3">
             URL Handler (lagado://)
@@ -65,7 +69,6 @@ function SettingsSystemIntegration() {
                 label="Execute command"
                 checked={false}
                 onChange={() => {}}
-                className="text-lagado-red"
               />
             </div>
           </div>
@@ -73,8 +76,7 @@ function SettingsSystemIntegration() {
             Manage URL Whitelist
           </Button>
         </div>
- 
-        {/* Clipboard */}
+
         <div>
           <h3 className="text-h3 text-lagado-text-bright font-semibold mb-3">Clipboard</h3>
           <div className="space-y-3">
@@ -109,8 +111,7 @@ function SettingsSystemIntegration() {
             />
           </div>
         </div>
- 
-        {/* Drag & Drop */}
+
         <div>
           <h3 className="text-h3 text-lagado-text-bright font-semibold mb-3">Drag & Drop</h3>
           <div className="space-y-3">
@@ -126,8 +127,7 @@ function SettingsSystemIntegration() {
             />
           </div>
         </div>
- 
-        {/* File Associations */}
+
         <div>
           <h3 className="text-h3 text-lagado-text-bright font-semibold mb-3">File Associations</h3>
           <Checkbox

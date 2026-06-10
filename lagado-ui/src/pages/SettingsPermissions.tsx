@@ -1,5 +1,9 @@
- 
-function SettingsPermissions() {
+import React, { useState } from "react";
+import { Card } from "../components/Card";
+import { Radio } from "../components/Radio";
+import { Button } from "../components/Button";
+
+export default function SettingsPermissions() {
   const [autoApprove, setAutoApprove] = useState("restore");
  
   return (

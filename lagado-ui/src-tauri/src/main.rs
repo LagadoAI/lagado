@@ -435,6 +435,67 @@ async fn auth_recover(
     Ok(())
 }
 
+// ── Network settings ──────────────────────────────────────────────────────────
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default)]
+struct NetworkSettings {
+    proxy_enabled:  bool,
+    proxy_type:     String,
+    proxy_host:     String,
+    proxy_port:     u16,
+    bridge_address: String,
+}
+
+fn network_settings_path() -> std::path::PathBuf {
+    lagado_agent::config::data_dir().join("config/network.json")
+}
+
+#[tauri::command]
+fn get_network_settings() -> NetworkSettings {
+    let path = network_settings_path();
+    std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+#[tauri::command]
+fn save_network_settings(settings: NetworkSettings) -> Result<(), String> {
+    let path = network_settings_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let json = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
+    std::fs::write(&path, json).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn test_network_connection(settings: NetworkSettings) -> String {
+    if !settings.proxy_enabled {
+        return "No proxy configured — direct connection active.".to_string();
+    }
+    let proxy_url = format!(
+        "{}://{}:{}",
+        settings.proxy_type, settings.proxy_host, settings.proxy_port
+    );
+    let client = match reqwest::Proxy::all(&proxy_url)
+        .ok()
+        .and_then(|p| reqwest::Client::builder().proxy(p).timeout(std::time::Duration::from_secs(10)).build().ok())
+    {
+        Some(c) => c,
+        None => return "Failed to build proxy client — check proxy address.".to_string(),
+    };
+    match client.get("https://check.torproject.org/api/ip").send().await {
+        Ok(r) if r.status().is_success() => {
+            r.text().await
+                .map(|t| format!("Connected — {}", t.chars().take(120).collect::<String>()))
+                .unwrap_or_else(|_| "Connected.".to_string())
+        }
+        Ok(r) => format!("Proxy reachable but got HTTP {}.", r.status()),
+        Err(e) => format!("Connection failed: {e}"),
+    }
+}
+
 fn main() {
     tracing_subscriber::fmt::init();
 
@@ -530,6 +591,8 @@ fn main() {
 
     tauri::Builder::default()
         .setup(move |app| {
+            // Clean up empty cgroup leaves from any previous Lagado run
+            lagado_agent::security::sandbox::cleanup_stale();
             // Start main 8B llama-server
             tauri::async_runtime::spawn(async move {
                 let child = ensure_llama_server().await;
@@ -577,6 +640,7 @@ fn main() {
             vault_list_files, get_server_status, capture_frame,
             vm_boot, vm_stop, vm_status,
             auth_check, auth_signup, auth_login, auth_recover,
+            get_network_settings, save_network_settings, test_network_connection,
         ])
         .run(tauri::generate_context!())
         .expect("Lagado failed to start");

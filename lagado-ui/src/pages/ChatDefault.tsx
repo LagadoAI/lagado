@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useChatContext } from "@/hooks/use-chat-context";
 import { PermissionCard } from "@/components/PermissionCard";
+import { HyperLoader } from "../components/HyperLoader";
 
 interface Conversation {
   id: string;
@@ -193,9 +194,7 @@ useEffect(() => {
               <div key={msg.id} className="group">
                 {msg.role === "assistant" ? (
                   <div className="flex gap-3">
-                    <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-lagado-blue to-lagado-purple flex-shrink-0 flex items-center justify-center shadow-[0_0_12px_rgba(139,92,246,0.3)]">
-                      <span className="text-white text-caption font-bold">L</span>
-                    </div>
+                    <img src="/lagado-mark.png" alt="Lagado" className="w-8 h-8 flex-shrink-0 drop-shadow-[0_0_8px_rgba(139,92,246,0.35)]" />
                     <div className="flex-1 max-w-2xl">
                       <div className="relative bg-lagado-surface/60 backdrop-blur-md border border-lagado-border/60 rounded-2xl rounded-tl-sm p-4 shadow-lg">
                         <div className="absolute left-0 top-4 bottom-4 w-0.5 rounded-full bg-gradient-to-b from-lagado-blue to-lagado-purple" />
@@ -229,9 +228,12 @@ useEffect(() => {
             ))}
             {isLoading && (
               <div className="flex gap-3">
-                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-lagado-blue to-lagado-purple flex-shrink-0 shadow-[0_0_12px_rgba(139,92,246,0.3)]" />
+                <img src="/lagado-mark.png" alt="Lagado" className="w-8 h-8 flex-shrink-0 drop-shadow-[0_0_8px_rgba(139,92,246,0.35)]" />
                 <div className="bg-lagado-surface/60 backdrop-blur-md border border-lagado-border/60 rounded-2xl rounded-tl-sm px-4 py-3">
-                  <TypingAnimation />
+                  <div className="flex items-center gap-2.5">
+                    <HyperLoader size={28} />
+                    <span className="text-caption text-lagado-text-dim font-mono">thinking…</span>
+                  </div>
                 </div>
               </div>
             )}
@@ -337,17 +339,3 @@ useEffect(() => {
   );
 }
 
-function TypingAnimation() {
-  const [stage, setStage] = useState(0);
-  useEffect(() => {
-    const id = setInterval(() => setStage((s) => (s + 1) % 4), 400);
-    return () => clearInterval(id);
-  }, []);
-  return (
-    <div className="flex items-center gap-1 text-lagado-text-dim text-body py-1">
-      <span>.</span>
-      <span className={stage >= 1 ? "opacity-100" : "opacity-0"}>.</span>
-      <span className={stage >= 2 ? "opacity-100" : "opacity-0"}>.</span>
-    </div>
-  );
-}

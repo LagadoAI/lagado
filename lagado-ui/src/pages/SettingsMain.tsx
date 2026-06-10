@@ -8,8 +8,17 @@ import { Input } from "../components/Input";
 import { Select } from "../components/Select";
 import { Button } from "../components/Button";
 import { Tabs } from "../components/Tabs";
-import { Checkbox } from "../components/Checkbox";
- 
+import SettingsBackup from "./SettingsBackup";
+import SettingsModels from "./SettingsModels";
+import SettingsInference from "./SettingsInference";
+import SettingsKVCache from "./SettingsKVCache";
+import SettingsPermissions from "./SettingsPermissions";
+import SettingsVault from "./SettingsVault";
+import SettingsSystemIntegration from "./SettingsSystemIntegration";
+import SettingsAppConnections from "./SettingsAppConnections";
+import SettingsAdvanced from "./SettingsAdvanced";
+import SettingsNetwork from "./SettingsNetwork";
+
 const settingsTabs = [
   { id: "profile", label: "Profile" },
   { id: "backup", label: "Backup" },
@@ -19,6 +28,7 @@ const settingsTabs = [
   { id: "permissions", label: "Permissions" },
   { id: "vault", label: "Vault" },
   { id: "system", label: "System" },
+  { id: "network", label: "Network" },
   { id: "apps", label: "Apps" },
   { id: "advanced", label: "Advanced" },
 ];
@@ -103,6 +113,7 @@ export default function SettingsMain() {
           {activeTab === "permissions" && <SettingsPermissions />}
           {activeTab === "vault" && <SettingsVault />}
           {activeTab === "system" && <SettingsSystemIntegration />}
+          {activeTab === "network" && <SettingsNetwork />}
           {activeTab === "apps" && <SettingsAppConnections />}
           {activeTab === "advanced" && <SettingsAdvanced />}
         </div>

@@ -1,15 +1,19 @@
- 
-function SettingsAppConnections() {
+import React from "react";
+import { Card } from "../components/Card";
+import { Alert } from "../components/Alert";
+import { Button } from "../components/Button";
+
+export default function SettingsAppConnections() {
   const apps = [
     { name: "Email (IMAP/SMTP)", status: "disconnected", icon: "📧" },
     { name: "Calendar (CalDAV)", status: "disconnected", icon: "📅" },
     { name: "Cloud Storage", status: "disconnected", icon: "☁" },
   ];
- 
+
   return (
     <Card>
       <h2 className="text-h2 text-lagado-text-bright font-bold mb-6">External Apps</h2>
- 
+
       <div className="space-y-3">
         {apps.map((app) => (
           <div
@@ -31,7 +35,7 @@ function SettingsAppConnections() {
           </div>
         ))}
       </div>
- 
+
       <Alert
         type="info"
         title="More integrations available"

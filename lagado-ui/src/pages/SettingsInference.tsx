@@ -1,13 +1,19 @@
- 
-function SettingsInference() {
+import React, { useState } from "react";
+import { Card } from "../components/Card";
+import { Radio } from "../components/Radio";
+import { Select } from "../components/Select";
+import { Input } from "../components/Input";
+import { Slider } from "../components/Slider";
+
+export default function SettingsInference() {
   const [mode, setMode] = useState("local");
   const [threads, setThreads] = useState(8);
   const [batchSize, setBatchSize] = useState(4);
- 
+
   return (
     <Card>
       <h2 className="text-h2 text-lagado-text-bright font-bold mb-6">Inference Settings</h2>
- 
+
       <div className="space-y-6">
         <div>
           <label className="block text-body-sm text-lagado-text-dim mb-3">Mode</label>
@@ -38,7 +44,7 @@ function SettingsInference() {
             />
           </div>
         </div>
- 
+
         {mode !== "local" && (
           <div>
             <label className="block text-body-sm text-lagado-text-dim mb-2">Cloud Provider</label>
@@ -55,7 +61,7 @@ function SettingsInference() {
             <Input className="mt-3" placeholder="API Key" type="password" />
           </div>
         )}
- 
+
         <div>
           <Slider
             min={1}
@@ -65,7 +71,7 @@ function SettingsInference() {
             label={`Threads (${threads})`}
           />
         </div>
- 
+
         <div>
           <Slider
             min={1}
@@ -79,4 +85,3 @@ function SettingsInference() {
     </Card>
   );
 }
- 

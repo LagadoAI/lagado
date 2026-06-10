@@ -1,5 +1,10 @@
- 
-function SettingsAdvanced() {
+import React, { useState } from "react";
+import { Card } from "../components/Card";
+import { Radio } from "../components/Radio";
+import { Input } from "../components/Input";
+import { Select } from "../components/Select";
+
+export default function SettingsAdvanced() {
   const [mode, setMode] = useState("proven");
  
   return (

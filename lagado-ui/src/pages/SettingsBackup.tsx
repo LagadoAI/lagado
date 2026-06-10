@@ -1,13 +1,17 @@
- 
-function SettingsBackup() {
+import React, { useState } from "react";
+import { Card } from "../components/Card";
+import { Radio } from "../components/Radio";
+import { Select } from "../components/Select";
+import { Button } from "../components/Button";
+
+export default function SettingsBackup() {
   const [backupMethod, setBackupMethod] = useState("local");
   const [frequency, setFrequency] = useState("weekly");
-  const [autoBackup, setAutoBackup] = useState(true);
- 
+
   return (
     <Card>
       <h2 className="text-h2 text-lagado-text-bright font-bold mb-6">Backup & Sync</h2>
- 
+
       <div className="space-y-6">
         <div>
           <label className="block text-body-sm text-lagado-text-dim mb-3">Backup Method</label>
@@ -46,7 +50,7 @@ function SettingsBackup() {
             />
           </div>
         </div>
- 
+
         {backupMethod === "cloud" && (
           <>
             <div>
@@ -77,10 +81,10 @@ function SettingsBackup() {
             </div>
           </>
         )}
- 
+
         <div className="pt-4 border-t border-lagado-border">
           <p className="text-body-sm text-lagado-text-dim mb-3">
-            Last backup: 5/26/2026 14:30
+            Last backup: never
           </p>
           <Button variant="primary" size="md">
             Backup Now

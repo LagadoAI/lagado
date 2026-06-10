@@ -391,8 +391,20 @@ fn http_client() -> reqwest::Client {
     let mut builder = reqwest::Client::builder()
         .timeout(Duration::from_secs(30))
         .user_agent("Lagado/0.1 (local-first AI agent)");
-    if let Ok(proxy_url) = std::env::var("LAGADO_HTTP_PROXY") {
-        if let Ok(proxy) = reqwest::Proxy::all(&proxy_url) {
+
+    // Env var takes priority (power-user override), then settings file.
+    let proxy_url = std::env::var("LAGADO_HTTP_PROXY").ok().or_else(|| {
+        let path = crate::config::data_dir().join("config/network.json");
+        #[derive(serde::Deserialize)]
+        struct Net { proxy_enabled: bool, proxy_type: String, proxy_host: String, proxy_port: u16 }
+        std::fs::read_to_string(&path).ok()
+            .and_then(|s| serde_json::from_str::<Net>(&s).ok())
+            .filter(|n| n.proxy_enabled && !n.proxy_host.is_empty())
+            .map(|n| format!("{}://{}:{}", n.proxy_type, n.proxy_host, n.proxy_port))
+    });
+
+    if let Some(url) = proxy_url {
+        if let Ok(proxy) = reqwest::Proxy::all(&url) {
             builder = builder.proxy(proxy);
         }
     }

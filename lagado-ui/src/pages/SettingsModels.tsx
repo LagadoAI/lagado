@@ -5,7 +5,7 @@ import { Button } from "../components/Button";
 import { Checkbox } from "../components/Checkbox";
 import { Badge } from "../components/Badge";
 
-function SettingsModels() {
+export default function SettingsModels() {
   const [models, setModels] = useState<string[]>([]);
   const [activeModel, setActiveModelState] = useState<string>("");
   const [timeline, setTimeline] = useState<Array<{ timestamp: number; active_goal: string; last_action: string }>>([]);

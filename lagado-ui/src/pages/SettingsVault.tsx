@@ -1,12 +1,17 @@
- 
-function SettingsVault() {
+import React, { useState } from "react";
+import { Card } from "../components/Card";
+import { Slider } from "../components/Slider";
+import { Select } from "../components/Select";
+import { Button } from "../components/Button";
+
+export default function SettingsVault() {
   const [maxSize, setMaxSize] = useState(10);
   const [pruningPolicy, setPruningPolicy] = useState("lru");
- 
+
   return (
     <Card>
       <h2 className="text-h2 text-lagado-text-bright font-bold mb-6">Vault Configuration</h2>
- 
+
       <div className="space-y-6">
         <div>
           <Slider
@@ -17,7 +22,7 @@ function SettingsVault() {
             label={`Max Vault Size (${maxSize} GB)`}
           />
         </div>
- 
+
         <div>
           <label className="block text-body-sm text-lagado-text-dim mb-2">Pruning Policy</label>
           <Select
@@ -30,7 +35,7 @@ function SettingsVault() {
             ]}
           />
         </div>
- 
+
         <div>
           <h3 className="text-h3 text-lagado-text-bright font-semibold mb-3">External Connections</h3>
           <div className="space-y-2">
@@ -39,7 +44,7 @@ function SettingsVault() {
             <Button variant="secondary" size="md" className="w-full">+ Add Cloud Drive</Button>
           </div>
         </div>
- 
+
         <div className="pt-4 border-t border-lagado-border">
           <h3 className="text-h3 text-lagado-text-bright font-semibold mb-3">Encryption</h3>
           <Button variant="secondary" size="md">Change Encryption Key</Button>
