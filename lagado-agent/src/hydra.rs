@@ -53,7 +53,8 @@ impl Hydra {
     /// Initialize Hydra from system governor detection.
     /// Checks port 8081 for a live classifier server — uses it if up, else falls back to adapter.
     pub fn from_governor(adapter: Arc<dyn InferenceAdapter + Send + Sync>) -> Self {
-        let server_config = governor::detect_and_plan(config::CONTEXT_SIZE);
+        let model_bytes = std::fs::metadata(config::model_path()).map(|m| m.len()).unwrap_or(0);
+        let server_config = governor::detect_and_plan(config::CONTEXT_SIZE, model_bytes);
 
         let capability = if server_config.n_gpu_layers > 0 && server_config.ctx >= 16384 {
             Capability::High

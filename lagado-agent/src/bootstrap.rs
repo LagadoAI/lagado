@@ -162,10 +162,16 @@ pub async fn ensure_vlm_server() -> Option<Child> {
 }
 
 pub async fn ensure_llama_server() -> Option<Child> {
-    let cfg = governor::detect_and_plan(config::CONTEXT_SIZE);
+    let model_bytes = std::fs::metadata(config::model_path())
+        .map(|m| m.len())
+        .unwrap_or(0);
+    let cfg = governor::detect_and_plan(config::CONTEXT_SIZE, model_bytes);
     chronos::log(&format!(
-        "server_config: gpu={} ctx={} ngl={} threads={} parallel={}",
-        cfg.n_gpu_layers > 0, cfg.ctx, cfg.n_gpu_layers, cfg.threads, cfg.n_parallel
+        "server_config: gpu={} vram_fit={:.0}% ctx={} ngl={} threads={} parallel={} moe_cpu={}",
+        cfg.n_gpu_layers > 0,
+        cfg.vram_fit_fraction(model_bytes) * 100.0,
+        cfg.ctx, cfg.n_gpu_layers, cfg.threads, cfg.n_parallel,
+        cfg.moe_experts_on_cpu,
     ));
 
     let already_up = tokio::task::spawn_blocking(|| {
@@ -193,6 +199,11 @@ pub async fn ensure_llama_server() -> Option<Child> {
     if cfg.flash_attn {
         args.push("-fa".to_string());
         args.push("on".to_string());
+    }
+    if cfg.moe_experts_on_cpu {
+        // MoE model: keep expert tensors on CPU, attention/embedding on GPU.
+        // Set by governor when Phase 3.x GGUF parser detects expert_count > 1.
+        args.push("--cpu-moe".to_string());
     }
     tracing::info!("Spawning: {} {}", config::llama_server_bin().display(), args.join(" "));
 
