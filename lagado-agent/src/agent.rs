@@ -222,7 +222,7 @@ pub async fn agent_loop(
                 let adapter = adapter_clone.clone();
                 Box::pin(async move {
                     tokio::task::spawn_blocking(move || {
-                        adapter.generate(&p, 2048, 0.2)
+                        adapter.generate_with_confidence(&p, 2048, 0.2)
                             .map_err(|e| PipelineError::ModelError(e))
                     })
                     .await
@@ -232,8 +232,14 @@ pub async fn agent_loop(
         };
 
         match forge.call_with_retry(&prompt, &enforcer).await {
-            Ok(tool_call) => {
-                tracing::info!("Step {}: {:?}", enforcer.step(), tool_call);
+            Ok((tool_call, confidence)) => {
+                tracing::info!("Step {}: {:?} [conf={:.2}]", enforcer.step(), tool_call, confidence);
+                if confidence < 0.6 && confidence != 1.0 {
+                    chronos::log(&format!(
+                        "low_confidence: step={} conf={:.2} action={:?}",
+                        enforcer.step(), confidence, tool_call
+                    ));
+                }
 
                 // Conversational response — emit as chat message and end this goal
                 if let ToolCall::Chat { ref text } = tool_call {
@@ -251,7 +257,8 @@ pub async fn agent_loop(
                 }
 
                 // state mutex is NOT held from here through approval_rx.recv()
-                let output = match gate::evaluate_action(&tool_call, &registry) {
+                let base_verdict = gate::evaluate_action(&tool_call, &registry);
+                let output = match gate::confidence_escalate(base_verdict, confidence) {
                     gate::Verdict::Allow => {
                         let desc = gate::describe_redacted(&tool_call);
                         let out = execute_tool(&tool_call, actuator.as_ref()).await;

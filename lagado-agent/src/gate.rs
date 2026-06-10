@@ -8,7 +8,7 @@ pub enum RiskTier {
     Destructive,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Verdict {
     Allow,
     ConfirmTap,
@@ -116,7 +116,77 @@ pub fn describe_redacted(call: &ToolCall) -> String {
     }
 }
 
+const CONFIDENCE_LOW: f32  = 0.30; // below this: always ConfirmTyped
+const CONFIDENCE_MID: f32  = 0.60; // below this: escalate one tier
+
+/// Apply a confidence-based escalation on top of the base verdict.
+///
+/// The model's geometric-mean token probability (from logprobs) is used as a
+/// proxy for certainty. Low-confidence actions surface to the human regardless
+/// of the tool's normal risk tier:
+///   < 0.30  → ConfirmTyped (very uncertain — human must actively confirm)
+///   < 0.60  → escalate one tier (Allow→Tap, Tap→Typed)
+///   ≥ 0.60  → pass through unchanged
+///   = 1.0   → no logprob data (adapter doesn't support it) — pass through
+///
+/// The 1.0 sentinel means "no information" and is explicitly not gated, so
+/// adapters without logprob support are never blocked by this function.
+pub fn confidence_escalate(verdict: Verdict, confidence: f32) -> Verdict {
+    // Block is a hard stop — confidence cannot lift it
+    if matches!(verdict, Verdict::Block(_)) { return verdict; }
+    if confidence == 1.0 { return verdict; } // no logprob data — don't interfere
+    if confidence < CONFIDENCE_LOW { return Verdict::ConfirmTyped; }
+    if confidence < CONFIDENCE_MID {
+        return match verdict {
+            Verdict::Allow       => Verdict::ConfirmTap,
+            Verdict::ConfirmTap  => Verdict::ConfirmTyped,
+            other                => other,
+        };
+    }
+    verdict
+}
+
 fn is_sensitive_key(key: &str) -> bool {
     matches!(key, "content" | "text" | "data" | "body" | "password"
                 | "token" | "key" | "secret" | "api_key" | "value")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn high_confidence_passes_through() {
+        assert_eq!(confidence_escalate(Verdict::Allow,      0.9), Verdict::Allow);
+        assert_eq!(confidence_escalate(Verdict::ConfirmTap, 0.7), Verdict::ConfirmTap);
+    }
+
+    #[test]
+    fn mid_confidence_escalates_one_tier() {
+        // Allow → Tap, Tap → Typed
+        assert!(matches!(confidence_escalate(Verdict::Allow,      0.5), Verdict::ConfirmTap));
+        assert!(matches!(confidence_escalate(Verdict::ConfirmTap, 0.4), Verdict::ConfirmTyped));
+    }
+
+    #[test]
+    fn low_confidence_forces_typed() {
+        assert!(matches!(confidence_escalate(Verdict::Allow,      0.1), Verdict::ConfirmTyped));
+        assert!(matches!(confidence_escalate(Verdict::ConfirmTap, 0.2), Verdict::ConfirmTyped));
+    }
+
+    #[test]
+    fn sentinel_1_0_is_never_gated() {
+        // 1.0 means "no logprob data" — must not gate anything
+        assert_eq!(confidence_escalate(Verdict::Allow, 1.0), Verdict::Allow);
+    }
+
+    #[test]
+    fn block_verdict_never_escalated() {
+        let blocked = Verdict::Block("reason".to_string());
+        // Block stays Block regardless of confidence
+        match confidence_escalate(blocked, 0.1) {
+            Verdict::Block(_) => {}
+            other => panic!("expected Block, got {:?}", other),
+        }
+    }
 }
