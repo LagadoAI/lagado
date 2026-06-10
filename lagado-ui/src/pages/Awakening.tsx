@@ -10,7 +10,11 @@ const TRUTHS = [
   "This agent is yours alone.",
 ]
 
-export default function Awakening() {
+interface AwakeningProps {
+  onComplete?: () => void
+}
+
+export default function Awakening({ onComplete }: AwakeningProps) {
   const navigate = useNavigate()
   const [beat, setBeat] = useState(0)
   // beat 0: dark pulse
@@ -28,11 +32,13 @@ export default function Awakening() {
   }, [beat])
 
   const handleBegin = () => {
-    // Mark awakening complete
     localStorage.setItem('lagado_awakened', 'true')
-    // Initialize chronos T=0 via Tauri command (fire-and-forget)
     invoke('initialize_timeline').catch(() => {})
-    navigate('/')
+    if (onComplete) {
+      onComplete()
+    } else {
+      navigate('/')
+    }
   }
 
   return (

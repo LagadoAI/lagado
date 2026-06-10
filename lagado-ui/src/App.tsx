@@ -57,7 +57,11 @@ function AppRoutes() {
   }
 
   if (authState === 'awakening') {
-    return <Awakening />
+    return <Awakening onComplete={() => {
+      invoke<{ needs_setup: boolean }>('auth_check')
+        .then(info => setAuthState(info.needs_setup ? 'signup' : 'login'))
+        .catch(() => setAuthState('login'))
+    }} />
   }
 
   if (authState === 'signup') {
@@ -73,7 +77,7 @@ function AppRoutes() {
   }
 
   if (authState === 'login') {
-    return <LoginPage onLogin={() => setAuthState('app')} />
+    return <LoginPage onLogin={() => setAuthState('app')} onSignup={() => setAuthState('signup')} />
   }
 
   return (

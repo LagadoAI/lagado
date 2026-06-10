@@ -1,13 +1,12 @@
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { invoke } from '@tauri-apps/api/core'
 
 interface LoginPageProps {
   onLogin: () => void
+  onSignup?: () => void
 }
 
-export default function LoginPage({ onLogin }: LoginPageProps) {
-  const navigate = useNavigate()
+export default function LoginPage({ onLogin, onSignup }: LoginPageProps) {
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -17,7 +16,8 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
   const [newPassword, setNewPassword] = useState('')
   const [newConfirm, setNewConfirm] = useState('')
 
-  // Countdown timer when locked
+  const username = localStorage.getItem('lagado_username') || 'local_user'
+
   useEffect(() => {
     if (lockedSecs <= 0) return
     const id = setInterval(() => setLockedSecs(s => Math.max(0, s - 1)), 1000)
@@ -25,147 +25,145 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
   }, [lockedSecs > 0])
 
   const handleLogin = async () => {
-    if (!password) { setError('Enter your password'); return }
-    setLoading(true)
-    setError(null)
+    if (!password) { setError('Enter your passphrase'); return }
+    setLoading(true); setError(null)
     try {
       await invoke('auth_login', { password })
       onLogin()
-      navigate('/chat')
     } catch (e: any) {
       const msg = e?.toString() ?? ''
       if (msg.startsWith('locked:')) {
-        setLockedSecs(parseInt(msg.split(':')[1]) || 600)
-        setError(null)
+        setLockedSecs(parseInt(msg.split(':')[1]) || 600); setError(null)
       } else if (msg.startsWith('wrong_password:')) {
         const left = msg.split(':')[1]
-        setError(`Wrong password — ${left} attempt${left === '1' ? '' : 's'} remaining`)
+        setError(`Wrong passphrase — ${left} attempt${left === '1' ? '' : 's'} remaining`)
       } else {
         setError(msg || 'Login failed')
       }
-    } finally {
-      setLoading(false)
-    }
+    } finally { setLoading(false) }
   }
 
   const handleRecover = async () => {
     if (!recoveryPhrase) { setError('Enter your recovery phrase'); return }
     if (newPassword.length < 8) { setError('Password must be at least 8 characters'); return }
     if (newPassword !== newConfirm) { setError('Passwords do not match'); return }
-    setLoading(true)
-    setError(null)
+    setLoading(true); setError(null)
     try {
       await invoke('auth_recover', { recoveryPhrase, newPassword })
       onLogin()
-      navigate('/chat')
     } catch (e: any) {
       setError(e?.toString() ?? 'Recovery failed')
-    } finally {
-      setLoading(false)
-    }
+    } finally { setLoading(false) }
   }
 
   const formatTime = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
 
   return (
-    <div className="min-h-screen bg-lagado-bg flex items-center justify-center px-4">
-      <div className="w-full max-w-md">
-        <div className="text-center mb-8">
-          <h1 style={{ fontSize: '72px' }} className="text-lagado-text-bright font-bold tracking-wider mb-2">
-            LAGADO
-          </h1>
-          <p className="text-sm text-lagado-text-dim">Local · Private · Yours</p>
+    <div style={{
+      height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
+      padding: 16,
+      background: 'radial-gradient(700px 380px at 50% 8%, rgba(139,92,246,.16), transparent 60%), var(--bg)',
+    }}>
+      <div style={{ width: 380 }}>
+        {/* Logo lockup */}
+        <div style={{ textAlign: 'center', marginBottom: 26 }}>
+          <img src="/lagado-mark.png" width={56} height={56} alt="Lagado"
+            style={{ filter: 'drop-shadow(0 0 18px rgba(139,92,246,.45))', display: 'inline-block' }} />
+          <h1 style={{
+            fontSize: 44, fontWeight: 700, letterSpacing: '.18em', textTransform: 'uppercase',
+            color: 'var(--text-strong)', margin: '12px 0 6px', fontFamily: 'var(--font-display)',
+          }}>Lagado</h1>
+          <p style={{ fontSize: 13, color: 'var(--text-dim)', margin: 0 }}>Local • Private • Yours</p>
         </div>
 
-        <div className="bg-lagado-surface border border-lagado-border rounded-xl p-6">
+        {/* Auth card */}
+        <div className="lg-card" style={{ padding: 22 }}>
           {lockedSecs > 0 && (
-            <div className="mb-4 px-3 py-3 bg-red-500/10 border border-red-500/30 rounded-lg text-center">
-              <p className="text-xs text-red-400 font-medium">Too many failed attempts</p>
-              <p className="text-xl font-mono text-red-300 mt-1">{formatTime(lockedSecs)}</p>
-              <p className="text-xs text-red-400/60 mt-1">Try again after the timer expires</p>
+            <div style={{ marginBottom: 16, padding: '10px 14px', background: 'var(--red-dim)', border: '1px solid rgba(239,68,68,.3)', borderRadius: 8, textAlign: 'center' }}>
+              <p style={{ fontSize: 12, color: 'var(--red-500)', fontWeight: 600 }}>Too many failed attempts</p>
+              <p style={{ fontSize: 20, fontFamily: 'var(--font-mono)', color: '#ef4444', margin: '4px 0 2px' }}>{formatTime(lockedSecs)}</p>
+              <p style={{ fontSize: 11, color: 'rgba(239,68,68,.6)' }}>Try again after timer expires</p>
             </div>
           )}
 
           {error && (
-            <div className="mb-4 px-3 py-2 bg-red-500/10 border border-red-500/30 rounded-lg">
-              <p className="text-xs text-red-400">{error}</p>
+            <div style={{ marginBottom: 14, padding: '8px 12px', background: 'var(--red-dim)', border: '1px solid rgba(239,68,68,.3)', borderRadius: 8 }}>
+              <p style={{ fontSize: 12, color: 'var(--red-500)' }}>{error}</p>
             </div>
           )}
 
           {!showRecovery ? (
-            <div className="space-y-4">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               <div>
-                <label className="block text-xs text-lagado-text-dim mb-1.5">Password</label>
+                <label className="lg-label">Username</label>
+                <input className="lg-field" value={username} readOnly style={{ cursor: 'default', opacity: 0.7 }} />
+              </div>
+              <div>
+                <label className="lg-label">Passphrase</label>
                 <input
+                  className="lg-field"
                   type="password"
                   value={password}
                   onChange={e => setPassword(e.target.value)}
                   onKeyDown={e => e.key === 'Enter' && handleLogin()}
-                  placeholder="Enter your password"
+                  placeholder="Enter passphrase"
                   disabled={lockedSecs > 0}
-                  className="w-full px-3 py-2 bg-lagado-surface-2 border border-lagado-border rounded-lg text-sm text-lagado-text placeholder-lagado-text-dim focus:border-lagado-blue focus:outline-none disabled:opacity-40 transition-colors"
                 />
               </div>
               <button
+                className="lg-btn lg-btn--primary lg-btn--lg"
+                style={{ width: '100%', marginTop: 6 }}
                 onClick={handleLogin}
                 disabled={loading || lockedSecs > 0}
-                className="w-full py-2.5 bg-lagado-blue/20 border border-lagado-blue/40 text-lagado-blue rounded-lg text-sm font-semibold hover:bg-lagado-blue/30 disabled:opacity-50 transition-all"
               >
                 {loading ? 'Unlocking…' : 'Unlock'}
               </button>
-              <button
-                onClick={() => { setShowRecovery(true); setError(null) }}
-                className="w-full text-xs text-lagado-text-dim hover:text-lagado-text transition-colors py-1"
-              >
-                Forgot password? Use recovery phrase
-              </button>
+              <div style={{ marginTop: 8, paddingTop: 14, borderTop: '1px solid var(--line-700)', textAlign: 'center', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <button
+                  onClick={() => { setShowRecovery(true); setError(null) }}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-dim)', fontSize: 12, fontFamily: 'var(--font-display)' }}
+                >
+                  Forgot passphrase? Use recovery phrase
+                </button>
+                {onSignup && (
+                  <button
+                    onClick={onSignup}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--purple-500)', fontSize: 12, fontFamily: 'var(--font-display)' }}
+                  >
+                    First time? Create account
+                  </button>
+                )}
+              </div>
             </div>
           ) : (
-            <div className="space-y-4">
-              <p className="text-xs text-lagado-text-dim mb-2">Enter your recovery phrase to set a new password.</p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <p style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 4 }}>
+                Enter your recovery phrase to set a new passphrase.
+              </p>
               <div>
-                <label className="block text-xs text-lagado-text-dim mb-1.5">Recovery phrase</label>
+                <label className="lg-label">Recovery phrase</label>
                 <textarea
+                  className="lg-field"
                   value={recoveryPhrase}
                   onChange={e => setRecoveryPhrase(e.target.value)}
                   placeholder="Your recovery phrase"
                   rows={2}
-                  className="w-full px-3 py-2 bg-lagado-surface-2 border border-lagado-border rounded-lg text-sm text-lagado-text placeholder-lagado-text-dim focus:border-lagado-purple focus:outline-none resize-none transition-colors"
+                  style={{ height: 'auto', padding: '10px 12px' }}
                 />
               </div>
               <div>
-                <label className="block text-xs text-lagado-text-dim mb-1.5">New password</label>
-                <input
-                  type="password"
-                  value={newPassword}
-                  onChange={e => setNewPassword(e.target.value)}
-                  placeholder="At least 8 characters"
-                  className="w-full px-3 py-2 bg-lagado-surface-2 border border-lagado-border rounded-lg text-sm text-lagado-text placeholder-lagado-text-dim focus:border-lagado-blue focus:outline-none transition-colors"
-                />
+                <label className="lg-label">New passphrase</label>
+                <input className="lg-field" type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder="At least 8 characters" />
               </div>
               <div>
-                <label className="block text-xs text-lagado-text-dim mb-1.5">Confirm new password</label>
-                <input
-                  type="password"
-                  value={newConfirm}
-                  onChange={e => setNewConfirm(e.target.value)}
-                  placeholder="Repeat password"
-                  onKeyDown={e => e.key === 'Enter' && handleRecover()}
-                  className="w-full px-3 py-2 bg-lagado-surface-2 border border-lagado-border rounded-lg text-sm text-lagado-text placeholder-lagado-text-dim focus:border-lagado-blue focus:outline-none transition-colors"
-                />
+                <label className="lg-label">Confirm new passphrase</label>
+                <input className="lg-field" type="password" value={newConfirm} onChange={e => setNewConfirm(e.target.value)} placeholder="Repeat passphrase" onKeyDown={e => e.key === 'Enter' && handleRecover()} />
               </div>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => { setShowRecovery(false); setError(null) }}
-                  className="px-4 py-2.5 bg-lagado-surface-2 border border-lagado-border text-lagado-text-dim rounded-lg text-sm hover:text-lagado-text transition-colors"
-                >
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button className="lg-btn lg-btn--ghost lg-btn--md" onClick={() => { setShowRecovery(false); setError(null) }}>
                   Back
                 </button>
-                <button
-                  onClick={handleRecover}
-                  disabled={loading}
-                  className="flex-1 py-2.5 bg-lagado-purple/20 border border-lagado-purple/40 text-lagado-purple rounded-lg text-sm font-semibold hover:bg-lagado-purple/30 disabled:opacity-50 transition-all"
-                >
+                <button className="lg-btn lg-btn--primary lg-btn--md" style={{ flex: 1 }} onClick={handleRecover} disabled={loading}>
                   {loading ? 'Recovering…' : 'Recover vault'}
                 </button>
               </div>
@@ -173,8 +171,8 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
           )}
         </div>
 
-        <p className="text-center mt-6 text-xs text-lagado-text-dim">
-          AES-256-GCM · Argon2id · Local only
+        <p style={{ textAlign: 'center', marginTop: 18, fontSize: 11, color: 'var(--text-dim)' }}>
+          Encrypted with AES-256 · Local authentication only
         </p>
       </div>
     </div>
