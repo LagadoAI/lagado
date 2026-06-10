@@ -19,11 +19,16 @@ Full design: `docs/plans/MASTER_PLAN_v4.md` and `FILE_DEPENDENCY_REFERENCE_v3.md
 Single Tauri binary (`lagado-ui/src-tauri/`) wraps:
 - React/shadcn UI — Liquid AI inspired, deep navy + blue/purple glassmorphism
 - Rust agent core (`lagado-agent/` as a library)
-- Vendored `llama-server` subprocess (HTTP inference on :8080, NOT FFI)
+- Vendored `llama-server` subprocess (HTTP inference on :8080, NOT FFI) — main 8B model
+- Classifier subprocess on :8081 (LFM2.5-1.2B-Instruct, intent classification, CPU-only)
+- VLM subprocess on :8082 (LFM2.5-VL-450M + mmproj, vision — **being replaced by in-process FFI**)
 - QEMU desktop VM (agent's sandboxed working surface)
 
 Inference: HTTP to `llama-server` → `/v1/chat/completions`.
-Model: LFM2.5 (`LFM2.5-8B-A1B-Q4_K_M.gguf`) from `~/.laputa-secure/models/`.
+Models in `~/.laputa-secure/models/`:
+- `LFM2.5-8B-A1B-Q4_K_M.gguf` — main agent model
+- `LFM2.5-1.2B-Instruct-Q4_K_M.gguf` — intent classifier
+- `LFM2.5-VL-450M-F16.gguf` + `mmproj-LFM2.5-VL-450m-F16.gguf` — vision encoder
 
 ### Agent pipeline (Hydra orchestrator)
 
@@ -35,6 +40,8 @@ isPaused? → YES → send_chat() → chat inference (no tools, no screen)
 action_graph shortcut (score ≥ 0.65)? → YES → agent_loop directly
     ↓ NO
 hydra::classify_intent() [CLEAN PROMPT — zero history, current message only]
+    → 1.2B classifier on :8081 (few-shot prompt, ~80% accuracy)
+    → fallback to 8B if classifier server down
     ↓
 CHAT → chat_response() with RAG context
 INTERACTIVE/REASONING → agent_loop() with HITL gate + RecoveryManager
@@ -46,8 +53,6 @@ INTERACTIVE/REASONING → agent_loop() with HITL gate + RecoveryManager
 
 ### VM Architecture (Phase 1.4 — COMPLETE)
 
-The agent operates a sandboxed QEMU VM, not the host desktop.
-
 ```
 QemuDesktopBackend boots qcow2 with QMP socket + VirtIO display
          ↓
@@ -56,75 +61,112 @@ Actuator:   SSH into guest → xdotool mousemove cx cy click 1 (coords resolved 
 Live feed:  QMP screendump (format:png) → /dev/shm/lagado_frame.png → base64 → Immersive canvas
 ```
 
-**ISO-agnostic:** VmConfig accepts any qcow2/img path. Guest only needs SSH + xdotool.
 **Dev image:** `~/.laputa-secure/vm-images/Arch-Linux-x86_64-cloudimg.qcow2`
 **Seed ISO:** `~/.laputa-secure/vm-images/seed.iso` (cloud-init, first-boot only)
 **Guest:** user `laputa:laputa`, auto-login, XFCE4, xdotool + AT-SPI2 pre-installed
-
-**QMP screendump** — works Linux/Mac/Windows, no compositor needed. `format:png` required (default is PPM).
-**SSH readiness:** `vm_ssh_port` set asynchronously via background TCP poll — agent never attempts SSH before sshd is up.
-**Frame transport:** self-clocked (one frame in flight), Blake3 whole-frame delta gate (skip unchanged).
-**Auto-kill:** `Drop for VmHandle` kills QEMU when the app closes.
-**Source toggle:** Immersive page supports VM (QMP) or Host (grim/scrot) capture, persisted to localStorage.
+**QMP screendump** — `format:png` required (default is PPM).
+**SSH readiness:** `vm_ssh_port` set asynchronously via background TCP poll.
+**Frame path:** `/dev/shm/lagado_frame.png` — constant `config::FRAME_PATH`.
+**Auto-kill:** `Drop for VmHandle` + `KillOnDrop` wrapper kills all child processes on app exit.
 
 ### Auth (Phase 2 — COMPLETE)
 
 **Wrapped DEK scheme** — FileVault/1Password pattern:
-- Signup: random 32-byte DEK wrapped with `Argon2id(password, salt1)` + `Argon2id(recovery_phrase, salt2)`
-- Both blobs persisted to `~/.laputa-secure/config/keychain.json` — raw DEK never touches disk
-- Login: Argon2id(password, salt) → unwrap DEK → `auth::set_session_dek(dek)`
-- Recovery: recovery_phrase → unwrap DEK → re-wrap with new password
-- Lockout: 3 failures → 10-min cooldown, persisted to `lockout.json`, fail-closed if tampered
-- `auth::active_key()` returns session DEK if set, falls back to `machine_passphrase()` (dev only)
-- All cold-tier memory encryption routes through `active_key()`
+- Signup: random 32-byte DEK wrapped with `Argon2id(password)` + `Argon2id(recovery_phrase)`
+- Both blobs in `~/.laputa-secure/config/keychain.json` — raw DEK never touches disk
+- Login: Argon2id(password) → unwrap DEK → `auth::set_session_dek(dek)`
+- Lockout: 3 failures → 10-min cooldown, persisted, fail-closed if tampered
+- `auth::active_key()` is the only crypto entry point; falls back to `machine_passphrase()` in dev
+
+### Memory system (Phase 3.1 — COMPLETE)
+
+**MemoryTiers** wired into agent loop + SleepGate running:
+- `push_episode(text)` stores goal completions/aborts to cold tier (encrypted, temp=1.0)
+- `assemble_context(budget)` feeds episodic context into agent prompt as "Past sessions:" section
+- `decay_all()` decays hot/warm only — cold tier (vault) is never deleted by decay
+- SleepGate runs in background every 5min via `tauri::async_runtime::spawn`
+- DB: `~/.laputa-secure/memory.db`
+
+**Phase 3.3 IN PROGRESS — Visual embedding (not text description):**
+
+The VLM should NOT describe the screen in text. It should produce embedding vectors that feed
+the memory system directly. The architecture:
+
+```
+Frame (PNG) → in-process visual encoder (libmtmd.so FFI) → 1024-dim vector
+                                                                ↓
+                                                   MemoryTiers embedding BLOB column
+                                                                ↓
+                                               cosine similarity retrieval at query time
+                                                                ↓
+                                          top-K visually similar past episodes → agent context
+```
+
+**Key facts for implementation:**
+- `libmtmd.so` is already compiled at `vendored/llama.cpp-2/build/bin/libmtmd.so`
+- Header: `vendored/llama.cpp-2/tools/mtmd/mtmd.h`
+- Key C API calls needed:
+  ```c
+  llama_model_load_from_file(path, params) → llama_model*
+  mtmd_init_from_file(mmproj_path, model, params) → mtmd_context*
+  mtmd_bitmap_init(nx, ny, rgb_data) → mtmd_bitmap*
+  mtmd_input_chunks_init() → mtmd_input_chunks*
+  mtmd_tokenize(ctx, chunks, text, bitmaps, n) → i32
+  mtmd_encode_chunk(ctx, chunk) → i32   // runs vision encoder
+  mtmd_get_output_embd(ctx) → *f32      // n_embd_inp × n_tokens floats
+  // mean-pool over n_tokens → single 1024-dim vector
+  ```
+- Output size: `llama_model_n_embd_inp(model) × n_image_tokens × sizeof(f32)`
+- PNG decode: use `image` crate → raw RGB bytes → `mtmd_bitmap_init`
+- `build.rs` must link: `libllama.so`, `libmtmd.so`, `libggml.so` from vendored build/bin
+- The VLM subprocess (port 8082) can be retired once in-process path works
+- `VlmPerceptor` text description path → retire, replace with embedding store+retrieval
+- MemoryTiers needs: `embedding BLOB` column (JSON-encoded f32 array), cosine similarity search
+
+**The VLM subprocess (`perception/vlm_adapter.rs` + `ensure_vlm_server`) currently committed
+is the text-description version. It compiles and ships the mmproj download. It will be
+replaced in the same session by the in-process FFI path — do not remove it yet.**
 
 ### Key modules (`lagado-agent/src/`)
 
 | Module | Status | What it does |
 |---|---|---|
-| `hydra.rs` | ✓ | Dual-model orchestrator, intent routing, blake3 state hash |
-| `agent.rs` | ✓ | Agent loop, HITL gate, RecoveryManager wired, loop/deadlock detection |
-| `recovery.rs` | ✓ wired | 7 failure-mode dispatcher, graph-backed + LLM recovery, connected to agent loop |
-| `memory_tiers.rs` | ✓ | Hot/warm/cold tiers, AES-256-GCM on cold via active_key() |
-| `sleep_gate.rs` | stub | Background decay loop — built, not started in main.rs yet |
+| `hydra.rs` | ✓ | Dual-model orchestrator, few-shot classifier on :8081, blake3 state hash |
+| `agent.rs` | ✓ | Agent loop, episodic memory context, HITL gate, RecoveryManager |
+| `recovery.rs` | ✓ wired | 7 failure-mode dispatcher, graph-backed + LLM recovery |
+| `memory_tiers.rs` | ✓ | Hot/warm/cold tiers, push_episode, assemble_context, decay protects cold |
+| `sleep_gate.rs` | ✓ | Background decay every 5min — started in main.rs |
 | `chronos.rs` | ✓ | SQLite timeline, T=0 anchor |
 | `retrieval.rs` | ✓ | RAG K=15, Jaccard scoring |
-| `action_graph.rs` | ✓ | SQLite workflow store, shortcut path, record_outcome wired |
+| `action_graph.rs` | ✓ | SQLite workflow store, shortcut path |
 | `skill_library.rs` | ✓ | Voyager-style multi-step procedure store |
-| `security/crypto.rs` | ✓ | AES-256-GCM, Argon2id, `encrypt_with_key`/`decrypt_with_key` for DEK wrapping |
+| `security/crypto.rs` | ✓ | AES-256-GCM, Argon2id, DEK wrapping |
 | `auth/mod.rs` | ✓ | Wrapped DEK, lockout, `active_key()`, `set_session_dek()` |
 | `self_model.rs` | ✓ | Accepted beliefs, distill feed |
 | `distill.rs` | ✓ hooks | Replay manifest for Phase 3 QLoRA |
-| `perception/mod.rs` | ✓ | `PerceptionCache` (shared ref_id→coords), `parse_ref_coords`, MockPerceptor/Actuator |
-| `perception/linux.rs` | ✓ | AT-SPI2 via perceive.py, xdotool, shared PerceptionCache |
-| `perception/capture.rs` | stub | grim/scrot — superseded by QMP for VM, still used for host mode |
+| `perception/mod.rs` | ✓ | PerceptionCache, VlmPerceptor (text, being replaced) |
+| `perception/linux.rs` | ✓ | AT-SPI2 via perceive.py, xdotool |
 | `perception/delta.rs` | ✓ | Blake3 per-cell change detection |
-| `perception/vlm_adapter.rs` | stub | LFM2.5-VL bridge (Phase 3) |
-| `projector/` | ✓ | Cross-platform input executor, Validator |
-| `terminal/` | ✓ | PTY session manager |
-| `vm/mod.rs` | ✓ | QemuDesktopBackend, QMP client, DynamicActuator/Perceptor, VmSshPort |
-| `vm/qmp.rs` | ✓ | QMP Unix socket client — screendump(format:png), capability handshake |
-| `vm/ssh_actuator.rs` | ✓ | SSH→xdotool, shared PerceptionCache, ref_id→coords lookup |
-| `vm/ssh_perceptor.rs` | ✓ | SSH→perceive.py, populates shared PerceptionCache |
+| `perception/vlm_adapter.rs` | ✓→replacing | Text description via HTTP — being replaced by in-process FFI |
+| `perception/capture.rs` | stub | grim/scrot host mode |
+| `vm/mod.rs` | ✓ | QemuDesktopBackend, QMP, DynamicActuator/Perceptor |
+| `vm/qmp.rs` | ✓ | QMP socket client — screendump(format:png) |
+| `vm/ssh_actuator.rs` | ✓ | SSH→xdotool, PerceptionCache coord resolution |
+| `vm/ssh_perceptor.rs` | ✓ | SSH→perceive.py, populates PerceptionCache |
 | `governor.rs` | ✓ | Hardware detection → capability tier |
-| `config.rs` | ✓ | Cross-platform paths, model selection, env overrides (debug-only) |
-| `gate.rs` | ✓ | Read/Write/Destructive tiers; Type with destructive text → ConfirmTyped |
-| `mcp/` | stub | MCP tool discovery (Phase 3) |
-| `operator.rs` | ✓ | StepEnforcer, ToolDescriptor, RiskLevel, core_tools() |
+| `config.rs` | ✓ | Paths, FRAME_PATH constant, VLM/classifier/main server config |
+| `gate.rs` | ✓ | Read/Write/Destructive tiers; ConfirmTyped for destructive text |
+| `mcp/` | stub | MCP tool discovery (Phase 3.6) |
+| `operator.rs` | ✓ | StepEnforcer, ToolDescriptor, RiskLevel |
 
 ### UI (`lagado-ui/src/`)
 
-**Working:** `/` chat, `/awakening`, `/immersive` (live VM feed + VM/Host toggle + draggable controls),
+**Working:** `/` chat, `/awakening`, `/immersive` (live VM feed + VM/Host toggle + draggable),
 `/vm` (boot/stop/status), `/settings`, `/server`, `/terminal` (auth-gated), `/vault`, `/design`.
 
-**Auth flow:** loading → awakening → signup (`/setup/account`) or login → app.
-Login: password unlock with lockout countdown. Recovery: inline recovery phrase flow.
-Signup: two-step (password + recovery phrase with vault warning).
+**Auth flow:** loading → awakening → signup or login → app.
 
-**Phase 3 (coming-soon):** `/code`, `/mcp`.
-
-**Color system:** deep navy bg (`#080c14`), blue (`#3b82f6`) + purple (`#8b5cf6`) accents,
-red for destructive/deny only, green for success/connected only.
+**Color system:** deep navy bg (`#080c14`), blue (`#3b82f6`) + purple (`#8b5cf6`) accents.
 
 ## Key invariants — DO NOT BREAK
 
@@ -160,44 +202,25 @@ cd lagado-ui && npx tsc --noEmit
 Opus/Sonnet: planning, review, architecture. Haiku: all implementation and file edits.
 Verify with `cargo check --workspace` + `npx tsc --noEmit` after every Haiku task.
 
-Haiku completion format:
-```
-## TASK COMPLETE
-**Files changed:** <paths>
-**What was done:** <summary>
-**cargo check:** <last 5 lines>
-**tsc:** <output or "clean">
-```
-
 ## Status (2026-06-09)
 
-**Phase 1.4 COMPLETE — VM Desktop fully operational.**
-**Phase 2 Auth COMPLETE — wrapped DEK, lockout, signup/login/recovery UI.**
+**Phase 1.4 COMPLETE. Phase 2 COMPLETE. Phase 3.1 COMPLETE. Phase 3.2 COMPLETE.**
+**Phase 3.3 IN PROGRESS — visual embedding via in-process libmtmd FFI.**
 
 ### What works end-to-end
-- App launches → auth gate → signup (first launch) or login → chat
+- App launches → auth gate → signup or login → chat
 - Immersive opens → VM auto-boots → live QEMU desktop feed via QMP screendump
-- Agent actions route through SSH → xdotool in VM guest (ref_id resolved to coords)
-- RecoveryManager active: parse failures, loops, deadlocks all handled before abort
-- Cold memory encrypted with session DEK (user's password, not machine ID)
-- Destructive text inputs (rm -rf, DROP TABLE, etc.) require typed confirmation
+- Agent actions route through SSH → xdotool in VM guest
+- RecoveryManager active: parse failures, loops, deadlocks all handled
+- Cold memory encrypted with session DEK; episodes persist across sessions
+- SleepGate decays hot/warm every 5min; cold tier never deleted
+- 1.2B classifier on :8081 handles intent classification (few-shot, ~80% accuracy)
+- VLM server on :8082 can describe screen in text (Phase 3.3 text path — being replaced)
+- All 3 server child processes use KillOnDrop — no orphans on app exit
 
-### Known remaining items (Phase 3)
-- `sleep_gate.rs` not started in main.rs — memory never decays between sessions
-- `MemoryTiers` not instantiated in agent loop — still using legacy `memory.rs`
-- `action_graph::record_outcome()` wired but state_hash quality depends on screen read timing
-- `useAgentSocket.ts` is dead code — WebSocket hook superseded by Tauri IPC
-- Dual-model routing (350M classifier) deferred — 8B handles classification
-- VLM pipeline (LFM2.5-VL) deferred
-- `security/sandbox.rs` — seccomp/cgroups/namespace isolation not built
-- llama-server crash recovery — no auto-restart on mid-session server death
-- `projector/` is a parallel unused implementation alongside `perception/linux.rs`
-- No `InputArbiter` — user > agent > harness input priority not enforced
-
-### Phase 3 build order
-1. Wire `MemoryTiers` into agent loop, start `SleepGate` in main.rs
-2. 350M intent classifier on separate llama-server port
-3. VLM vision pipeline (LFM2.5-VL) using VM frames
-4. `security/sandbox.rs` — seccomp profile for QEMU + agent subprocesses
-5. llama-server health monitor + auto-restart
-6. MCP tool discovery (34 tools)
+### Phase 3 remaining
+- **3.3 (IN PROGRESS):** Replace VlmPerceptor text path with in-process `libmtmd.so` FFI embeddings.
+  Add `embedding BLOB` to MemoryTiers + cosine retrieval. Retire VLM subprocess.
+- **3.4:** llama-server health monitor + auto-restart on crash
+- **3.5:** `security/sandbox.rs` — seccomp/cgroups for QEMU + agent subprocesses
+- **3.6:** MCP tool discovery (34 tools)
