@@ -5,26 +5,17 @@ use tokio::sync::{mpsc, Mutex};
 use tauri::{State, Emitter};
 use lagado_agent::{
     agent::AgentState,
-    bootstrap::{ensure_llama_server, ensure_classifier_server},
+    bootstrap::{ensure_llama_server, ensure_classifier_server, KillOnDrop},
     config,
     hydra,
     inference::{InferenceAdapter, llama_cpp::LlamaCppAdapter},
     memory_tiers::MemoryTiers,
     perception::{Perceptor, Actuator, PerceptionCache},
+    server_guard::{ServerGuard, ServerEvent},
     sleep_gate::SleepGate,
     vm::{QemuDesktopBackend, VmHandle, VmBackend, VmSshPort, DynamicActuator, DynamicPerceptor},
 };
 use lagado_agent::vision::VisualEncoder;
-
-/// Kills and reaps the child process on drop — prevents server orphans on app exit.
-struct KillOnDrop(std::process::Child);
-
-impl Drop for KillOnDrop {
-    fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
-    }
-}
 
 struct AppState {
     agent: Arc<Mutex<AgentState>>,
@@ -465,8 +456,10 @@ fn main() {
 
     let llama_child: Arc<Mutex<Option<KillOnDrop>>> = Arc::new(Mutex::new(None));
     let llama_for_setup = llama_child.clone();
+    let llama_for_guard = llama_child.clone();
     let classifier_child: Arc<Mutex<Option<KillOnDrop>>> = Arc::new(Mutex::new(None));
     let classifier_for_setup = classifier_child.clone();
+    let classifier_for_guard = classifier_child.clone();
 
     let vm_ssh_port: VmSshPort = std::sync::Arc::new(std::sync::RwLock::new(None));
 
@@ -536,7 +529,7 @@ fn main() {
     });
 
     tauri::Builder::default()
-        .setup(move |_app| {
+        .setup(move |app| {
             // Start main 8B llama-server
             tauri::async_runtime::spawn(async move {
                 let child = ensure_llama_server().await;
@@ -546,6 +539,27 @@ fn main() {
             tauri::async_runtime::spawn(async move {
                 let child = ensure_classifier_server().await;
                 *classifier_for_setup.lock().await = child.map(KillOnDrop);
+            });
+            // Health monitor: polls /health every 10s, restarts crashed servers.
+            // Holds Arc clones of both child slots — KillOnDrop still fires on exit
+            // because Tauri tears down its async runtime before .run() returns,
+            // releasing all Arc clones and letting Drop run normally.
+            let app_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                ServerGuard::new(
+                    llama_for_guard,
+                    classifier_for_guard,
+                    move |event| {
+                        let (kind, server) = match event {
+                            ServerEvent::Crashed { server }       => ("server_crashed", server),
+                            ServerEvent::Restarted { server }     => ("server_restarted", server),
+                            ServerEvent::RestartFailed { server } => ("server_restart_failed", server),
+                        };
+                        let _ = app_handle.emit(kind, serde_json::json!({ "server": server }));
+                    },
+                )
+                .run()
+                .await;
             });
             // Start background memory consolidation loop (5-min decay cycles)
             tauri::async_runtime::spawn(async move {

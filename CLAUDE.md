@@ -123,6 +123,7 @@ Frame (PNG) → vision/shim.c (lagado_encode_image) → mean-pooled n_embd vecto
 | `recovery.rs` | ✓ wired | 7 failure-mode dispatcher, graph-backed + LLM recovery |
 | `memory_tiers.rs` | ✓ | Hot/warm/cold tiers, push_episode, assemble_context, decay protects cold |
 | `sleep_gate.rs` | ✓ | Background decay every 5min — started in main.rs |
+| `server_guard.rs` | ✓ | Health monitor — polls /health every 10s, auto-restarts crashed llama/classifier servers, emits tauri events |
 | `chronos.rs` | ✓ | SQLite timeline, T=0 anchor |
 | `retrieval.rs` | ✓ | RAG K=15, Jaccard scoring |
 | `action_graph.rs` | ✓ | SQLite workflow store, shortcut path |
@@ -191,9 +192,9 @@ cd lagado-ui && npx tsc --noEmit
 Opus/Sonnet: planning, review, architecture. Haiku: all implementation and file edits.
 Verify with `cargo check --workspace` + `npx tsc --noEmit` after every Haiku task.
 
-## Status (2026-06-09)
+## Status (2026-06-10)
 
-**Phase 1.4 COMPLETE. Phase 2 COMPLETE. Phase 3.1 COMPLETE. Phase 3.2 COMPLETE. Phase 3.3 COMPLETE.**
+**Phase 1.4 COMPLETE. Phase 2 COMPLETE. Phase 3.1 COMPLETE. Phase 3.2 COMPLETE. Phase 3.3 COMPLETE. Phase 3.4 COMPLETE.**
 
 ### What works end-to-end
 - App launches → auth gate → signup or login → chat
@@ -204,10 +205,10 @@ Verify with `cargo check --workspace` + `npx tsc --noEmit` after every Haiku tas
 - SleepGate decays hot/warm every 5min; cold tier never deleted
 - 1.2B classifier on :8081 handles intent classification (few-shot, ~80% accuracy)
 - Visual encoder runs in-process via libmtmd FFI; embeddings stored in MemoryTiers; cosine retrieval active
-- 2 server child processes (main 8B + 1.2B classifier) use KillOnDrop — no orphans on app exit
+- 2 server child processes (main 8B + 1.2B classifier) use KillOnDrop (defined in `bootstrap.rs`) — no orphans on app exit
+- ServerGuard polls /health every 10s; declares crash after 3 consecutive failures; restarts and retries indefinitely; emits `server_crashed`/`server_restarted`/`server_restart_failed` tauri events
 - VLM subprocess retired; vision now in-process FFI only
 
 ### Phase 3 remaining
-- **3.4:** llama-server health monitor + auto-restart on crash
 - **3.5:** `security/sandbox.rs` — seccomp/cgroups for QEMU + agent subprocesses
 - **3.6:** MCP tool discovery (34 tools)

@@ -1,8 +1,31 @@
 use std::process::{Child, Command, Stdio};
 use crate::{chronos, config, governor};
 
+/// Kills and reaps the managed server child on drop — prevents orphans on app exit.
+/// Held in AppState and ServerGuard; dropped when both the state and the guard task
+/// are torn down, which happens before the Tauri runtime returns from `.run()`.
+pub struct KillOnDrop(pub std::process::Child);
+
+impl Drop for KillOnDrop {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+/// Single-attempt synchronous health check. `timeout_secs` prevents hanging when
+/// the server process is alive but not yet accepting requests.
+/// Appends `/health` to `base_url` (e.g. `"http://127.0.0.1:8080"`).
+/// Must be called from a blocking context (spawn_blocking or std thread).
+pub fn check_health_sync(base_url: &str, timeout_secs: u64) -> bool {
+    let agent = ureq::AgentBuilder::new()
+        .timeout(std::time::Duration::from_secs(timeout_secs))
+        .build();
+    agent.get(&format!("{base_url}/health")).call().is_ok()
+}
+
 /// Start a lightweight llama-server on port 8081 for intent classification.
-/// Uses the 350M model, CPU-only (preserves GPU for the 8B), ctx=512.
+/// Uses the 1.2B model, CPU-only (preserves GPU for the 8B), ctx=512.
 /// Returns None if the model file doesn't exist or if a server is already running.
 pub async fn ensure_classifier_server() -> Option<Child> {
     let model_path = config::classifier_model_path();
@@ -12,7 +35,7 @@ pub async fn ensure_classifier_server() -> Option<Child> {
     }
 
     let already_up = tokio::task::spawn_blocking(|| {
-        ureq::get(&format!("{}/health", config::classifier_base_url())).call().is_ok()
+        check_health_sync(&config::classifier_base_url(), 2)
     })
     .await
     .unwrap_or(false);
@@ -26,7 +49,7 @@ pub async fn ensure_classifier_server() -> Option<Child> {
     cmd.args([
         "-m", &model_path.to_string_lossy(),
         "-c", &config::CLASSIFIER_CONTEXT_SIZE.to_string(),
-        "-ngl", "0",        // CPU-only — leave GPU headroom for the 8B model
+        "-ngl", "0",
         "-t", "2",
         "--parallel", "1",
         "--host", &config::llama_host(),
@@ -37,12 +60,9 @@ pub async fn ensure_classifier_server() -> Option<Child> {
     match cmd.spawn() {
         Ok(child) => {
             let ready = tokio::task::spawn_blocking(|| {
-                let agent = ureq::AgentBuilder::new()
-                    .timeout(std::time::Duration::from_secs(2))
-                    .build();
-                let url = format!("{}/health", config::classifier_base_url());
+                let url = config::classifier_base_url();
                 for _ in 0..30 {
-                    if agent.get(&url).call().is_ok() { return true; }
+                    if check_health_sync(&url, 2) { return true; }
                     std::thread::sleep(std::time::Duration::from_secs(1));
                 }
                 false
@@ -66,8 +86,9 @@ pub async fn ensure_classifier_server() -> Option<Child> {
 }
 
 /// Start llama-server for the VLM (vision-language model) on port 8082.
-/// Requires both the VLM GGUF and its mmproj companion file.
-/// Skips silently if either file is absent — VlmAdapter falls back to text-only.
+/// Retired in Phase 3.3 (vision is now in-process FFI). Kept as dead code;
+/// VLM subprocess approach is not used in the agent pipeline.
+#[allow(dead_code)]
 pub async fn ensure_vlm_server() -> Option<Child> {
     let model_path = config::vlm_model_path();
     let mmproj_path = config::vlm_mmproj_path();
@@ -82,7 +103,7 @@ pub async fn ensure_vlm_server() -> Option<Child> {
     }
 
     let already_up = tokio::task::spawn_blocking(|| {
-        ureq::get(&format!("{}/health", config::vlm_base_url())).call().is_ok()
+        check_health_sync(&config::vlm_base_url(), 2)
     })
     .await
     .unwrap_or(false);
@@ -108,12 +129,9 @@ pub async fn ensure_vlm_server() -> Option<Child> {
     match cmd.spawn() {
         Ok(child) => {
             let ready = tokio::task::spawn_blocking(|| {
-                let agent = ureq::AgentBuilder::new()
-                    .timeout(std::time::Duration::from_secs(2))
-                    .build();
-                let url = format!("{}/health", config::vlm_base_url());
+                let url = config::vlm_base_url();
                 for _ in 0..30 {
-                    if agent.get(&url).call().is_ok() { return true; }
+                    if check_health_sync(&url, 2) { return true; }
                     std::thread::sleep(std::time::Duration::from_secs(1));
                 }
                 false
@@ -137,74 +155,65 @@ pub async fn ensure_vlm_server() -> Option<Child> {
 }
 
 pub async fn ensure_llama_server() -> Option<Child> {
-    // ── Governor: detect hardware, plan server config ─────────────
     let cfg = governor::detect_and_plan(config::CONTEXT_SIZE);
     chronos::log(&format!(
         "server_config: gpu={} ctx={} ngl={} threads={} parallel={}",
         cfg.n_gpu_layers > 0, cfg.ctx, cfg.n_gpu_layers, cfg.threads, cfg.n_parallel
     ));
 
-    // Check if llama-server is already up before spawning
     let already_up = tokio::task::spawn_blocking(|| {
-        let url = format!("{}/health", config::llama_base_url());
-        ureq::get(&url).call().is_ok()
+        check_health_sync(&config::llama_base_url(), 2)
     })
     .await
     .unwrap_or(false);
 
-    // Keep child alive for the duration of the program
     if already_up {
         chronos::log("server_config: reusing existing server");
         tracing::info!("llama-server already running — reusing.");
-        None
-    } else {
-        let model_path = config::model_path();
-        let mut args = vec![
-            "-m".to_string(), model_path.to_string_lossy().to_string(),
-            "-c".to_string(), cfg.ctx.to_string(),
-            "-ngl".to_string(), cfg.n_gpu_layers.to_string(),
-            "-t".to_string(), cfg.threads.to_string(),
-            "--parallel".to_string(), cfg.n_parallel.to_string(),
-            "--host".to_string(), config::llama_host(),
-            "--port".to_string(), config::llama_port().to_string(),
-        ];
-        if cfg.flash_attn {
-            args.push("-fa".to_string());
-            args.push("on".to_string());
-        }
-        tracing::info!("Spawning: {} {}", config::llama_server_bin().display(), args.join(" "));
+        return None;
+    }
 
-        let mut cmd = Command::new(config::llama_server_bin());
-        cmd.args(&args);
-        match cmd.spawn() {
-            Ok(child) => {
-                let ready = tokio::task::spawn_blocking(|| {
-                    let agent = ureq::AgentBuilder::new()
-                        .timeout(std::time::Duration::from_secs(2))
-                        .build();
-                    let url = format!("{}/health", config::llama_base_url());
-                    for _ in 0..60 {
-                        if agent.get(&url).call().is_ok() {
-                            return true;
-                        }
-                        std::thread::sleep(std::time::Duration::from_secs(1));
-                    }
-                    false
-                })
-                .await
-                .unwrap_or(false);
+    let model_path = config::model_path();
+    let mut args = vec![
+        "-m".to_string(), model_path.to_string_lossy().to_string(),
+        "-c".to_string(), cfg.ctx.to_string(),
+        "-ngl".to_string(), cfg.n_gpu_layers.to_string(),
+        "-t".to_string(), cfg.threads.to_string(),
+        "--parallel".to_string(), cfg.n_parallel.to_string(),
+        "--host".to_string(), config::llama_host(),
+        "--port".to_string(), config::llama_port().to_string(),
+    ];
+    if cfg.flash_attn {
+        args.push("-fa".to_string());
+        args.push("on".to_string());
+    }
+    tracing::info!("Spawning: {} {}", config::llama_server_bin().display(), args.join(" "));
 
-                if !ready {
-                    tracing::error!("llama-server did not become ready within 60s — inference unavailable.");
-                    return None;
+    let mut cmd = Command::new(config::llama_server_bin());
+    cmd.args(&args);
+    match cmd.spawn() {
+        Ok(child) => {
+            let ready = tokio::task::spawn_blocking(|| {
+                let url = config::llama_base_url();
+                for _ in 0..60 {
+                    if check_health_sync(&url, 2) { return true; }
+                    std::thread::sleep(std::time::Duration::from_secs(1));
                 }
-                tracing::info!("llama-server ready.");
-                Some(child)
+                false
+            })
+            .await
+            .unwrap_or(false);
+
+            if !ready {
+                tracing::error!("llama-server did not become ready within 60s — inference unavailable.");
+                return None;
             }
-            Err(e) => {
-                tracing::error!("Failed to spawn llama-server: {e} — inference unavailable.");
-                None
-            }
+            tracing::info!("llama-server ready.");
+            Some(child)
+        }
+        Err(e) => {
+            tracing::error!("Failed to spawn llama-server: {e} — inference unavailable.");
+            None
         }
     }
 }

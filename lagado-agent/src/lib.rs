@@ -29,5 +29,6 @@ pub mod skill_library;
 pub mod sleep_gate;
 pub mod terminal;
 pub mod types;
+pub mod server_guard;
 pub mod vm;
 pub mod vision;
