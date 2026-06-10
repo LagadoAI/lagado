@@ -22,7 +22,12 @@ pub struct AgentState {
 }
 
 // ── Tool execution ────────────────────────────────────────────────
-async fn execute_tool(call: &ToolCall, actuator: &dyn Actuator) -> String {
+async fn execute_tool(
+    call: &ToolCall,
+    actuator: &dyn Actuator,
+    perceptor: &dyn Perceptor,
+    memory_tiers: &Arc<tokio::sync::Mutex<crate::memory_tiers::MemoryTiers>>,
+) -> String {
     match call {
         ToolCall::Click { selector } => actuator.click(selector),
         ToolCall::Type { selector, text } => actuator.type_text(selector, text),
@@ -34,8 +39,75 @@ async fn execute_tool(call: &ToolCall, actuator: &dyn Actuator) -> String {
         ToolCall::Task { description } => format!("Task completed: {}", description),
         ToolCall::Done { reason } => format!("Done: {}", reason),
         ToolCall::Chat { text } => text.clone(),
-        // Dispatcher wired in Step 3 (ToolRegistry + NativeRust executor)
-        ToolCall::Invoke { name, .. } => format!("invoke: {name} — executor not yet wired"),
+        ToolCall::Invoke { name, args } => {
+            dispatch_invoke(name, args, actuator, perceptor, memory_tiers).await
+        }
+    }
+}
+
+/// Full Invoke dispatcher — routes to native executor or subsystem tools.
+async fn dispatch_invoke(
+    name: &str,
+    args: &serde_json::Map<String, serde_json::Value>,
+    actuator: &dyn Actuator,
+    perceptor: &dyn Perceptor,
+    memory_tiers: &Arc<tokio::sync::Mutex<crate::memory_tiers::MemoryTiers>>,
+) -> String {
+    // Try self-contained native tools first
+    if let Some(result) = crate::tools::executor::dispatch(name, args).await {
+        return result;
+    }
+
+    // VM tools — route through actuator/perceptor
+    let s = |key: &str| args.get(key).and_then(|v| v.as_str()).unwrap_or("").to_string();
+    match name {
+        "screenshot" => {
+            // Capture via QMP screendump (same path as the live feed)
+            match std::fs::read(crate::config::FRAME_PATH) {
+                Ok(bytes) => {
+                    use base64::Engine;
+                    base64::engine::general_purpose::STANDARD.encode(&bytes)
+                }
+                Err(e) => format!("error: no frame available: {e}"),
+            }
+        }
+        "vm_command" => actuator.click(&format!("cmd:{}", s("command"))),
+        "vm_type"    => actuator.type_text("focused", &s("text")),
+        "vm_click"   => actuator.click(&s("selector")),
+
+        // Memory tools — delegate to MemoryTiers
+        "memory_store" => {
+            let key = s("key"); let value = s("value");
+            let mut tiers = memory_tiers.lock().await;
+            tiers.push_episode_id(format!("{key}: {value}"))
+                .map(|_| format!("stored {key}"))
+                .unwrap_or_else(|e| format!("error: {e}"))
+        }
+        "memory_get" => {
+            let key = s("key");
+            let tiers = memory_tiers.lock().await;
+            let ctx = tiers.assemble_context(512);
+            if ctx.is_empty() { format!("no memory entry for '{key}'") }
+            else {
+                // Filter assembled context to lines containing the key
+                let matching: Vec<&str> = ctx.lines()
+                    .filter(|l| l.contains(&key))
+                    .collect();
+                if matching.is_empty() { format!("no memory entry for '{key}'") }
+                else { matching.join("\n") }
+            }
+        }
+        "memory_list" => {
+            let tiers = memory_tiers.lock().await;
+            let ctx = tiers.assemble_context(4096);
+            if ctx.is_empty() { "memory is empty".to_string() } else { ctx }
+        }
+        "memory_delete" => {
+            // MemoryTiers doesn't yet have delete-by-key; decay handles cleanup
+            format!("memory_delete: use tool_config.json to disable tools or let decay handle cleanup")
+        }
+
+        _ => format!("unknown tool: {name}"),
     }
 }
 
@@ -45,6 +117,8 @@ async fn request_and_await_approval(
     tool_call: &ToolCall,
     state: &Arc<Mutex<AgentState>>,
     actuator: &dyn Actuator,
+    perceptor: &dyn Perceptor,
+    memory_tiers: &Arc<tokio::sync::Mutex<crate::memory_tiers::MemoryTiers>>,
     approval_rx: &mut mpsc::Receiver<bool>,
     confirm_tx: &mpsc::Sender<String>,
 ) -> String {
@@ -82,7 +156,7 @@ async fn request_and_await_approval(
     }
     let approved = approval_rx.recv().await.unwrap_or(false);
     if approved {
-        let out = execute_tool(tool_call, actuator).await;
+        let out = execute_tool(tool_call, actuator, perceptor, memory_tiers).await;
         chronos::log(&format!("action: {desc_safe} -> {out}"));
         let _ = confirm_tx
             .send(envelope::make(
@@ -261,7 +335,7 @@ pub async fn agent_loop(
                 let output = match gate::confidence_escalate(base_verdict, confidence) {
                     gate::Verdict::Allow => {
                         let desc = gate::describe_redacted(&tool_call);
-                        let out = execute_tool(&tool_call, actuator.as_ref()).await;
+                        let out = execute_tool(&tool_call, actuator.as_ref(), perceptor.as_ref(), &memory_tiers).await;
                         chronos::log(&format!("action: {desc} -> {out}"));
                         let _ = confirm_tx.send(envelope::make("action_log", envelope::ActionLogPayload {
                             text: format!("{desc} -> {out}"),
@@ -269,10 +343,10 @@ pub async fn agent_loop(
                         out
                     }
                     gate::Verdict::ConfirmTap => {
-                        request_and_await_approval("tap", &tool_call, &state, actuator.as_ref(), &mut approval_rx, &confirm_tx).await
+                        request_and_await_approval("tap", &tool_call, &state, actuator.as_ref(), perceptor.as_ref(), &memory_tiers, &mut approval_rx, &confirm_tx).await
                     }
                     gate::Verdict::ConfirmTyped => {
-                        request_and_await_approval("typed", &tool_call, &state, actuator.as_ref(), &mut approval_rx, &confirm_tx).await
+                        request_and_await_approval("typed", &tool_call, &state, actuator.as_ref(), perceptor.as_ref(), &memory_tiers, &mut approval_rx, &confirm_tx).await
                     }
                     gate::Verdict::Block(reason) => {
                         chronos::log(&format!("blocked: {reason}"));
