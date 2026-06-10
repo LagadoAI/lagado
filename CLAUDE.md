@@ -155,11 +155,32 @@ Frame (PNG) → vision/shim.c (lagado_encode_image) → mean-pooled n_embd vecto
 ### UI (`lagado-ui/src/`)
 
 **Working:** `/` chat, `/awakening`, `/immersive` (live VM feed + VM/Host toggle + draggable),
-`/vm` (boot/stop/status), `/settings`, `/server`, `/terminal` (auth-gated), `/vault`, `/design`.
+`/vm` (boot/stop/status), `/settings` (11-tab panel), `/server`, `/terminal` (auth-gated), `/vault`, `/design`.
 
-**Auth flow:** loading → awakening → signup or login → app.
+**Auth flow:** loading → awakening (onComplete → auth_check) → signup (3-step) or login → app.
+- `Awakening` now takes `onComplete` prop — App.tsx wires it to re-invoke `auth_check` and set state.
+  Previously `navigate('/')` was a no-op since `<Routes>` wasn't mounted in the awakening branch.
+- `LoginPage` has `onSignup` prop → "First time? Create account" link as safety net.
+- `SignupPage` adds username step (stored in `localStorage.lagado_username`) before password.
+
+**Design system:** Full token layer in `index.css` (colors, effects, spacing, radius, typography).
+CSS vars (`--bg`, `--surface`, `--grad-brand-h`, etc.) + component classes (`.lg-btn`, `.lg-card`,
+`.lg-glasspanel`, `.lg-bubble--user/agent`, `.lg-pill--connected/connecting/disconnected`,
+`.lg-tabs`, `.lg-tab`, `.nav-item`). Mixes with Tailwind — no conflicts (different namespaces).
+
+**Shared layout component:** `lagado-ui/src/components/AppSidebar.tsx`
+- Mark + "LAGADO" wordmark, gradient "+ New conversation" button, search field
+- SURFACES nav: Chat / Immersive / Vault / Terminal / Settings with Lucide icons + active highlight
+- User footer: initials avatar, username (from localStorage), "Sovereign", StatusPill
+- Used in `ChatDefault` and `SettingsMain`; safe to use in any page inside `<ChatProvider>`
+
+**Network/Privacy settings:** `SettingsNetwork.tsx` + Tauri commands `get_network_settings` /
+`save_network_settings` / `test_network_connection`. Persists to `~/.laputa-secure/config/network.json`.
+Proxy off by default; Tor/Whonix presets; bridge field. `executor.rs::http_client()` reads settings
+file first, `LAGADO_HTTP_PROXY` env var overrides.
 
 **Color system:** deep navy bg (`#080c14`), blue (`#3b82f6`) + purple (`#8b5cf6`) accents.
+Agent avatar = `lagado-mark.png` (maze-tesseract logo). Thinking state = `HyperLoader` SVG.
 
 ## Key invariants — DO NOT BREAK
 
@@ -197,10 +218,12 @@ Verify with `cargo check --workspace` + `npx tsc --noEmit` after every Haiku tas
 
 ## Status (2026-06-10)
 
-**Phase 1.4 COMPLETE. Phase 2 COMPLETE. Phase 3.1 COMPLETE. Phase 3.2 COMPLETE. Phase 3.3 COMPLETE. Phase 3.4 COMPLETE. Phase 3.5 COMPLETE. Phase 3.6 COMPLETE.**
+**Phase 1.4 COMPLETE. Phase 2 COMPLETE. Phase 3.1–3.6 COMPLETE. UI design system COMPLETE.**
 
 ### What works end-to-end
-- App launches → auth gate → signup or login → chat
+- App launches → Awakening (onComplete → auth_check) → signup (3-step) or login → chat
+- Login: maze-tesseract lockup, glass card, gradient Unlock, "First time?" link
+- Signup: username → passphrase → recovery phrase (username saved to localStorage)
 - Immersive opens → VM auto-boots → live QEMU desktop feed via QMP screendump
 - Agent actions route through SSH → xdotool in VM guest
 - RecoveryManager active: parse failures, loops, deadlocks all handled
@@ -213,13 +236,28 @@ Verify with `cargo check --workspace` + `npx tsc --noEmit` after every Haiku tas
 - GPU detection: NVIDIA + AMD; conservative binary fit; moe_experts_on_cpu wired to --cpu-moe
 - cgroup v2 sandbox + QEMU -sandbox seccomp; model-agnostic memory caps
 - 44 bundled native Rust tools: filesystem, git, system, text/util, web (DDG+SearXNG, Tor-native), clipboard, VM, memory
+- Network proxy settings: SOCKS5/HTTP opt-in, Tor/Whonix presets, persisted to network.json
 - Confidence gating: geometric mean of logprobs gates uncertain actions through HITL regardless of trust level
 - ToolRegistry: TrustLevel per tool, gate wired; tool_config.json for user overrides + MCP server installs
 - MCP stdio client: auto-discovers tools from user-added servers at startup (10s timeout, non-fatal)
 - Tool retrieval in prompt: top-10 per step by Jaccard scoring — never flat-dumps full catalog
 - 95 lib tests
+- Vault FAISS: `build_index.py` (Python, offline) indexes vault facts + chunks via MiniLM-L6-v2 + `IndexFlatIP`
+
+### FAISS / action graph — architecture decision pending
+- **Vault FAISS** ✓ — `build_index.py` works; saves `vault/vault_index.faiss` + `vault_meta.json`
+- **Action graph FAISS** ✗ — not yet built. Current action graph uses exact blake3 hash lookup
+  which is incompatible with pre-seeded data (hashes will never match user's real screens).
+- **Pre-seeding plan**: 10K+ (context, action) pairs to be seeded. Requires semantic vector lookup.
+- **Pending decision**: embedding strategy for runtime consistency.
+  Recommended path: run `llama-server --embedding` on MiniLM GGUF at `:8082` — same model
+  used in `build_index.py` at build time, consistent dims, no Python at agent runtime.
+- **Next step**: once embedding strategy confirmed, build `faiss_index.rs` + extend `retrieval.rs`
+  to query action graph by embedding similarity instead of exact hash.
 
 ### Remaining / next session
-- Settings UI: tool manager (view/enable/disable, change trust levels), marketplace catalog browser, search backend config
+- FAISS action graph: embedding strategy decision → `faiss_index.rs` → `retrieval.rs` integration
+- Action graph pre-seeding: dataset format + `build_index.py` extension for action graph entries
+- Settings tool manager: view/enable/disable tools, change trust levels
 - GGUF parser for MoE detection (flips moe_experts_on_cpu, enables partial GPU offload)
 - Tool manager Tauri commands: get_tools, set_tool_trust, toggle_tool_enabled
