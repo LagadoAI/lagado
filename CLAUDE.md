@@ -213,4 +213,26 @@ Verify with `cargo check --workspace` + `npx tsc --noEmit` after every Haiku tas
 - cgroup v2 sandbox: apply_limits on llama/classifier/qemu; QEMU -sandbox seccomp flag; cleanup_stale at startup; memory caps from model file size × 1.5 (model-agnostic, env overrideable)
 
 ### Phase 3 remaining
-- **3.6:** MCP tool discovery — stub at `mcp/mod.rs`. Design open: transport (stdio subprocess preferred over new localhost port per security model), ToolCall::Mcp enum extension deferred until execution surface is decided (both VM-caged and host-side HITL modes needed). "34 tools" spec was in deleted LAPUTA_v1_UNIFIED_MASTER_PLAN_v4.md — needs user input before catalog is defined.
+- **3.6:** MCP tool discovery + 50+ tool system. Design settled, two user decisions pending before implementation starts (see below).
+
+### Phase 3.6 design — ready to implement once user answers two questions
+
+**Architecture decided (advisor-reviewed):**
+- `ToolCall::Invoke { name: String, args: serde_json::Map<String, Value> }` — one generic variant added to the enum. All existing match arms add one explicit `Invoke` arm (no wildcard). Bracket parser extended: any unrecognised `name(args)` → Invoke.
+- `ToolRegistry` — central catalog mapping `name → { description, risk_level, backend, enabled, trust_level }`. Gate looks up risk by name for Invoke calls (maintains gate invariant #3).
+- `TrustLevel { Auto, Tap, Typed, Disabled }` — per-tool override, explicit opt-in for Auto (never default). Saved in `~/.laputa-secure/config/tool_config.json`.
+- `ToolBackend { Native, Mcp { cmd: Vec<String>, location: ServerLocation } }` where `ServerLocation { Host, Guest }`.
+- MCP transport: **stdio subprocess** (no new localhost port — sovereignty).
+- Tool retrieval: top-K relevant tools per step via `retrieval.rs` scoring. Never flat-dump 54 tool descriptions (tanks 8B selection accuracy).
+- No hand-coded 54 Rust executors — MCP servers supply tool implementations. Small native backend for VM-only tools (screenshot, vm_command) that have no MCP equivalent.
+
+**Implementation sequence:**
+1. `ToolCall::Invoke` + bracket parser + all match sites + gate-by-name lookup
+2. `ToolRegistry` + `tool_config.json` schema + `TrustLevel`
+3. MCP stdio client: `tools/list` → registry. Pure parse fn, unit-tested.
+4. One gated Invoke end-to-end (prove both host-HITL and guest-caged paths)
+5. More servers + tool retrieval in prompt
+
+**Two user decisions still needed (answer in next session):**
+1. **MCP runtime**: Allow Node.js/Python MCP servers on host (full ecosystem, supply-chain trade-off) vs guest-only (full containment, harder setup) vs Rust-only (no external runtimes, curated set)?
+2. **Bundled servers**: Which MCP servers auto-start out-of-the-box? Candidates: filesystem (10 tools), memory (5 tools), fetch/web (2 tools), git (9 tools).
