@@ -107,7 +107,12 @@ Frame (PNG) → vision/shim.c (lagado_encode_image) → mean-pooled n_embd vecto
 - `VisualEncoder` fires at episode boundaries only (Done/Task/Abort), not per tick
 - VLM subprocess (port 8082) and `VlmPerceptor` text path retired
 - `MemoryTiers`: `embedding BLOB` column + `store_visual_embedding()` + `find_similar_by_embedding()`
-- All gated behind `#[cfg(target_os = "linux")]` for cross-platform CI
+- Platform gate ONLY inside `vision/mod.rs` — public API compiles everywhere, `load()` returns Err on non-Linux
+- `encode_and_store_async()` fires in background tokio::spawn, encode in spawn_blocking outside lock
+- Visual retrieval wired into agent_loop: encodes current frame once per invocation → top-3 similar episodes → prompt
+- `[[bin]] test=false` in Cargo.toml (static lib linking doesn't propagate to bin test targets)
+- `cargo test -p lagado-agent` requires `LD_LIBRARY_PATH=.../vendored/llama.cpp-2/build/bin` (stale rpath in vendored libllama.so)
+- 57 lib tests pass; FFI smoke-tested via `load_returns_err_on_bad_path` (calls real `lagado_encoder_init`)
 
 ### Key modules (`lagado-agent/src/`)
 
@@ -199,7 +204,8 @@ Verify with `cargo check --workspace` + `npx tsc --noEmit` after every Haiku tas
 - SleepGate decays hot/warm every 5min; cold tier never deleted
 - 1.2B classifier on :8081 handles intent classification (few-shot, ~80% accuracy)
 - Visual encoder runs in-process via libmtmd FFI; embeddings stored in MemoryTiers; cosine retrieval active
-- All 3 server child processes use KillOnDrop — no orphans on app exit
+- 2 server child processes (main 8B + 1.2B classifier) use KillOnDrop — no orphans on app exit
+- VLM subprocess retired; vision now in-process FFI only
 
 ### Phase 3 remaining
 - **3.4:** llama-server health monitor + auto-restart on crash
