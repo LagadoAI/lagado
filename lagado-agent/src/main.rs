@@ -28,6 +28,7 @@ mod self_model;
 mod skill_library;
 mod sleep_gate;
 mod terminal;
+mod tools;
 mod types;
 mod vision;
 

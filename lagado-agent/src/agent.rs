@@ -7,7 +7,7 @@ use crate::memory::Memory;
 use crate::inference::InferenceAdapter;
 use crate::perception::{Perceptor, Actuator};
 use crate::recovery::FailureType;
-use crate::{chronos, config, envelope, gate};
+use crate::{chronos, config, envelope, gate, tools};
 use crate::recovery::{RecoveryManager, RecoveryOutcome};
 use crate::action_graph::ActionGraph;
 use tokio::sync::Mutex as TokioMutex;
@@ -118,6 +118,7 @@ pub async fn agent_loop(
     confirm_tx: mpsc::Sender<String>,
     memory_tiers: Arc<tokio::sync::Mutex<crate::memory_tiers::MemoryTiers>>,
     visual_encoder: Option<Arc<crate::vision::VisualEncoder>>,
+    registry: Arc<tools::ToolRegistry>,
 ) {
     let mut enforcer = StepEnforcer::new();
     let mut memory = Memory::new(|steps| {
@@ -250,7 +251,7 @@ pub async fn agent_loop(
                 }
 
                 // state mutex is NOT held from here through approval_rx.recv()
-                let output = match gate::evaluate_action(&tool_call) {
+                let output = match gate::evaluate_action(&tool_call, &registry) {
                     gate::Verdict::Allow => {
                         let desc = gate::describe_redacted(&tool_call);
                         let out = execute_tool(&tool_call, actuator.as_ref()).await;

@@ -16,7 +16,7 @@ use crate::action_graph::ActionGraph;
 use crate::inference::{InferenceAdapter, llama_cpp::LlamaCppAdapter};
 use crate::perception::{Perceptor, Actuator};
 use crate::retrieval::Retriever;
-use crate::{agent, config, envelope, governor};
+use crate::{agent, config, envelope, governor, tools};
 use blake3;
 
 /// Intent classification result
@@ -187,6 +187,7 @@ pub async fn run(
     visual_encoder: Option<Arc<crate::vision::VisualEncoder>>,
 ) {
     let hydra = Hydra::from_governor(adapter.clone());
+    let registry = Arc::new(tools::ToolRegistry::load());
 
     // Assemble context via retriever (RAG K=15)
     let context = {
@@ -206,7 +207,7 @@ pub async fn run(
             { let mut s = state.lock().await; s.goal = message.clone(); s.running = true; }
             agent::agent_loop(
                 state, adapter, perceptor, actuator, approval_rx, confirm_tx, memory_tiers,
-                visual_encoder,
+                visual_encoder, registry,
             ).await;
             return;
         }
@@ -253,7 +254,7 @@ pub async fn run(
             // Run the agent loop
             agent::agent_loop(
                 state, adapter, perceptor, actuator, approval_rx, confirm_tx, memory_tiers,
-                visual_encoder,
+                visual_encoder, registry,
             ).await;
         }
     }

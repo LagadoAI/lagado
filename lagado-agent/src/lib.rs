@@ -28,6 +28,7 @@ pub mod self_model;
 pub mod skill_library;
 pub mod sleep_gate;
 pub mod terminal;
+pub mod tools;
 pub mod types;
 pub mod server_guard;
 pub mod vm;

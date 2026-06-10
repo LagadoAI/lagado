@@ -1,3 +1,4 @@
+use crate::tools::{TrustLevel, ToolRegistry};
 use crate::types::ToolCall;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -44,10 +45,29 @@ pub fn is_destructive_text(text: &str) -> bool {
     patterns.iter().any(|p| t.contains(p))
 }
 
-pub fn evaluate_action(call: &ToolCall) -> Verdict {
+pub fn evaluate_action(call: &ToolCall, registry: &ToolRegistry) -> Verdict {
+    if let ToolCall::Invoke { name, args } = call {
+        // Destructive arg content is a hard override — cannot be bypassed by trust level.
+        // Catches `run_command(command="rm -rf /")` even when that tool is set to Auto.
+        let has_destructive_arg = args.values()
+            .filter_map(|v| v.as_str())
+            .any(is_destructive_text);
+        if has_destructive_arg {
+            return Verdict::ConfirmTyped;
+        }
+
+        return match registry.trust_for(name) {
+            TrustLevel::Disabled => Verdict::Block(format!("Tool '{name}' is disabled")),
+            TrustLevel::Auto     => Verdict::Allow,
+            TrustLevel::Tap      => Verdict::ConfirmTap,
+            TrustLevel::Typed    => Verdict::ConfirmTyped,
+        };
+    }
+
+    // Non-Invoke tools: use static risk classification
     match classify(call) {
-        RiskTier::Read => Verdict::Allow,
-        RiskTier::Write => Verdict::ConfirmTap,
+        RiskTier::Read        => Verdict::Allow,
+        RiskTier::Write       => Verdict::ConfirmTap,
         RiskTier::Destructive => Verdict::ConfirmTyped,
     }
 }

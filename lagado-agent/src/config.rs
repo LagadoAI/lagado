@@ -218,6 +218,11 @@ pub fn classifier_memory_max_bytes() -> u64 {
     2 * 1024 * 1024 * 1024 // fallback: 2 GiB
 }
 
+/// User tool configuration — trust overrides and marketplace MCP servers.
+pub fn tool_config_path() -> PathBuf {
+    data_dir().join("config").join("tool_config.json")
+}
+
 /// List all .gguf files in the models directory.
 pub fn available_models() -> Vec<String> {
     let models_dir = data_dir().join("models");
