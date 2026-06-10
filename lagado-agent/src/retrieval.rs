@@ -38,8 +38,7 @@ impl Retriever {
     }
 
     /// Compute relevance score between a query and a candidate text.
-    /// Phase 1: Jaccard-like word overlap with length penalty for very short matches.
-    /// Phase 2: replace body with embedding cosine similarity.
+    /// Jaccard-like word overlap with length penalty for very short matches.
     fn score_similarity(query: &str, candidate: &str) -> f32 {
         let q_words: HashSet<&str> =
             query.split_whitespace().collect();
@@ -132,6 +131,40 @@ impl Retriever {
         scored.into_iter().take(k).map(|(_, t)| t.clone()).collect()
     }
 
+    /// Select and format the K most relevant tools from the registry for the current goal.
+    ///
+    /// Scores each enabled tool by Jaccard similarity against the query text.
+    /// Returns a compact prompt section: name, short description, and risk marker.
+    /// K=10 is the recommended budget — enough signal for the 8B model to choose
+    /// without crowding out episodic context.
+    pub fn format_tools_for_prompt(
+        entries: &[&crate::tools::ToolEntry],
+        query: &str,
+        k: usize,
+    ) -> String {
+        if entries.is_empty() { return String::new(); }
+
+        let mut scored: Vec<(f32, &&crate::tools::ToolEntry)> = entries.iter()
+            .map(|e| {
+                let text = format!("{} {}", e.name, e.description);
+                (Self::score_similarity(query, &text), e)
+            })
+            .collect();
+        scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+
+        let lines: Vec<String> = scored.into_iter().take(k).map(|(_, e)| {
+            let risk_tag = match e.trust {
+                crate::tools::TrustLevel::Auto     => "[auto]",
+                crate::tools::TrustLevel::Tap      => "[tap]",
+                crate::tools::TrustLevel::Typed    => "[type]",
+                crate::tools::TrustLevel::Disabled => "[disabled]",
+            };
+            format!("  {}({}) — {} {}", e.name, args_hint(&e.name), e.description, risk_tag)
+        }).collect();
+
+        format!("Available tools:\n{}", lines.join("\n"))
+    }
+
     /// Format retrieved entries as a context string for prompt injection.
     pub fn format_context(entries: &[RetrievedEntry]) -> String {
         if entries.is_empty() {
@@ -146,5 +179,65 @@ impl Retriever {
             return String::new();
         }
         format!("Relevant context:\n{}", lines.join("\n"))
+    }
+}
+
+/// Short argument hint for each built-in tool. Used in the tools prompt section
+/// so the model knows how to call the tool without reading a full schema.
+fn args_hint(name: &str) -> &'static str {
+    match name {
+        // Filesystem
+        "read_file"      => r#"path="...""#,
+        "write_file"     => r#"path="...", content="...""#,
+        "list_dir"       => r#"path="...""#,
+        "search_files"   => r#"path="...", pattern="...""#,
+        "move_file"      => r#"src="...", dst="...""#,
+        "copy_file"      => r#"src="...", dst="...""#,
+        "delete_file"    => r#"path="...""#,
+        "make_dir"       => r#"path="...""#,
+        "file_info"      => r#"path="...""#,
+        "read_multiple"  => r#"paths=[...]"#,
+        // Git
+        "git_status"     => "",
+        "git_diff"       => r#"path="...""#,
+        "git_log"        => r#"n=10"#,
+        "git_add"        => r#"path="...""#,
+        "git_commit"     => r#"message="...""#,
+        "git_branch"     => r#"name="...""#,
+        "git_checkout"   => r#"branch="...""#,
+        "git_push"       => "",
+        "git_pull"       => "",
+        // System
+        "run_command"    => r#"command="...""#,
+        "list_processes" => "",
+        "kill_process"   => r#"pid=1234"#,
+        "get_env"        => r#"key="...""#,
+        "set_env"        => r#"key="...", value="...""#,
+        // Text
+        "regex_search"   => r#"pattern="...", text="...""#,
+        "json_query"     => r#"pointer="/key", data="...""#,
+        "hash_file"      => r#"path="...""#,
+        "base64_encode"  => r#"data="...""#,
+        "base64_decode"  => r#"data="...""#,
+        "find_replace"   => r#"path="...", pattern="...", replacement="...""#,
+        // Web
+        "web_search"     => r#"query="...", num_results=5"#,
+        "fetch_url"      => r#"url="...""#,
+        "read_webpage"   => r#"url="...""#,
+        "download_file"  => r#"url="...", path="...""#,
+        // Clipboard
+        "read_clipboard" => "",
+        "write_clipboard"=> r#"text="...""#,
+        // VM
+        "screenshot"     => "",
+        "vm_command"     => r#"command="...""#,
+        "vm_type"        => r#"text="...""#,
+        "vm_click"       => r#"selector="...""#,
+        // Memory
+        "memory_store"   => r#"key="...", value="...""#,
+        "memory_get"     => r#"key="...""#,
+        "memory_list"    => "",
+        "memory_delete"  => r#"key="...""#,
+        _                => "...",
     }
 }

@@ -286,8 +286,15 @@ pub async fn agent_loop(
         } else {
             format!("Visually similar past sessions:\n- {visual_context}\n\n")
         };
+        // Top-10 tools most relevant to the current goal — never flat-dump all tools
+        let tool_section = {
+            let entries = registry.enabled_entries();
+            let formatted = crate::retrieval::Retriever::format_tools_for_prompt(&entries, &goal, 10);
+            if formatted.is_empty() { String::new() } else { format!("{formatted}\n\n") }
+        };
+
         let prompt = format!(
-            "{system_prompt}\n\n{episodic_section}{visual_section}{context}\n\nScreen:\n{screen}\n\nGoal: {goal}\n\nWhat is your next action?"
+            "{system_prompt}\n\n{episodic_section}{visual_section}{tool_section}{context}\n\nScreen:\n{screen}\n\nGoal: {goal}\n\nWhat is your next action?"
         );
 
         let adapter_clone = adapter.clone();
