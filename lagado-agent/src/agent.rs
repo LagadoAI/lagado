@@ -34,6 +34,8 @@ async fn execute_tool(call: &ToolCall, actuator: &dyn Actuator) -> String {
         ToolCall::Task { description } => format!("Task completed: {}", description),
         ToolCall::Done { reason } => format!("Done: {}", reason),
         ToolCall::Chat { text } => text.clone(),
+        // Dispatcher wired in Step 3 (ToolRegistry + NativeRust executor)
+        ToolCall::Invoke { name, .. } => format!("invoke: {name} — executor not yet wired"),
     }
 }
 
@@ -48,12 +50,15 @@ async fn request_and_await_approval(
 ) -> String {
     let desc = gate::describe(tool_call);
     let desc_safe = gate::describe_redacted(tool_call);
-    let tool_name = match tool_call {
-        ToolCall::Click { .. } => "click",
-        ToolCall::Type { .. } => "type",
-        ToolCall::Key { .. } => "key",
-        ToolCall::Chat { .. } => "chat",
-        _ => "unknown",
+    let tool_name: String = match tool_call {
+        ToolCall::Click { .. }  => "click".to_string(),
+        ToolCall::Type { .. }   => "type".to_string(),
+        ToolCall::Key { .. }    => "key".to_string(),
+        ToolCall::Wait { .. }   => "wait".to_string(),
+        ToolCall::Done { .. }   => "done".to_string(),
+        ToolCall::Task { .. }   => "task".to_string(),
+        ToolCall::Chat { .. }   => "chat".to_string(),
+        ToolCall::Invoke { name, .. } => name.clone(),
     };
     let id = uuid::Uuid::new_v4().to_string();
     chronos::log(&format!("confirm_requested: {confirm_type}: {desc_safe}"));
@@ -63,7 +68,7 @@ async fn request_and_await_approval(
             envelope::PermissionPayload {
                 id: id.clone(),
                 type_: confirm_type.to_string(),
-                tool: tool_name.to_string(),
+                tool: tool_name,
                 action: desc.clone(),
                 reason: "Write action requires confirmation".to_string(),
                 origin_surface: "immersive".to_string(),
@@ -329,7 +334,8 @@ pub async fn agent_loop(
                         tracing::info!("Goal achieved.");
                         break;
                     }
-                    _ => {}
+                    ToolCall::Click { .. } | ToolCall::Type { .. } | ToolCall::Key { .. }
+                    | ToolCall::Wait { .. } | ToolCall::Chat { .. } | ToolCall::Invoke { .. } => {}
                 }
             }
             Err(e) => {

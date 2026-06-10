@@ -22,12 +22,19 @@ pub fn classify(call: &ToolCall) -> RiskTier {
         ToolCall::Type { text, .. } => {
             if is_destructive_text(text) { RiskTier::Destructive } else { RiskTier::Write }
         }
+        // Scan all string-valued args for destructive patterns before trusting the name.
+        // Default to Write (tap-confirm) until ToolRegistry classifies by name in Step 2.
+        ToolCall::Invoke { args, .. } => {
+            let has_destructive_arg = args.values()
+                .filter_map(|v| v.as_str())
+                .any(is_destructive_text);
+            if has_destructive_arg { RiskTier::Destructive } else { RiskTier::Write }
+        }
     }
 }
 
-fn is_destructive_text(text: &str) -> bool {
+pub fn is_destructive_text(text: &str) -> bool {
     let t = text.to_lowercase();
-    // Shell commands that destroy data or system state
     let patterns = [
         "rm -rf", "rm -r /", "mkfs", "dd if=", "format c:",
         ":(){:|:&};:", "chmod -r 000", "> /dev/sda",
@@ -54,10 +61,18 @@ pub fn describe(call: &ToolCall) -> String {
         ToolCall::Done { reason } => format!("done(reason=\"{}\")", reason),
         ToolCall::Task { description } => format!("task(description=\"{}\")", description),
         ToolCall::Chat { text } => format!("chat(\"{}\")", text),
+        ToolCall::Invoke { name, args } => {
+            let pairs: Vec<String> = args.iter()
+                .map(|(k, v)| format!("{}={}", k, v))
+                .collect();
+            format!("{}({})", name, pairs.join(", "))
+        }
     }
 }
 
-/// Like `describe`, but with typed text redacted — for logs and persisted history.
+/// Like `describe`, but with potentially sensitive arg values redacted for logs.
+/// Redacts values for known sensitive keys; shows key names so the log stays useful.
+/// Step 2 will replace this with ToolRegistry sensitivity annotations.
 pub fn describe_redacted(call: &ToolCall) -> String {
     match call {
         ToolCall::Type { selector, text } => format!(
@@ -65,6 +80,23 @@ pub fn describe_redacted(call: &ToolCall) -> String {
             selector,
             text.chars().count()
         ),
+        ToolCall::Invoke { name, args } => {
+            let pairs: Vec<String> = args.iter()
+                .map(|(k, v)| {
+                    if is_sensitive_key(k) {
+                        format!("{}=<redacted>", k)
+                    } else {
+                        format!("{}={}", k, v)
+                    }
+                })
+                .collect();
+            format!("{}({})", name, pairs.join(", "))
+        }
         other => describe(other),
     }
+}
+
+fn is_sensitive_key(key: &str) -> bool {
+    matches!(key, "content" | "text" | "data" | "body" | "password"
+                | "token" | "key" | "secret" | "api_key" | "value")
 }

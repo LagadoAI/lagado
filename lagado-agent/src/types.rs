@@ -10,6 +10,9 @@ pub enum ToolCall {
     Task    { description: String },
     Done    { reason: String },
     Chat    { text: String },
+    /// Generic invocation for all native + MCP tools. Name is looked up in ToolRegistry
+    /// (Step 2) for risk classification and dispatch. Args are the parsed call arguments.
+    Invoke  { name: String, args: serde_json::Map<String, serde_json::Value> },
 }
 
 #[derive(Debug, Clone)]
