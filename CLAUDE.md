@@ -143,8 +143,9 @@ Frame (PNG) → vision/shim.c (lagado_encode_image) → mean-pooled n_embd vecto
 | `vm/qmp.rs` | ✓ | QMP socket client — screendump(format:png) |
 | `vm/ssh_actuator.rs` | ✓ | SSH→xdotool, PerceptionCache coord resolution |
 | `vm/ssh_perceptor.rs` | ✓ | SSH→perceive.py, populates PerceptionCache |
-| `governor.rs` | ✓ | Hardware detection → capability tier |
-| `config.rs` | ✓ | Paths, FRAME_PATH constant, VLM/classifier/main server config |
+| `governor.rs` | ✓ | NVIDIA+AMD GPU detection, VRAM-aware n_gpu_layers, GpuInfo/GpuVendor, moe_experts_on_cpu wired to --cpu-moe |
+| `security/sandbox.rs` | ✓ | cgroup v2 memory+pid limits (Linux), QEMU -sandbox flag, cleanup_stale |
+| `config.rs` | ✓ | Paths, FRAME_PATH, server config; llama/classifier_memory_max_bytes() from model file size × 1.5 (model-agnostic) |
 | `gate.rs` | ✓ | Read/Write/Destructive tiers; ConfirmTyped for destructive text |
 | `mcp/` | stub | MCP tool discovery (Phase 3.6) |
 | `operator.rs` | ✓ | StepEnforcer, ToolDescriptor, RiskLevel |
@@ -208,6 +209,8 @@ Verify with `cargo check --workspace` + `npx tsc --noEmit` after every Haiku tas
 - 2 server child processes (main 8B + 1.2B classifier) use KillOnDrop (defined in `bootstrap.rs`) — no orphans on app exit
 - ServerGuard polls /health every 10s; declares crash after 3 consecutive failures; restarts and retries indefinitely; emits `server_crashed`/`server_restarted`/`server_restart_failed` tauri events
 - VLM subprocess retired; vision now in-process FFI only
+- GPU detection: NVIDIA (nvidia-smi) + AMD (DRM sysfs); conservative binary fit (vram_free ≥ model×1.1 → ngl=99, else CPU); moe_experts_on_cpu wired to --cpu-moe for MoE models; vram_fit_fraction() on ServerConfig ready for Phase 3.x GGUF parser
+- cgroup v2 sandbox: apply_limits on llama/classifier/qemu; QEMU -sandbox seccomp flag; cleanup_stale at startup; memory caps from model file size × 1.5 (model-agnostic, env overrideable)
 
 ### Phase 3 remaining
-- **3.6:** MCP tool discovery (34 tools)
+- **3.6:** MCP tool discovery — stub at `mcp/mod.rs`. Design open: transport (stdio subprocess preferred over new localhost port per security model), ToolCall::Mcp enum extension deferred until execution surface is decided (both VM-caged and host-side HITL modes needed). "34 tools" spec was in deleted LAPUTA_v1_UNIFIED_MASTER_PLAN_v4.md — needs user input before catalog is defined.
