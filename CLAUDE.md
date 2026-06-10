@@ -21,7 +21,7 @@ Single Tauri binary (`lagado-ui/src-tauri/`) wraps:
 - Rust agent core (`lagado-agent/` as a library)
 - Vendored `llama-server` subprocess (HTTP inference on :8080, NOT FFI) — main 8B model
 - Classifier subprocess on :8081 (LFM2.5-1.2B-Instruct, intent classification, CPU-only)
-- VLM subprocess on :8082 (LFM2.5-VL-450M + mmproj, vision — **being replaced by in-process FFI**)
+- Visual encoder: in-process `libmtmd.so` FFI (LFM2.5-VL-450M + mmproj, vision → embedding vectors, no subprocess)
 - QEMU desktop VM (agent's sandboxed working surface)
 
 Inference: HTTP to `llama-server` → `/v1/chat/completions`.
@@ -87,45 +87,27 @@ Live feed:  QMP screendump (format:png) → /dev/shm/lagado_frame.png → base64
 - SleepGate runs in background every 5min via `tauri::async_runtime::spawn`
 - DB: `~/.laputa-secure/memory.db`
 
-**Phase 3.3 IN PROGRESS — Visual embedding (not text description):**
-
-The VLM should NOT describe the screen in text. It should produce embedding vectors that feed
-the memory system directly. The architecture:
+**Phase 3.3 COMPLETE — Visual embedding via in-process libmtmd FFI:**
 
 ```
-Frame (PNG) → in-process visual encoder (libmtmd.so FFI) → 1024-dim vector
-                                                                ↓
-                                                   MemoryTiers embedding BLOB column
-                                                                ↓
-                                               cosine similarity retrieval at query time
-                                                                ↓
-                                          top-K visually similar past episodes → agent context
+Frame (PNG) → vision/shim.c (lagado_encode_image) → mean-pooled n_embd vector
+                                                            ↓
+                                               MemoryTiers embedding BLOB column
+                                                            ↓
+                                           cosine similarity retrieval at query time
+                                                            ↓
+                                      top-K visually similar past episodes → agent context
 ```
 
-**Key facts for implementation:**
-- `libmtmd.so` is already compiled at `vendored/llama.cpp-2/build/bin/libmtmd.so`
-- Header: `vendored/llama.cpp-2/tools/mtmd/mtmd.h`
-- Key C API calls needed:
-  ```c
-  llama_model_load_from_file(path, params) → llama_model*
-  mtmd_init_from_file(mmproj_path, model, params) → mtmd_context*
-  mtmd_bitmap_init(nx, ny, rgb_data) → mtmd_bitmap*
-  mtmd_input_chunks_init() → mtmd_input_chunks*
-  mtmd_tokenize(ctx, chunks, text, bitmaps, n) → i32
-  mtmd_encode_chunk(ctx, chunk) → i32   // runs vision encoder
-  mtmd_get_output_embd(ctx) → *f32      // n_embd_inp × n_tokens floats
-  // mean-pool over n_tokens → single 1024-dim vector
-  ```
-- Output size: `llama_model_n_embd_inp(model) × n_image_tokens × sizeof(f32)`
-- PNG decode: use `image` crate → raw RGB bytes → `mtmd_bitmap_init`
-- `build.rs` must link: `libllama.so`, `libmtmd.so`, `libggml.so` from vendored build/bin
-- The VLM subprocess (port 8082) can be retired once in-process path works
-- `VlmPerceptor` text description path → retire, replace with embedding store+retrieval
-- MemoryTiers needs: `embedding BLOB` column (JSON-encoded f32 array), cosine similarity search
-
-**The VLM subprocess (`perception/vlm_adapter.rs` + `ensure_vlm_server`) currently committed
-is the text-description version. It compiles and ships the mmproj download. It will be
-replaced in the same session by the in-process FFI path — do not remove it yet.**
+**Key implementation facts:**
+- C shim at `lagado-agent/src/vision/shim.c` handles all struct-by-value C ABI
+- Rust binding at `lagado-agent/src/vision/mod.rs` — `VisualEncoder` behind `Mutex`
+- `build.rs` compiles shim via `cc` crate, links `libllama.so`/`libmtmd.so`/`libggml.so`
+- Image decoded to RGB (NOT RGBA) before passing to `mtmd_bitmap_init`
+- `VisualEncoder` fires at episode boundaries only (Done/Task/Abort), not per tick
+- VLM subprocess (port 8082) and `VlmPerceptor` text path retired
+- `MemoryTiers`: `embedding BLOB` column + `store_visual_embedding()` + `find_similar_by_embedding()`
+- All gated behind `#[cfg(target_os = "linux")]` for cross-platform CI
 
 ### Key modules (`lagado-agent/src/`)
 
@@ -144,10 +126,12 @@ replaced in the same session by the in-process FFI path — do not remove it yet
 | `auth/mod.rs` | ✓ | Wrapped DEK, lockout, `active_key()`, `set_session_dek()` |
 | `self_model.rs` | ✓ | Accepted beliefs, distill feed |
 | `distill.rs` | ✓ hooks | Replay manifest for Phase 3 QLoRA |
-| `perception/mod.rs` | ✓ | PerceptionCache, VlmPerceptor (text, being replaced) |
+| `perception/mod.rs` | ✓ | PerceptionCache, VlmPerceptor retired |
 | `perception/linux.rs` | ✓ | AT-SPI2 via perceive.py, xdotool |
 | `perception/delta.rs` | ✓ | Blake3 per-cell change detection |
-| `perception/vlm_adapter.rs` | ✓→replacing | Text description via HTTP — being replaced by in-process FFI |
+| `perception/vlm_adapter.rs` | kept | Text path kept for reference; not used in agent pipeline |
+| `vision/mod.rs` | ✓ | VisualEncoder FFI wrapper, cosine_similarity, Linux-only |
+| `vision/shim.c` | ✓ | C shim over libmtmd — lagado_encoder_init/encode_image/free |
 | `perception/capture.rs` | stub | grim/scrot host mode |
 | `vm/mod.rs` | ✓ | QemuDesktopBackend, QMP, DynamicActuator/Perceptor |
 | `vm/qmp.rs` | ✓ | QMP socket client — screendump(format:png) |
@@ -204,8 +188,7 @@ Verify with `cargo check --workspace` + `npx tsc --noEmit` after every Haiku tas
 
 ## Status (2026-06-09)
 
-**Phase 1.4 COMPLETE. Phase 2 COMPLETE. Phase 3.1 COMPLETE. Phase 3.2 COMPLETE.**
-**Phase 3.3 IN PROGRESS — visual embedding via in-process libmtmd FFI.**
+**Phase 1.4 COMPLETE. Phase 2 COMPLETE. Phase 3.1 COMPLETE. Phase 3.2 COMPLETE. Phase 3.3 COMPLETE.**
 
 ### What works end-to-end
 - App launches → auth gate → signup or login → chat
@@ -215,12 +198,10 @@ Verify with `cargo check --workspace` + `npx tsc --noEmit` after every Haiku tas
 - Cold memory encrypted with session DEK; episodes persist across sessions
 - SleepGate decays hot/warm every 5min; cold tier never deleted
 - 1.2B classifier on :8081 handles intent classification (few-shot, ~80% accuracy)
-- VLM server on :8082 can describe screen in text (Phase 3.3 text path — being replaced)
+- Visual encoder runs in-process via libmtmd FFI; embeddings stored in MemoryTiers; cosine retrieval active
 - All 3 server child processes use KillOnDrop — no orphans on app exit
 
 ### Phase 3 remaining
-- **3.3 (IN PROGRESS):** Replace VlmPerceptor text path with in-process `libmtmd.so` FFI embeddings.
-  Add `embedding BLOB` to MemoryTiers + cosine retrieval. Retire VLM subprocess.
 - **3.4:** llama-server health monitor + auto-restart on crash
 - **3.5:** `security/sandbox.rs` — seccomp/cgroups for QEMU + agent subprocesses
 - **3.6:** MCP tool discovery (34 tools)
