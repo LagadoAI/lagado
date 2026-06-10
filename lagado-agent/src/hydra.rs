@@ -187,7 +187,12 @@ pub async fn run(
     visual_encoder: Option<Arc<crate::vision::VisualEncoder>>,
 ) {
     let hydra = Hydra::from_governor(adapter.clone());
-    let registry = Arc::new(tools::ToolRegistry::load());
+    let mut reg = tools::ToolRegistry::load();
+    let mcp_entries = tools::discover_mcp_tools().await;
+    if !mcp_entries.is_empty() {
+        reg.merge_entries(mcp_entries);
+    }
+    let registry = Arc::new(reg);
 
     // Assemble context via retriever (RAG K=15)
     let context = {

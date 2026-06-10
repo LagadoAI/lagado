@@ -43,6 +43,8 @@ pub struct ToolEntry {
     pub backend:     ToolBackend,
     pub enabled:     bool,
     pub trust:       TrustLevel,
+    /// JSON Schema for MCP tool input validation. None for native Rust tools.
+    pub schema:      Option<serde_json::Value>,
 }
 
 // ── Tool registry ─────────────────────────────────────────────────────────────
@@ -88,6 +90,76 @@ impl ToolRegistry {
 
     /// Catalog size (for diagnostics).
     pub fn len(&self) -> usize { self.entries.len() }
+
+    /// Merge additional entries (e.g., from MCP discovery) into the catalog.
+    pub fn merge_entries(&mut self, entries: Vec<ToolEntry>) {
+        for entry in entries {
+            self.entries.insert(entry.name.clone(), entry);
+        }
+    }
+}
+
+/// Discover tools from all MCP servers listed in tool_config.json.
+/// Returns entries ready to merge into the registry.
+///
+/// Each server gets a 10-second discovery timeout. Servers that fail
+/// or aren't installed are skipped with a warning (non-fatal).
+pub async fn discover_mcp_tools() -> Vec<ToolEntry> {
+    let config: ToolConfig = match std::fs::read_to_string(crate::config::tool_config_path())
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+    {
+        Some(c) => c,
+        None => return Vec::new(),
+    };
+
+    if config.mcp_servers.is_empty() { return Vec::new(); }
+
+    let mut all_entries: Vec<ToolEntry> = Vec::new();
+
+    for server in config.mcp_servers {
+        let cmd = server.cmd.clone();
+        let server_name = server.name.clone();
+        let location = server.location.clone();
+
+        let discovery = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            tokio::task::spawn_blocking(move || crate::mcp::client::discover_tools(&cmd)),
+        )
+        .await;
+
+        match discovery {
+            Err(_) => {
+                tracing::warn!("MCP '{}': discovery timed out after 10s", server_name);
+            }
+            Ok(Err(e)) => {
+                tracing::warn!("MCP '{}': spawn_blocking failed: {e}", server_name);
+            }
+            Ok(Ok(Err(e))) => {
+                tracing::warn!("MCP '{}': discovery error: {e}", server_name);
+            }
+            Ok(Ok(Ok(tools))) => {
+                tracing::info!("MCP '{}': discovered {} tools", server_name, tools.len());
+                for tool in tools {
+                    let loc = match location {
+                        ServerLocation::Host  => ServerLocation::Host,
+                        ServerLocation::Guest => ServerLocation::Guest,
+                    };
+                    all_entries.push(ToolEntry {
+                        name:        tool.name,
+                        description: tool.description,
+                        risk:        RiskTier::Write,
+                        backend:     ToolBackend::Mcp { cmd: server.cmd.clone(), location: loc },
+                        enabled:     true,
+                        trust:       TrustLevel::Tap, // user-added: never Auto by default
+                        schema:      Some(tool.input_schema),
+                    });
+                }
+            }
+        }
+    }
+
+    all_entries
 }
 
 // ── tool_config.json schema ───────────────────────────────────────────────────
@@ -141,7 +213,8 @@ fn apply_overrides(entries: &mut HashMap<String, ToolEntry>, cfg: ToolConfig) {
                 location: match server.location { ServerLocation::Host => ServerLocation::Host, ServerLocation::Guest => ServerLocation::Guest },
             },
             enabled: true,
-            trust:   TrustLevel::Tap, // user-added MCP: never Auto by default
+            trust:   TrustLevel::Tap,
+            schema:  None,
         });
     }
 }
@@ -223,6 +296,7 @@ fn builtin_entries() -> Vec<ToolEntry> {
         backend:     NativeRust,
         enabled:     true,
         trust:       *trust,
+        schema:      None,
     }).collect()
 }
 
