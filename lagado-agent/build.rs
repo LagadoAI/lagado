@@ -1,5 +1,6 @@
 fn main() {
-    // Visual encoder shim — Linux only (libmtmd.so is a Linux-only build artifact)
+    // Visual encoder shim — Linux only, and only when vendored headers are present.
+    // Sets cargo:rustc-cfg=lagado_vision_ffi so vision/mod.rs gates FFI accordingly.
     #[cfg(target_os = "linux")]
     build_vision_shim();
 }
@@ -7,8 +8,15 @@ fn main() {
 #[cfg(target_os = "linux")]
 fn build_vision_shim() {
     let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-    let lib_dir = format!("{manifest}/vendored/llama.cpp-2/build/bin");
     let include_dir = format!("{manifest}/vendored/llama.cpp-2/include");
+
+    // Skip gracefully when vendored headers are absent (e.g. CI without local build artifacts).
+    if !std::path::Path::new(&include_dir).join("llama.h").exists() {
+        println!("cargo:warning=vision shim skipped: vendored/llama.cpp-2/include/llama.h not found");
+        return;
+    }
+
+    let lib_dir = format!("{manifest}/vendored/llama.cpp-2/build/bin");
     let mtmd_include_dir = format!("{manifest}/vendored/llama.cpp-2/tools/mtmd");
     let ggml_include_dir = format!("{manifest}/vendored/llama.cpp-2/ggml/include");
 
@@ -21,7 +29,7 @@ fn build_vision_shim() {
         .include(&include_dir)
         .include(&mtmd_include_dir)
         .include(&ggml_include_dir)
-        .flag("-w") // suppress warnings from llama.cpp headers
+        .flag("-w")
         .compile("lagado_vision_shim");
 
     println!("cargo:rustc-link-search=native={lib_dir}");
@@ -29,4 +37,5 @@ fn build_vision_shim() {
     println!("cargo:rustc-link-lib=dylib=mtmd");
     println!("cargo:rustc-link-lib=dylib=ggml");
     println!("cargo:rustc-link-arg=-Wl,-rpath,{lib_dir}");
+    println!("cargo:rustc-cfg=lagado_vision_ffi");
 }

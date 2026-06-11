@@ -8,18 +8,18 @@ use std::sync::Mutex;
 
 // ── FFI block (Linux only) ────────────────────────────────────────
 
-#[cfg(target_os = "linux")]
+#[cfg(lagado_vision_ffi)]
 use std::ffi::CString;
-#[cfg(target_os = "linux")]
+#[cfg(lagado_vision_ffi)]
 use std::os::raw::{c_char, c_int, c_uint};
 
-#[cfg(target_os = "linux")]
+#[cfg(lagado_vision_ffi)]
 #[repr(C)]
 struct LagadoEncoder {
     _private: [u8; 0],
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(lagado_vision_ffi)]
 extern "C" {
     fn lagado_encoder_init(
         model_path:  *const c_char,
@@ -43,10 +43,10 @@ extern "C" {
 // ── RawEncoder — platform-specific pointer wrapper ────────────────
 
 // Two struct definitions, one per platform — same name, safe on both.
-#[cfg(target_os = "linux")]
+#[cfg(lagado_vision_ffi)]
 struct RawEncoder(*mut LagadoEncoder);
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(lagado_vision_ffi))]
 struct RawEncoder;
 
 // SAFETY: access is gated behind Mutex; C encoder has no global mutable state per handle.
@@ -55,7 +55,7 @@ unsafe impl Sync for RawEncoder {}
 
 impl Drop for RawEncoder {
     fn drop(&mut self) {
-        #[cfg(target_os = "linux")]
+        #[cfg(lagado_vision_ffi)]
         if !self.0.is_null() {
             unsafe { lagado_encoder_free(self.0) };
         }
@@ -75,7 +75,7 @@ impl VisualEncoder {
     /// Load the VLM text model + mmproj projector.
     /// Returns Err on non-Linux platforms (no libmtmd.so).
     pub fn load(model_path: &str, mmproj_path: &str, use_gpu: bool) -> Result<Self, String> {
-        #[cfg(target_os = "linux")]
+        #[cfg(lagado_vision_ffi)]
         {
             let c_model  = CString::new(model_path).map_err(|e| e.to_string())?;
             let c_mmproj = CString::new(mmproj_path).map_err(|e| e.to_string())?;
@@ -103,7 +103,7 @@ impl VisualEncoder {
                 n_embd,
             });
         }
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(not(lagado_vision_ffi))]
         Err("visual encoding requires Linux (libmtmd.so not available on this platform)".to_string())
     }
 
@@ -114,7 +114,7 @@ impl VisualEncoder {
             return None;
         }
 
-        #[cfg(target_os = "linux")]
+        #[cfg(lagado_vision_ffi)]
         {
             let img = image::load_from_memory(png_bytes)
                 .map_err(|e| tracing::warn!("PNG decode failed: {e}"))
@@ -136,7 +136,7 @@ impl VisualEncoder {
             }
             return Some(out);
         }
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(not(lagado_vision_ffi))]
         { let _ = png_bytes; None }
     }
 }
@@ -186,7 +186,7 @@ mod tests {
     fn encode_png_returns_none_on_empty() {
         // Can't construct a real VisualEncoder without model files,
         // but encode_png must return None for empty bytes regardless.
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(not(lagado_vision_ffi))]
         {
             let enc = VisualEncoder { inner: Mutex::new(RawEncoder), n_embd: 1024 };
             assert_eq!(enc.encode_png(b""), None);

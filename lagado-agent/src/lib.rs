@@ -31,5 +31,6 @@ pub mod terminal;
 pub mod tools;
 pub mod types;
 pub mod server_guard;
+#[cfg(unix)]
 pub mod vm;
 pub mod vision;
