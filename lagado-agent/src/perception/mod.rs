@@ -126,6 +126,7 @@ pub use linux::{LinuxPerceptor, LinuxActuator, linux_pair};
 
 pub mod capture;
 pub mod delta;
+pub mod frame;
 pub mod vlm_adapter;
 
 /// Wraps any Perceptor with a VLM layer that appends visual context to AT-SPI2 output.
