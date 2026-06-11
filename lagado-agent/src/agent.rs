@@ -10,7 +10,7 @@ use crate::recovery::FailureType;
 use crate::{chronos, config, envelope, gate, tools};
 use crate::recovery::{RecoveryManager, RecoveryOutcome};
 use crate::action_graph::ActionGraph;
-use crate::skill_library::SkillLibrary;
+use crate::skill_library::{Skill, SkillLibrary};
 use tokio::sync::Mutex as TokioMutex;
 use blake3;
 
@@ -426,6 +426,7 @@ pub async fn agent_loop(
                             tiers.push_episode_id(format!("Goal '{goal}': {reason}")).ok()
                         };
                         encode_and_store_async(episode_id, &visual_encoder, memory_tiers.clone());
+                        distill_skill_async(goal.clone(), memory.context_string(), recent_actions.len(), adapter.clone(), skill_library.clone());
                         tracing::info!("Goal achieved.");
                         break;
                     }
@@ -440,6 +441,7 @@ pub async fn agent_loop(
                             tiers.push_episode_id(format!("Task '{goal}': {description}")).ok()
                         };
                         encode_and_store_async(episode_id, &visual_encoder, memory_tiers.clone());
+                        distill_skill_async(goal.clone(), memory.context_string(), recent_actions.len(), adapter.clone(), skill_library.clone());
                         tracing::info!("Goal achieved.");
                         break;
                     }
@@ -522,4 +524,116 @@ fn encode_and_store_async(
             let _ = tiers.store_visual_embedding(&id, &embd);
         }
     });
+}
+
+/// Distill a reusable skill from a completed episode via a background LLM summarization call.
+/// Fail-silent — never blocks or errors the completion path.
+/// Skips episodes with fewer than 2 real tool steps (those belong to action_graph).
+fn distill_skill_async(
+    goal: String,
+    trajectory: String,
+    step_count: usize,
+    adapter: Arc<dyn crate::inference::InferenceAdapter>,
+    skill_library: Arc<SkillLibrary>,
+) {
+    if step_count < 2 { return; }
+    tokio::spawn(async move {
+        let prompt = build_distill_prompt(&goal, &trajectory);
+        let result = tokio::task::spawn_blocking(move || {
+            adapter.generate(&prompt, 256, 0.3)
+        }).await;
+        if let Ok(Ok(text)) = result {
+            if let Some(skill) = parse_skill_json(&text, &goal) {
+                let name = skill.name.clone();
+                if skill_library.save(&skill).is_ok() {
+                    tracing::debug!("skill distilled: {name}");
+                }
+            }
+        }
+    });
+}
+
+fn build_distill_prompt(goal: &str, trajectory: &str) -> String {
+    format!(
+        "Goal completed: \"{goal}\"\n\nTrajectory:\n{trajectory}\n\n\
+Extract a reusable skill from this experience. \
+Respond with ONLY a valid JSON object — no markdown fences, no explanation:\n\
+{{\"name\": \"snake_case_name\", \"description\": \"phrase as a user would state the goal or trigger\", \"approach\": \"the key lesson or method\"}}\n\n\
+Rules: name is lowercase_snake_case 2-4 words; description uses vocabulary a user would write when asking for this task; approach is 1-3 sentences."
+    )
+}
+
+fn parse_skill_json(text: &str, fallback_goal: &str) -> Option<Skill> {
+    let stripped = text.trim()
+        .trim_start_matches("```json")
+        .trim_start_matches("```")
+        .trim_end_matches("```")
+        .trim();
+    let start = stripped.find('{')?;
+    let end   = stripped.rfind('}')?;
+    let json  = &stripped[start..=end];
+
+    let v: serde_json::Value = serde_json::from_str(json).ok()?;
+    let name        = v["name"].as_str()?.trim().to_string();
+    let description = v["description"].as_str()?.trim().to_string();
+    let approach    = v["approach"].as_str()?.trim().to_string();
+
+    if name.is_empty() || approach.is_empty() { return None; }
+    let description = if description.len() >= 5 { description } else { fallback_goal.to_string() };
+
+    Some(Skill::from_episode(name, description, approach, vec![]))
+}
+
+// ── Distillation tests ────────────────────────────────────────────
+
+#[cfg(test)]
+mod distill_tests {
+    use super::*;
+
+    #[test]
+    fn parse_clean_json() {
+        let text = r#"{"name": "open_browser", "description": "user wants to open the web browser", "approach": "Click the browser icon in the taskbar."}"#;
+        let skill = parse_skill_json(text, "open browser").unwrap();
+        assert_eq!(skill.name, "open_browser");
+        assert!(skill.approach.contains("taskbar"));
+        assert_eq!(skill.description, "user wants to open the web browser");
+    }
+
+    #[test]
+    fn parse_fenced_json() {
+        let text = "```json\n{\"name\": \"copy_file\", \"description\": \"copy a file to another directory\", \"approach\": \"Use file manager copy-paste.\"}\n```";
+        let skill = parse_skill_json(text, "copy file").unwrap();
+        assert_eq!(skill.name, "copy_file");
+    }
+
+    #[test]
+    fn parse_empty_description_falls_back_to_goal() {
+        let text = r#"{"name": "run_test", "description": "", "approach": "Use cargo test from the project root."}"#;
+        let skill = parse_skill_json(text, "run the tests").unwrap();
+        assert_eq!(skill.description, "run the tests");
+    }
+
+    #[test]
+    fn parse_rejects_empty_name() {
+        let text = r#"{"name": "", "description": "some desc", "approach": "some approach"}"#;
+        assert!(parse_skill_json(text, "goal").is_none());
+    }
+
+    #[test]
+    fn parse_rejects_empty_approach() {
+        let text = r#"{"name": "do_thing", "description": "some desc", "approach": ""}"#;
+        assert!(parse_skill_json(text, "goal").is_none());
+    }
+
+    #[test]
+    fn parse_rejects_invalid_json() {
+        assert!(parse_skill_json("not json at all", "goal").is_none());
+    }
+
+    #[test]
+    fn parse_json_with_surrounding_text() {
+        let text = r#"Here is the skill: {"name": "resize_window", "description": "user needs to resize an application window", "approach": "Drag the window edge."} Done."#;
+        let skill = parse_skill_json(text, "resize window").unwrap();
+        assert_eq!(skill.name, "resize_window");
+    }
 }
