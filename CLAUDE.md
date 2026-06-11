@@ -137,10 +137,14 @@ Frame (PNG) → vision/shim.c (lagado_encode_image) → mean-pooled n_embd vecto
 | `auth/mod.rs` | ✓ | Wrapped DEK, lockout, `active_key()`, `set_session_dek()` |
 | `self_model.rs` | ✓ | Accepted beliefs, distill feed |
 | `distill.rs` | ✓ hooks | Replay manifest for Phase 3 QLoRA |
-| `perception/mod.rs` | ✓ | PerceptionCache, VlmPerceptor retired |
-| `perception/linux.rs` | ✓ | AT-SPI2 via perceive.py, xdotool |
-| `perception/delta.rs` | ✓ | Blake3 per-cell change detection |
+| `perception/mod.rs` | ✓ | PerceptionCache (coords + bboxes), VlmPerceptor retired |
+| `perception/linux.rs` | ✓ | AT-SPI2 via perceive.py --focused, populates both coords and bboxes |
+| `perception/delta.rs` | ✓ | Pixel-space blake3 per cell — decoded RGB, remainder → last col/row |
+| `perception/frame.rs` | ✓ | FrameProcessor: PNG→RGB→DeltaDetector, stateful, reset() between sessions |
+| `perception/cv_proposer.rs` | ✓ | Canny + 8-connected components (imageproc), ProposalResult, extract_cell_rgb |
 | `perception/vlm_adapter.rs` | kept | Text path kept for reference; not used in agent pipeline |
+| `perception/arbiter.rs` | NOT BUILT | IoU-dedup arbiter (TASK 6) |
+| `perception/harness.rs` | NOT BUILT | PerceptionMode switch + CSV measurement log (TASK 7) |
 | `vision/mod.rs` | ✓ | VisualEncoder FFI wrapper, cosine_similarity, Linux-only |
 | `vision/shim.c` | ✓ | C shim over libmtmd — lagado_encoder_init/encode_image/free |
 | `perception/capture.rs` | stub | grim/scrot host mode |
@@ -221,11 +225,11 @@ cd lagado-ui && npx tsc --noEmit
 Opus/Sonnet: planning, review, architecture. Haiku: all implementation and file edits.
 Verify with `cargo check --workspace` + `npx tsc --noEmit` after every Haiku task.
 
-## Status (2026-06-10)
+## Status (2026-06-11)
 
-**FULL LIVING MEMORY SYSTEM COMPLETE. Phases 1.4, 2, 3.1–3.6, memory consolidation, entropy pruning, skill distillation all done. CI all platforms green.**
+**FULL LIVING MEMORY SYSTEM COMPLETE. Perception fusion harness TASK 1–3 complete. TASK 4 is next (hard gate before shim changes).**
 
-HEAD: `938af52`. 110 lib tests. Ubuntu ✓ macOS ✓ Windows ✓.
+HEAD: `c03b532`. 137 lib tests. Ubuntu ✓ macOS ✓ Windows ✓.
 
 **Single source of truth for the plan:** `LAPUTA HOW TO/LAGADO_MASTER_PLAN.md.pdf` (June 3, 2026).
 
@@ -249,6 +253,15 @@ HEAD: `938af52`. 110 lib tests. Ubuntu ✓ macOS ✓ Windows ✓.
 - Immersive → VM auto-boots → live QEMU desktop feed → SSH → xdotool actuation
 - RecoveryManager, SleepGate (full consolidation), ServerGuard, cgroup v2 sandbox all active
 - 44 bundled native Rust tools, MCP stdio client, confidence gating, HITL gate
+
+### Perception fusion harness (in progress)
+- TASK 1 ✓ — full bbox retained (`parse_ref_bboxes`, `PerceptionCache.bboxes`)
+- TASK 2 ✓ — pixel-space DeltaDetector (decoded RGB, remainder → last col/row) + FrameProcessor
+- TASK 3 ✓ — CV box proposer (Canny + connected components, imageproc 0.27) + cv_measure binary
+- TASK 4 ⛔ HARD GATE — `examples/probe_patch_positions.rs` throwaway probe; confirm decoder_pos is regular spatial grid BEFORE writing TASK 5
+- TASK 5 — shim: `lagado_encode_image_patches()` + Rust `encode_png_patches()`
+- TASK 6 — `perception/arbiter.rs`: IoU-dedup → `FusedElement` / `Sense` enum
+- TASK 7 — `perception/harness.rs`: `PerceptionMode`, CSV measurement log, conditional wire
 
 ### Remaining (against 7-segment PDF plan)
 - **Segment 1** — Browser extension Backend #1: DOM perception + actuation (cross-platform ON-RAMP)
