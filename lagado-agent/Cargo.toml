@@ -35,6 +35,11 @@ path = "src/bin/cv_measure.rs"
 test = false
 
 [[bin]]
+name = "first_walk"
+path = "src/bin/first_walk.rs"
+test = false
+
+[[bin]]
 name = "harness_proof"
 path = "src/bin/harness_proof.rs"
 test = false

@@ -88,6 +88,11 @@ wiring the verification loop (act → observe delta → check expectation) into 
 own reasoning. Windows-native perception, the browser backend, and the Lens recorder are
 designed but not yet built. We publish what works and what doesn't.
 
+## Design rationale
+
+Every major decision here was an argument we had on purpose. [DESIGN.md](DESIGN.md) records
+the twelve that matter — each one as *the decision, why, and what it cost us*.
+
 ## Stack
 
 Rust (agent core) · Tauri + React (app) · llama.cpp (vendored, local inference) ·
