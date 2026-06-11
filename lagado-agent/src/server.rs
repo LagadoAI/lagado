@@ -8,12 +8,18 @@ use crate::config;
 use crate::envelope;
 use crate::inference::InferenceAdapter;
 use crate::perception::{Perceptor, Actuator};
+use crate::skill_library::SkillLibrary;
+use crate::tools::ToolRegistry;
 
 pub(crate) async fn run_ws_server(
     state: Arc<Mutex<AgentState>>,
     adapter: Arc<dyn InferenceAdapter>,
     perceptor: Arc<dyn Perceptor>,
     actuator: Arc<dyn Actuator>,
+    memory_tiers: Arc<tokio::sync::Mutex<crate::memory_tiers::MemoryTiers>>,
+    visual_encoder: Option<Arc<crate::vision::VisualEncoder>>,
+    registry: Arc<ToolRegistry>,
+    skill_library: Arc<SkillLibrary>,
 ) {
     let addr = config::ws_addr();
     let listener = match TcpListener::bind(&addr).await {
@@ -70,8 +76,12 @@ pub(crate) async fn run_ws_server(
                                         let adapter_clone = adapter.clone();
                                         let perceptor_clone = perceptor.clone();
                                         let actuator_clone = actuator.clone();
+                                        let mt_clone = memory_tiers.clone();
+                                        let ve_clone = visual_encoder.clone();
+                                        let reg_clone = registry.clone();
+                                        let sl_clone = skill_library.clone();
                                         tokio::spawn(async move {
-                                            agent_loop(state_clone, adapter_clone, perceptor_clone, actuator_clone, approval_rx, confirm_tx).await;
+                                            agent_loop(state_clone, adapter_clone, perceptor_clone, actuator_clone, approval_rx, confirm_tx, mt_clone, ve_clone, reg_clone, sl_clone).await;
                                         });
                                     }
                                 }

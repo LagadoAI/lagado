@@ -12,6 +12,7 @@ use lagado_agent::{
     memory_tiers::MemoryTiers,
     perception::{Perceptor, Actuator, PerceptionCache},
     server_guard::{ServerGuard, ServerEvent},
+    skill_library::SkillLibrary,
     sleep_gate::SleepGate,
     vm::{QemuDesktopBackend, VmHandle, VmBackend, VmSshPort, DynamicActuator, DynamicPerceptor},
 };
@@ -31,6 +32,7 @@ struct AppState {
     session_dek: Arc<Mutex<Option<Vec<u8>>>>,
     ssh_cache: Arc<std::sync::Mutex<PerceptionCache>>,
     memory_tiers: Arc<Mutex<MemoryTiers>>,
+    skill_library: Arc<SkillLibrary>,
 }
 
 #[tauri::command]
@@ -66,6 +68,7 @@ async fn send_goal(
     let actuator = state.actuator.clone();
     let memory_tiers = state.memory_tiers.clone();
     let visual_encoder = state.visual_encoder.clone();
+    let skill_library = state.skill_library.clone();
 
     tokio::spawn(async move {
         hydra::run(
@@ -80,6 +83,7 @@ async fn send_goal(
             confirm_tx,
             memory_tiers,
             visual_encoder,
+            skill_library,
         )
         .await;
     });
@@ -513,6 +517,8 @@ fn main() {
             std::process::exit(1);
         })
     ));
+
+    let skill_library = Arc::new(SkillLibrary::open(&config::data_dir()));
     let memory_for_setup = memory_tiers.clone();
 
     let llama_child: Arc<Mutex<Option<KillOnDrop>>> = Arc::new(Mutex::new(None));
@@ -587,6 +593,7 @@ fn main() {
         session_dek: Arc::new(Mutex::new(None)),
         ssh_cache,
         memory_tiers,
+        skill_library,
     });
 
     tauri::Builder::default()

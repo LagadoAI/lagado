@@ -10,6 +10,7 @@ use crate::recovery::FailureType;
 use crate::{chronos, config, envelope, gate, tools};
 use crate::recovery::{RecoveryManager, RecoveryOutcome};
 use crate::action_graph::ActionGraph;
+use crate::skill_library::SkillLibrary;
 use tokio::sync::Mutex as TokioMutex;
 use blake3;
 
@@ -193,6 +194,7 @@ pub async fn agent_loop(
     memory_tiers: Arc<tokio::sync::Mutex<crate::memory_tiers::MemoryTiers>>,
     visual_encoder: Option<Arc<crate::vision::VisualEncoder>>,
     registry: Arc<tools::ToolRegistry>,
+    skill_library: Arc<SkillLibrary>,
 ) {
     let mut enforcer = StepEnforcer::new();
     let mut memory = Memory::new(|steps| {
@@ -257,6 +259,13 @@ pub async fn agent_loop(
         }
     };
 
+    // Retrieve relevant skills as advisory depth context — top-3 by Jaccard on goal text.
+    // These are injected into the prompt as guidance, never executed verbatim.
+    let skill_context: String = {
+        let skills = skill_library.retrieve(&goal, 3);
+        SkillLibrary::format_for_prompt(&skills)
+    };
+
     chronos::log(&format!("goal_received: {goal}"));
     let _ = confirm_tx.send(envelope::make("status", envelope::StatusPayload {
         state: "goal_received".to_string(),
@@ -286,6 +295,11 @@ pub async fn agent_loop(
         } else {
             format!("Visually similar past sessions:\n- {visual_context}\n\n")
         };
+        let skill_section = if skill_context.is_empty() {
+            String::new()
+        } else {
+            format!("{skill_context}\n")
+        };
         // Top-10 tools most relevant to the current goal — never flat-dump all tools
         let tool_section = {
             let entries = registry.enabled_entries();
@@ -294,7 +308,7 @@ pub async fn agent_loop(
         };
 
         let prompt = format!(
-            "{system_prompt}\n\n{episodic_section}{visual_section}{tool_section}{context}\n\nScreen:\n{screen}\n\nGoal: {goal}\n\nWhat is your next action?"
+            "{system_prompt}\n\n{episodic_section}{visual_section}{skill_section}{tool_section}{context}\n\nScreen:\n{screen}\n\nGoal: {goal}\n\nWhat is your next action?"
         );
 
         let adapter_clone = adapter.clone();

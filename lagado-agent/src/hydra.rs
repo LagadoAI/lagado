@@ -16,6 +16,7 @@ use crate::action_graph::ActionGraph;
 use crate::inference::{InferenceAdapter, llama_cpp::LlamaCppAdapter};
 use crate::perception::{Perceptor, Actuator};
 use crate::retrieval::Retriever;
+use crate::skill_library::SkillLibrary;
 use crate::{agent, config, envelope, governor, tools};
 use blake3;
 
@@ -185,6 +186,7 @@ pub async fn run(
     confirm_tx: mpsc::Sender<String>,
     memory_tiers: Arc<tokio::sync::Mutex<crate::memory_tiers::MemoryTiers>>,
     visual_encoder: Option<Arc<crate::vision::VisualEncoder>>,
+    skill_library: Arc<SkillLibrary>,
 ) {
     let hydra = Hydra::from_governor(adapter.clone());
     let mut reg = tools::ToolRegistry::load();
@@ -212,7 +214,7 @@ pub async fn run(
             { let mut s = state.lock().await; s.goal = message.clone(); s.running = true; }
             agent::agent_loop(
                 state, adapter, perceptor, actuator, approval_rx, confirm_tx, memory_tiers,
-                visual_encoder, registry,
+                visual_encoder, registry, skill_library,
             ).await;
             return;
         }
@@ -259,7 +261,7 @@ pub async fn run(
             // Run the agent loop
             agent::agent_loop(
                 state, adapter, perceptor, actuator, approval_rx, confirm_tx, memory_tiers,
-                visual_encoder, registry,
+                visual_encoder, registry, skill_library,
             ).await;
         }
     }
