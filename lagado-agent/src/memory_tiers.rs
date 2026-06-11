@@ -432,33 +432,33 @@ mod tests {
 
     #[test]
     fn test_episode_persists_across_reopen() {
-        let db_file = "/tmp/test_episode_persist.db";
-        let _ = fs::remove_file(db_file);
+        let db_file = std::env::temp_dir().join("test_episode_persist.db");
+        let _ = fs::remove_file(&db_file);
 
         // Session 1: push episode, close
         {
-            let mut mem = MemoryTiers::open(db_file.as_ref()).expect("open failed");
+            let mut mem = MemoryTiers::open(&db_file).expect("open failed");
             mem.push_episode("Goal 'open browser': opened Firefox (5 steps)".to_string())
                 .expect("push_episode failed");
         }
 
         // Session 2: reopen from same path, assert episode survives
         {
-            let mem = MemoryTiers::open(db_file.as_ref()).expect("reopen failed");
+            let mem = MemoryTiers::open(&db_file).expect("reopen failed");
             let ctx = mem.assemble_context(4096);
             assert!(ctx.contains("open browser") || ctx.contains("opened Firefox"),
                 "episode not found in context after reopen: {ctx:?}");
         }
 
-        let _ = fs::remove_file(db_file);
+        let _ = fs::remove_file(&db_file);
     }
 
     #[test]
     fn test_decay_all_preserves_cold() {
-        let db_file = "/tmp/test_decay_cold.db";
-        let _ = fs::remove_file(db_file);
+        let db_file = std::env::temp_dir().join("test_decay_cold.db");
+        let _ = fs::remove_file(&db_file);
 
-        let mut mem = MemoryTiers::open(db_file.as_ref()).expect("open failed");
+        let mut mem = MemoryTiers::open(&db_file).expect("open failed");
         mem.push_episode("important vault entry".to_string()).expect("push failed");
 
         // Decay 50 cycles — should NOT delete cold entry
@@ -470,15 +470,15 @@ mod tests {
         assert!(ctx.contains("important vault entry"),
             "cold entry was wrongly deleted by decay: {ctx:?}");
 
-        let _ = fs::remove_file(db_file);
+        let _ = fs::remove_file(&db_file);
     }
 
     #[test]
     fn test_memory_tiers_basic() {
-        let db_file = "/tmp/test_memory_tiers.db";
-        let _ = fs::remove_file(db_file);
+        let db_file = std::env::temp_dir().join("test_memory_tiers.db");
+        let _ = fs::remove_file(&db_file);
 
-        let mut mem = MemoryTiers::open(db_file.as_ref()).expect("Failed to open");
+        let mut mem = MemoryTiers::open(&db_file).expect("Failed to open");
 
         // Test push_hot
         mem.push_hot("Hot memory entry".to_string());

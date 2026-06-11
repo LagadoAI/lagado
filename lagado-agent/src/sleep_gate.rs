@@ -60,24 +60,24 @@ mod tests {
 
     #[tokio::test]
     async fn test_sleep_gate_creation() {
-        let db_file = "/tmp/test_sleep_gate.db";
-        let _ = fs::remove_file(db_file);
+        let db_file = std::env::temp_dir().join("test_sleep_gate.db");
+        let _ = fs::remove_file(&db_file);
 
-        let mem = MemoryTiers::open(db_file.as_ref()).expect("Failed to open");
+        let mem = MemoryTiers::open(&db_file).expect("Failed to open");
         let mem = Arc::new(Mutex::new(mem));
         let gate = SleepGate::new(mem);
 
         assert!(!gate.running.load(Ordering::SeqCst));
 
-        let _ = fs::remove_file(db_file);
+        let _ = fs::remove_file(&db_file);
     }
 
     #[tokio::test]
     async fn test_sleep_gate_stop() {
-        let db_file = "/tmp/test_sleep_gate_stop.db";
-        let _ = fs::remove_file(db_file);
+        let db_file = std::env::temp_dir().join("test_sleep_gate_stop.db");
+        let _ = fs::remove_file(&db_file);
 
-        let mem = MemoryTiers::open(db_file.as_ref()).expect("Failed to open");
+        let mem = MemoryTiers::open(&db_file).expect("Failed to open");
         let mem = Arc::new(Mutex::new(mem));
         let gate = SleepGate::new(mem);
 
@@ -91,15 +91,15 @@ mod tests {
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
         handle.abort();
 
-        let _ = fs::remove_file(db_file);
+        let _ = fs::remove_file(&db_file);
     }
 
     #[tokio::test]
     async fn test_sleep_gate_consolidate_now() {
-        let db_file = "/tmp/test_sleep_gate_consolidate.db";
-        let _ = fs::remove_file(db_file);
+        let db_file = std::env::temp_dir().join("test_sleep_gate_consolidate.db");
+        let _ = fs::remove_file(&db_file);
 
-        let mem = MemoryTiers::open(db_file.as_ref()).expect("Failed to open");
+        let mem = MemoryTiers::open(&db_file).expect("Failed to open");
         let mem = Arc::new(Mutex::new(mem));
         let gate = SleepGate::new(mem.clone());
 
