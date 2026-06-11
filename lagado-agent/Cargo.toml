@@ -27,6 +27,12 @@ blake3 = "1"
 nix = { version = "0.27", features = ["fs", "process", "term", "ioctl", "signal"] }
 base64 = "0.22"
 image = { version = "0.25", default-features = false, features = ["png"] }
+imageproc = { version = "0.27", default-features = false }
+
+[[bin]]
+name = "cv_measure"
+path = "src/bin/cv_measure.rs"
+test = false
 
 [build-dependencies]
 cc = "1"

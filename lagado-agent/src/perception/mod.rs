@@ -125,6 +125,7 @@ pub mod linux;
 pub use linux::{LinuxPerceptor, LinuxActuator, linux_pair};
 
 pub mod capture;
+pub mod cv_proposer;
 pub mod delta;
 pub mod frame;
 pub mod vlm_adapter;
