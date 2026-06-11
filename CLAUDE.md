@@ -4,14 +4,16 @@ Guidance for working in this repo. Read before making changes.
 
 ## What this is
 
-**Lagado AI** — a local-first, privacy-first desktop agent. Three pillars:
-1. **Sovereign** — local-only, encrypted, no cloud, no telemetry
-2. **Living** — thermodynamic memory hierarchy, sleep consolidation, patterns compound
-3. **Self-aware in time** — chronos autobiographical spine, T=0 at first launch
+**Lagado AI** — a local-first, privacy-first desktop agent. Four pillars (from PDF master plan):
+1. **P1 — Maximum Security & Sovereignty** — local-only, encrypted, no telemetry. The headline moat.
+2. **P2 — Dual-Brain Hydra** — fast LFM2.5 + optional 8B heavy. Governor decides tier. "AI anywhere."
+3. **P3 — Fully Integrated Stack** — one coherent system, not loose modules
+4. **P4 — Persistent Learning** — action graph + skill library, survives reboots
 
 Production targets: **Windows-first, macOS, Linux**. Development on Linux.
 GitHub Actions CI (linux/macos/windows) is the cross-platform test bench.
-Full design: `docs/plans/MASTER_PLAN_v4.md` and `FILE_DEPENDENCY_REFERENCE_v3.md`.
+**Single source of truth:** `LAPUTA HOW TO/LAGADO_MASTER_PLAN.md.pdf` (June 3 2026 — supersedes all other plan files).
+Companion detail: `docs/plans/FILE_DEPENDENCY_REFERENCE_v3.md`.
 
 ## Architecture
 
@@ -78,14 +80,16 @@ Live feed:  QMP screendump (format:png) → /dev/shm/lagado_frame.png → base64
 - Lockout: 3 failures → 10-min cooldown, persisted, fail-closed if tampered
 - `auth::active_key()` is the only crypto entry point; falls back to `machine_passphrase()` in dev
 
-### Memory system (Phase 3.1 — COMPLETE)
+### Memory system (COMPLETE — all phases)
 
-**MemoryTiers** wired into agent loop + SleepGate running:
-- `push_episode(text)` stores goal completions/aborts to cold tier (encrypted, temp=1.0)
-- `assemble_context(budget)` feeds episodic context into agent prompt as "Past sessions:" section
-- `decay_all()` decays hot/warm only — cold tier (vault) is never deleted by decay
-- SleepGate runs in background every 5min via `tauri::async_runtime::spawn`
-- DB: `~/.laputa-secure/memory.db`
+**Full living memory triangle operational:**
+- Hot entries → sleep_gate → LLM batch summarize → warm entries → entropy prune at 10,000
+- Entropy equation: `V = T × e^(−λt) × (1 + ln(n+1))`, λ = ln(2)/30days (Ebbinghaus + log reinforcement)
+- Cold (vault) never entropy-pruned; 365-day natural half-life protects it
+- Skill distillation: Done/Task episodes → `distill_skill_async()` → LLM extract → `skill_library.save()`
+- Visual embeddings: frame encoded at episode boundaries → cosine similarity retrieval
+- `SleepGate::new(memory, adapter)` — full consolidation cycle every 5 min
+- DB: `~/.laputa-secure/memory.db`, `~/.laputa-secure/skill_library.db`
 
 **Phase 3.3 COMPLETE — Visual embedding via in-process libmtmd FFI:**
 
@@ -113,7 +117,7 @@ Frame (PNG) → vision/shim.c (lagado_encode_image) → mean-pooled n_embd vecto
 - Visual retrieval wired into agent_loop: encodes current frame once per invocation → top-3 similar episodes → prompt
 - `[[bin]] test=false` in Cargo.toml (static lib linking doesn't propagate to bin test targets)
 - `cargo test -p lagado-agent` requires `LD_LIBRARY_PATH=.../vendored/llama.cpp-2/build/bin` (stale rpath in vendored libllama.so)
-- 101 lib tests pass (HEAD d366c55)
+- 110 lib tests pass (HEAD 938af52)
 
 ### Key modules (`lagado-agent/src/`)
 
@@ -122,13 +126,13 @@ Frame (PNG) → vision/shim.c (lagado_encode_image) → mean-pooled n_embd vecto
 | `hydra.rs` | ✓ | Dual-model orchestrator, few-shot classifier on :8081, blake3 state hash |
 | `agent.rs` | ✓ | Agent loop, episodic memory context, HITL gate, RecoveryManager |
 | `recovery.rs` | ✓ wired | 7 failure-mode dispatcher, graph-backed + LLM recovery |
-| `memory_tiers.rs` | ✓ | Hot/warm/cold tiers, push_episode, assemble_context, decay protects cold |
-| `sleep_gate.rs` | ✓ | Background decay every 5min — started in main.rs |
+| `memory_tiers.rs` | ✓ | Hot/warm/cold tiers, entropy equation, drain_cool_hot, promote_warm_summary, entropy_prune_warm |
+| `sleep_gate.rs` | ✓ | Full consolidation: decay → batch summarize → warm promote → entropy prune. Takes adapter. |
 | `server_guard.rs` | ✓ | Health monitor — polls /health every 10s, auto-restarts crashed llama/classifier servers, emits tauri events |
 | `chronos.rs` | ✓ | SQLite timeline, T=0 anchor |
 | `retrieval.rs` | ✓ | RAG K=15, Jaccard scoring |
 | `action_graph.rs` | ✓ | SQLite workflow store, shortcut path |
-| `skill_library.rs` | ✓ read / ✗ write | Experiential depth layer — retrieval wired, distillation not yet built |
+| `skill_library.rs` | ✓ | Experiential depth layer — read + distillation write path wired |
 | `security/crypto.rs` | ✓ | AES-256-GCM, Argon2id, DEK wrapping |
 | `auth/mod.rs` | ✓ | Wrapped DEK, lockout, `active_key()`, `set_session_dek()` |
 | `self_model.rs` | ✓ | Accepted beliefs, distill feed |
@@ -217,35 +221,41 @@ cd lagado-ui && npx tsc --noEmit
 Opus/Sonnet: planning, review, architecture. Haiku: all implementation and file edits.
 Verify with `cargo check --workspace` + `npx tsc --noEmit` after every Haiku task.
 
-## Status (2026-06-11)
+## Status (2026-06-10)
 
-**Phase 1.4 COMPLETE. Phase 2 COMPLETE. Phase 3.1–3.6 COMPLETE. UI design system COMPLETE. CI all platforms green.**
+**FULL LIVING MEMORY SYSTEM COMPLETE. Phases 1.4, 2, 3.1–3.6, memory consolidation, entropy pruning, skill distillation all done. CI all platforms green.**
 
-HEAD: `d366c55`. 101 lib tests. Ubuntu ✓ macOS ✓ Windows ✓.
+HEAD: `938af52`. 110 lib tests. Ubuntu ✓ macOS ✓ Windows ✓.
+
+**Single source of truth for the plan:** `LAPUTA HOW TO/LAGADO_MASTER_PLAN.md.pdf` (June 3, 2026).
 
 ### UI ↔ Backend wire (verified)
 `useTauriAgent.ts` → direct `invoke()` calls → Tauri commands. Events back via `app.emit()` / `listen()`.
-`server.rs` WebSocket (port 9090) and `useAgentSocket.ts` are **orphaned** — never called in production.
+`server.rs` WebSocket (port 9090) and `useAgentSocket.ts` are **orphaned** — dev scaffold for UI design iteration only.
 
-### Two-layer experiential memory (architecture settled)
-- **action_graph** = muscle memory: exact blake3(screen) hash → action shortcut, bypasses inference at score ≥ 0.65
-- **skill_library** = depth: situation-class → advisory NL procedures, informs inference, never replays
-  - Retrieved on turns 1-3 only (tapers off; action history + live screen are fresher by turn 4+)
-  - **Read path wired. Write/distillation NOT built — library is currently inert in production.**
+### Full memory system (complete)
+- **Hot → warm**: sleep_gate batches cooled hot entries → LLM summarizes → warm SQLite
+- **Entropy pruning**: `V = T × e^(−λt) × (1 + ln(n+1))`; warm pruned at 10,000; cold never touched
+- **Skill distillation**: Done/Task episodes → `distill_skill_async()` → LLM → `skill_library.save()`
+- **Visual similarity**: frame encoded at episode boundaries → cosine similarity retrieval
+- **action_graph**: muscle memory (exact hash bypass at score ≥ 0.65)
+- **skill_library**: advisory depth context, turns 1-3 only
 
 ### What works end-to-end
 - App launches → Awakening → auth → chat
 - `send_goal` → hydra → 1.2B classifier → agent_loop (episodic + visual + skill context turns 1-3, tools every turn)
+- At Done/Task: skill distilled + visual embedding stored
+- Every 5 min: sleep_gate consolidates hot → warm → entropy prunes if over limit
 - Immersive → VM auto-boots → live QEMU desktop feed → SSH → xdotool actuation
-- RecoveryManager, SleepGate, ServerGuard, cgroup v2 sandbox all active
+- RecoveryManager, SleepGate (full consolidation), ServerGuard, cgroup v2 sandbox all active
 - 44 bundled native Rust tools, MCP stdio client, confidence gating, HITL gate
-- Network proxy settings: SOCKS5/HTTP opt-in, Tor/Whonix presets
-- Vault FAISS: `build_index.py` indexes vault facts + chunks via MiniLM-L6-v2
 
-### Remaining / next session
-- **Skill distillation** (immediate next): wire write path — at episode completion (Done/Task/Abort),
-  call LLM to extract (name, description, approach) from trajectory → `skill_library.save()`.
-  Lives in `sleep_gate.rs` and/or agent_loop Done/Abort handlers.
-- Settings tool manager: view/enable/disable tools, change trust levels (get_tools, set_tool_trust, toggle_tool_enabled)
-- GGUF parser for MoE detection (auto-set moe_experts_on_cpu, enable partial GPU offload)
-- FAISS action graph and pre-seeding: deferred indefinitely (architecture changed to skill_library experiential model)
+### Remaining (against 7-segment PDF plan)
+- **Segment 1** — Browser extension Backend #1: DOM perception + actuation (cross-platform ON-RAMP)
+- **Segment 5** — Egress proof + `security/profile.rs` (Strict/Balanced/Open tiered profile)
+- **Segment 6** — Immersive watch-and-direct loop (partial)
+- **Segment 7** — Native desktop perception for Mac/Win (stubs exist)
+- Settings tool manager: get_tools, set_tool_trust, toggle_tool_enabled
+- GGUF MoE parser (auto-set moe_experts_on_cpu)
+- grammar.rs GBNF constraint (accuracy lever, currently stub)
+- security/audit.rs (tamper-evident append-only log)
