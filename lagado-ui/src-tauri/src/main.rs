@@ -519,7 +519,8 @@ fn main() {
     ));
 
     let skill_library = Arc::new(SkillLibrary::open(&config::data_dir()));
-    let memory_for_setup = memory_tiers.clone();
+    let memory_for_setup  = memory_tiers.clone();
+    let adapter_for_sleep = adapter.clone();
 
     let llama_child: Arc<Mutex<Option<KillOnDrop>>> = Arc::new(Mutex::new(None));
     let llama_for_setup = llama_child.clone();
@@ -633,7 +634,7 @@ fn main() {
             });
             // Start background memory consolidation loop (5-min decay cycles)
             tauri::async_runtime::spawn(async move {
-                let gate = SleepGate::new(memory_for_setup);
+                let gate = SleepGate::new(memory_for_setup, adapter_for_sleep);
                 let _handle = gate.start();
                 std::future::pending::<()>().await;
             });

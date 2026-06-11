@@ -423,6 +423,110 @@ impl MemoryTiers {
     pub fn clear_hot(&mut self) {
         self.hot.clear();
     }
+
+    /// Number of entries currently in the hot tier.
+    pub fn hot_count(&self) -> usize {
+        self.hot.len()
+    }
+
+    /// Drain hot entries cooled below `threshold` — removes them from hot Vec and returns them.
+    /// Called by sleep_gate to collect entries ready for consolidation.
+    pub fn drain_cool_hot(&mut self, threshold: f32) -> Vec<MemoryEntry> {
+        let (cool, stay): (Vec<_>, Vec<_>) = self.hot.drain(..).partition(|e| e.temperature < threshold);
+        self.hot = stay;
+        cool
+    }
+
+    /// Write a consolidation summary directly to WARM tier.
+    /// Called by sleep_gate after LLM summarizes a batch of cooled hot entries.
+    pub fn promote_warm_summary(&mut self, summary: String) -> Result<(), String> {
+        let now = now_unix();
+        let id = Uuid::new_v4().to_string();
+        self.db.execute(
+            "INSERT INTO memory_entries (id, text, tier, temperature, created_at, accessed_at, access_count)
+             VALUES (?1, ?2, 'warm', 0.8, ?3, ?4, 0)",
+            rusqlite::params![&id, &summary, now, now],
+        ).map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    /// Count warm entries currently in SQLite.
+    pub fn warm_entry_count(&self) -> usize {
+        self.db.query_row(
+            "SELECT COUNT(*) FROM memory_entries WHERE tier = 'warm'",
+            [],
+            |row| row.get::<_, usize>(0),
+        ).unwrap_or(0)
+    }
+
+    /// Entropy-based pruning of the WARM tier when it exceeds `max_warm` entries.
+    ///
+    /// Information value per entry:
+    ///   V = temperature × e^(−λ × age_secs) × (1 + ln(access_count + 1))
+    ///   λ = ln(2) / 30_days  — value halves every 30 days without access
+    ///
+    /// Entries with lowest V are pruned first. Cold tier is never touched.
+    /// Returns the number of entries pruned.
+    pub fn entropy_prune_warm(&mut self, max_warm: usize) -> Result<usize, String> {
+        let now = now_unix();
+        let count = self.warm_entry_count();
+        if count <= max_warm {
+            return Ok(0);
+        }
+        let to_prune = count - max_warm;
+
+        let mut stmt = self.db.prepare(
+            "SELECT id, temperature, accessed_at, access_count
+             FROM memory_entries WHERE tier = 'warm'"
+        ).map_err(|e| e.to_string())?;
+
+        let mut scored: Vec<(String, f32)> = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, f32>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, u32>(3)?,
+                ))
+            })
+            .map_err(|e| e.to_string())?
+            .filter_map(|r| r.ok())
+            .map(|(id, temp, accessed_at, access_count)| {
+                let age_secs = (now - accessed_at).max(0);
+                let v = information_value(temp, age_secs, access_count);
+                (id, v)
+            })
+            .collect();
+
+        // Lowest information value pruned first
+        scored.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+
+        let ids: Vec<String> = scored.into_iter().take(to_prune).map(|(id, _)| id).collect();
+        let pruned = ids.len();
+        for id in &ids {
+            self.db.execute(
+                "DELETE FROM memory_entries WHERE id = ?1",
+                rusqlite::params![id],
+            ).map_err(|e| e.to_string())?;
+        }
+        Ok(pruned)
+    }
+}
+
+/// Information value of a memory entry.
+///
+/// V = T × e^(−λ × age_secs) × (1 + ln(n + 1))
+///
+/// Based on the Ebbinghaus forgetting curve with logarithmic access reinforcement:
+/// - T: current temperature (integrated history of decay + reinforcement)
+/// - e^(−λt): recency factor — value halves every 30 days without access
+/// - (1 + ln(n+1)): each access compounds but with diminishing returns
+pub fn information_value(temperature: f32, age_secs: i64, access_count: u32) -> f32 {
+    const HALF_LIFE_SECS: f64 = 30.0 * 86400.0;
+    let lambda = std::f64::consts::LN_2 / HALF_LIFE_SECS;
+    let recency = (-(lambda * age_secs.max(0) as f64)).exp() as f32;
+    let reinforcement = 1.0_f32 + (access_count as f32 + 1.0).ln();
+    temperature * recency * reinforcement
 }
 
 #[cfg(test)]
