@@ -135,7 +135,7 @@ impl Hydra {
             "{system_prompt}\n\n{context}\n\nUser: {message}\nAssistant:"
         );
 
-        match self.adapter.generate(&prompt, 512, 0.7) {
+        match self.adapter.generate(&prompt, 2048, 0.7) {
             Ok(response) => response,
             Err(_) => "I'm having trouble responding right now.".to_string(),
         }
