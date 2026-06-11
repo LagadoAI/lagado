@@ -34,6 +34,11 @@ name = "cv_measure"
 path = "src/bin/cv_measure.rs"
 test = false
 
+[[bin]]
+name = "harness_proof"
+path = "src/bin/harness_proof.rs"
+test = false
+
 [build-dependencies]
 cc = "1"
 

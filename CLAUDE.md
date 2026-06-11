@@ -227,9 +227,9 @@ Verify with `cargo check --workspace` + `npx tsc --noEmit` after every Haiku tas
 
 ## Status (2026-06-11)
 
-**FULL LIVING MEMORY SYSTEM COMPLETE. Perception fusion harness TASK 1–5 complete. TASK 6 (IoU arbiter) is next.**
+**FULL LIVING MEMORY SYSTEM COMPLETE. Perception fusion harness TASK 1–6 complete (TASK 7 next). VM control channel end-to-end tested + provisioning fixed.**
 
-HEAD: `62312a3`. 141 lib tests. Ubuntu ✓ macOS ✓ Windows ✓.
+HEAD: `0c8c99e` (+ uncommitted harness_proof bin/docs). 156 lib tests. Ubuntu ✓ macOS ✓ Windows ✓.
 
 **Single source of truth for the plan:** `LAPUTA HOW TO/LAGADO_MASTER_PLAN.md.pdf` (June 3, 2026).
 
@@ -254,7 +254,31 @@ HEAD: `62312a3`. 141 lib tests. Ubuntu ✓ macOS ✓ Windows ✓.
 - RecoveryManager, SleepGate (full consolidation), ServerGuard, cgroup v2 sandbox all active
 - 44 bundled native Rust tools, MCP stdio client, confidence gating, HITL gate
 
-### Perception fusion harness (in progress)
+### VM control channel — end-to-end tested 2026-06-11
+Smoke-test bin `lagado-agent/src/bin/harness_proof.rs` drives the real modules:
+`QemuDesktopBackend::boot → poll SSH → SshPerceptor::read_screen → QmpClient screendump →
+SshActuator → FrameProcessor delta → backend.shutdown`. Run with
+`LD_LIBRARY_PATH=…/vendored/llama.cpp-2/build/bin LAGADO_DATA_DIR=~/.laputa-secure ./target/debug/harness_proof`.
+
+**Result: agent code is sound; the VM was un-provisioned for the agent's SSH control model.** The
+agent's ONLY VM control channel is SSH (`ssh -o BatchMode=yes`, key auth). It was fully broken by the
+guest image, now fixed in `~/.laputa-secure/vm-images/` (cloud-init.yml + rebuilt seed.iso, originals
+backed up). Fixes applied: DHCP eth0, `ufw allow ssh`, install host pubkey, generated host keypair
+`~/.ssh/id_ed25519`. Now: boot → SSH (~14–24s) → AT-SPI2 tree read → QMP screendump → clean shutdown all work.
+**Raw actuation proven**: `xdotool mousemove/click/type` over SSH changed the screen (1076-px diff).
+
+**Open gaps (see memory `vm-harness-control-channel`):**
+- `tine` (pip tine-cli) rejects `tree --json` and its `tree` text format doesn't match perceive.py's
+  `parse_text_tree` → zero elements → no `ref_id→(x,y,w,h)` → **click-by-selector blocked** (raw coord click works).
+- `SshPerceptor` calls `perceive.py` without `--focused` (so emits JSON parse_ref_coords can't read).
+- `QemuDesktopBackend::boot()` has no kill-stale pre-flight → orphaned VMs block fresh boots.
+- VM readiness gates on bare TCP poll, not real SSH-auth success → false "ready" while sshd unreachable.
+
+### Perception fusion harness (TASK 6 code complete, committed)
+- TASK 6 ✓ — `perception/arbiter.rs` IoU-dedup fusion (commit 0c8c99e): `iou()`, `fuse(a11y,cv,patches)`,
+  `Sense{A11yOnly,VisionOnly,Both}`, `FusedElement`. MATCH_THRESHOLD=0.30 (loose), ±1 patch inflate fuzz,
+  overview-skip, mean-pool overlapping patch embeddings, deterministic (y,x,w,h) sort. 156 lib tests.
+  Still to close: CV real-screenshot noise gate (cv_measure on content-dense frame). TASK 7 next.
 - TASK 1 ✓ — full bbox retained (`parse_ref_bboxes`, `PerceptionCache.bboxes`)
 - TASK 2 ✓ — pixel-space DeltaDetector (decoded RGB, remainder → last col/row) + FrameProcessor
 - TASK 3 ✓ — CV box proposer (Canny + connected components, imageproc 0.27) + cv_measure binary
