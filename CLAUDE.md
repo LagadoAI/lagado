@@ -107,12 +107,13 @@ Frame (PNG) → vision/shim.c (lagado_encode_image) → mean-pooled n_embd vecto
 - `VisualEncoder` fires at episode boundaries only (Done/Task/Abort), not per tick
 - VLM subprocess (port 8082) and `VlmPerceptor` text path retired
 - `MemoryTiers`: `embedding BLOB` column + `store_visual_embedding()` + `find_similar_by_embedding()`
-- Platform gate ONLY inside `vision/mod.rs` — public API compiles everywhere, `load()` returns Err on non-Linux
+- Platform gate via `lagado_vision_ffi` cfg (set by build.rs ONLY when `vendored/llama.cpp-2/include/llama.h` exists)
+- CI skips shim compilation gracefully when vendored headers absent (gitignored); no linker errors
 - `encode_and_store_async()` fires in background tokio::spawn, encode in spawn_blocking outside lock
 - Visual retrieval wired into agent_loop: encodes current frame once per invocation → top-3 similar episodes → prompt
 - `[[bin]] test=false` in Cargo.toml (static lib linking doesn't propagate to bin test targets)
 - `cargo test -p lagado-agent` requires `LD_LIBRARY_PATH=.../vendored/llama.cpp-2/build/bin` (stale rpath in vendored libllama.so)
-- 57 lib tests pass; FFI smoke-tested via `load_returns_err_on_bad_path` (calls real `lagado_encoder_init`)
+- 101 lib tests pass (HEAD d366c55)
 
 ### Key modules (`lagado-agent/src/`)
 
@@ -127,7 +128,7 @@ Frame (PNG) → vision/shim.c (lagado_encode_image) → mean-pooled n_embd vecto
 | `chronos.rs` | ✓ | SQLite timeline, T=0 anchor |
 | `retrieval.rs` | ✓ | RAG K=15, Jaccard scoring |
 | `action_graph.rs` | ✓ | SQLite workflow store, shortcut path |
-| `skill_library.rs` | ✓ | Voyager-style multi-step procedure store |
+| `skill_library.rs` | ✓ read / ✗ write | Experiential depth layer — retrieval wired, distillation not yet built |
 | `security/crypto.rs` | ✓ | AES-256-GCM, Argon2id, DEK wrapping |
 | `auth/mod.rs` | ✓ | Wrapped DEK, lockout, `active_key()`, `set_session_dek()` |
 | `self_model.rs` | ✓ | Accepted beliefs, distill feed |
@@ -216,48 +217,35 @@ cd lagado-ui && npx tsc --noEmit
 Opus/Sonnet: planning, review, architecture. Haiku: all implementation and file edits.
 Verify with `cargo check --workspace` + `npx tsc --noEmit` after every Haiku task.
 
-## Status (2026-06-10)
+## Status (2026-06-11)
 
-**Phase 1.4 COMPLETE. Phase 2 COMPLETE. Phase 3.1–3.6 COMPLETE. UI design system COMPLETE.**
+**Phase 1.4 COMPLETE. Phase 2 COMPLETE. Phase 3.1–3.6 COMPLETE. UI design system COMPLETE. CI all platforms green.**
+
+HEAD: `d366c55`. 101 lib tests. Ubuntu ✓ macOS ✓ Windows ✓.
+
+### UI ↔ Backend wire (verified)
+`useTauriAgent.ts` → direct `invoke()` calls → Tauri commands. Events back via `app.emit()` / `listen()`.
+`server.rs` WebSocket (port 9090) and `useAgentSocket.ts` are **orphaned** — never called in production.
+
+### Two-layer experiential memory (architecture settled)
+- **action_graph** = muscle memory: exact blake3(screen) hash → action shortcut, bypasses inference at score ≥ 0.65
+- **skill_library** = depth: situation-class → advisory NL procedures, informs inference, never replays
+  - Retrieved on turns 1-3 only (tapers off; action history + live screen are fresher by turn 4+)
+  - **Read path wired. Write/distillation NOT built — library is currently inert in production.**
 
 ### What works end-to-end
-- App launches → Awakening (onComplete → auth_check) → signup (3-step) or login → chat
-- Login: maze-tesseract lockup, glass card, gradient Unlock, "First time?" link
-- Signup: username → passphrase → recovery phrase (username saved to localStorage)
-- Immersive opens → VM auto-boots → live QEMU desktop feed via QMP screendump
-- Agent actions route through SSH → xdotool in VM guest
-- RecoveryManager active: parse failures, loops, deadlocks all handled
-- Cold memory encrypted with session DEK; episodes persist across sessions
-- SleepGate decays hot/warm every 5min; cold tier never deleted
-- 1.2B classifier on :8081 handles intent classification (few-shot, ~80% accuracy)
-- Visual encoder runs in-process via libmtmd FFI; embeddings stored in MemoryTiers; cosine retrieval active
-- 2 server child processes (main 8B + 1.2B classifier) use KillOnDrop — no orphans on app exit
-- ServerGuard polls /health every 10s; auto-restart + emits tauri events
-- GPU detection: NVIDIA + AMD; conservative binary fit; moe_experts_on_cpu wired to --cpu-moe
-- cgroup v2 sandbox + QEMU -sandbox seccomp; model-agnostic memory caps
-- 44 bundled native Rust tools: filesystem, git, system, text/util, web (DDG+SearXNG, Tor-native), clipboard, VM, memory
-- Network proxy settings: SOCKS5/HTTP opt-in, Tor/Whonix presets, persisted to network.json
-- Confidence gating: geometric mean of logprobs gates uncertain actions through HITL regardless of trust level
-- ToolRegistry: TrustLevel per tool, gate wired; tool_config.json for user overrides + MCP server installs
-- MCP stdio client: auto-discovers tools from user-added servers at startup (10s timeout, non-fatal)
-- Tool retrieval in prompt: top-10 per step by Jaccard scoring — never flat-dumps full catalog
-- 95 lib tests
-- Vault FAISS: `build_index.py` (Python, offline) indexes vault facts + chunks via MiniLM-L6-v2 + `IndexFlatIP`
-
-### FAISS / action graph — architecture decision pending
-- **Vault FAISS** ✓ — `build_index.py` works; saves `vault/vault_index.faiss` + `vault_meta.json`
-- **Action graph FAISS** ✗ — not yet built. Current action graph uses exact blake3 hash lookup
-  which is incompatible with pre-seeded data (hashes will never match user's real screens).
-- **Pre-seeding plan**: 10K+ (context, action) pairs to be seeded. Requires semantic vector lookup.
-- **Pending decision**: embedding strategy for runtime consistency.
-  Recommended path: run `llama-server --embedding` on MiniLM GGUF at `:8082` — same model
-  used in `build_index.py` at build time, consistent dims, no Python at agent runtime.
-- **Next step**: once embedding strategy confirmed, build `faiss_index.rs` + extend `retrieval.rs`
-  to query action graph by embedding similarity instead of exact hash.
+- App launches → Awakening → auth → chat
+- `send_goal` → hydra → 1.2B classifier → agent_loop (episodic + visual + skill context turns 1-3, tools every turn)
+- Immersive → VM auto-boots → live QEMU desktop feed → SSH → xdotool actuation
+- RecoveryManager, SleepGate, ServerGuard, cgroup v2 sandbox all active
+- 44 bundled native Rust tools, MCP stdio client, confidence gating, HITL gate
+- Network proxy settings: SOCKS5/HTTP opt-in, Tor/Whonix presets
+- Vault FAISS: `build_index.py` indexes vault facts + chunks via MiniLM-L6-v2
 
 ### Remaining / next session
-- FAISS action graph: embedding strategy decision → `faiss_index.rs` → `retrieval.rs` integration
-- Action graph pre-seeding: dataset format + `build_index.py` extension for action graph entries
-- Settings tool manager: view/enable/disable tools, change trust levels
-- GGUF parser for MoE detection (flips moe_experts_on_cpu, enables partial GPU offload)
-- Tool manager Tauri commands: get_tools, set_tool_trust, toggle_tool_enabled
+- **Skill distillation** (immediate next): wire write path — at episode completion (Done/Task/Abort),
+  call LLM to extract (name, description, approach) from trajectory → `skill_library.save()`.
+  Lives in `sleep_gate.rs` and/or agent_loop Done/Abort handlers.
+- Settings tool manager: view/enable/disable tools, change trust levels (get_tools, set_tool_trust, toggle_tool_enabled)
+- GGUF parser for MoE detection (auto-set moe_experts_on_cpu, enable partial GPU offload)
+- FAISS action graph and pre-seeding: deferred indefinitely (architecture changed to skill_library experiential model)
