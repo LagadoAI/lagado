@@ -124,6 +124,7 @@ pub mod linux;
 #[cfg(target_os = "linux")]
 pub use linux::{LinuxPerceptor, LinuxActuator, linux_pair};
 
+pub mod arbiter;
 pub mod capture;
 pub mod cv_proposer;
 pub mod delta;
