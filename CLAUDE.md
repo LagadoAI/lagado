@@ -104,8 +104,8 @@ Frame (PNG) → vision/shim.c (lagado_encode_image) → mean-pooled n_embd vecto
 ```
 
 **Key implementation facts:**
-- C shim at `lagado-agent/src/vision/shim.c` handles all struct-by-value C ABI
-- Rust binding at `lagado-agent/src/vision/mod.rs` — `VisualEncoder` behind `Mutex`
+- C shim at `lagado-agent/src/vision/shim.c` — `lagado_encode_image()` mean-pool (unchanged) + `lagado_encode_image_patches()` per-tile/per-patch with `lfm2_find_grid()` runtime grid derivation
+- Rust binding at `lagado-agent/src/vision/mod.rs` — `VisualEncoder` behind `Mutex`; `encode_png_patches()` returns `Vec<TilePatches>`; `is_overview` set by structural chunk index (NOT token count)
 - `build.rs` compiles shim via `cc` crate, links `libllama.so`/`libmtmd.so`/`libggml.so`
 - Image decoded to RGB (NOT RGBA) before passing to `mtmd_bitmap_init`
 - `VisualEncoder` fires at episode boundaries only (Done/Task/Abort), not per tick
@@ -145,8 +145,8 @@ Frame (PNG) → vision/shim.c (lagado_encode_image) → mean-pooled n_embd vecto
 | `perception/vlm_adapter.rs` | kept | Text path kept for reference; not used in agent pipeline |
 | `perception/arbiter.rs` | NOT BUILT | IoU-dedup arbiter (TASK 6) |
 | `perception/harness.rs` | NOT BUILT | PerceptionMode switch + CSV measurement log (TASK 7) |
-| `vision/mod.rs` | ✓ | VisualEncoder FFI wrapper, cosine_similarity, Linux-only |
-| `vision/shim.c` | ✓ | C shim over libmtmd — lagado_encoder_init/encode_image/free |
+| `vision/mod.rs` | ✓ | encode_png() mean-pool + encode_png_patches() per-tile; PatchEmbedding/TilePatches; is_overview by structure |
+| `vision/shim.c` | ✓ | lagado_encode_image() mean-pool (unchanged) + lagado_encode_image_patches() per-tile; lfm2_find_grid() |
 | `perception/capture.rs` | stub | grim/scrot host mode |
 | `vm/mod.rs` | ✓ | QemuDesktopBackend, QMP, DynamicActuator/Perceptor |
 | `vm/qmp.rs` | ✓ | QMP socket client — screendump(format:png) |
@@ -227,9 +227,9 @@ Verify with `cargo check --workspace` + `npx tsc --noEmit` after every Haiku tas
 
 ## Status (2026-06-11)
 
-**FULL LIVING MEMORY SYSTEM COMPLETE. Perception fusion harness TASK 1–3 complete. TASK 4 is next (hard gate before shim changes).**
+**FULL LIVING MEMORY SYSTEM COMPLETE. Perception fusion harness TASK 1–5 complete. TASK 6 (IoU arbiter) is next.**
 
-HEAD: `c03b532`. 137 lib tests. Ubuntu ✓ macOS ✓ Windows ✓.
+HEAD: `62312a3`. 141 lib tests. Ubuntu ✓ macOS ✓ Windows ✓.
 
 **Single source of truth for the plan:** `LAPUTA HOW TO/LAGADO_MASTER_PLAN.md.pdf` (June 3, 2026).
 
@@ -258,9 +258,9 @@ HEAD: `c03b532`. 137 lib tests. Ubuntu ✓ macOS ✓ Windows ✓.
 - TASK 1 ✓ — full bbox retained (`parse_ref_bboxes`, `PerceptionCache.bboxes`)
 - TASK 2 ✓ — pixel-space DeltaDetector (decoded RGB, remainder → last col/row) + FrameProcessor
 - TASK 3 ✓ — CV box proposer (Canny + connected components, imageproc 0.27) + cv_measure binary
-- TASK 4 ⛔ HARD GATE — `examples/probe_patch_positions.rs` throwaway probe; confirm decoder_pos is regular spatial grid BEFORE writing TASK 5
-- TASK 5 — shim: `lagado_encode_image_patches()` + Rust `encode_png_patches()`
-- TASK 6 — `perception/arbiter.rs`: IoU-dedup → `FusedElement` / `Sense` enum
+- TASK 4 ✓ — decoder_pos flat (LFM2 1D not 2D); 1280×800 → 3×2 grid + overview; ordering verified by marker test
+- TASK 5 ✓ — `lagado_encode_image_patches()` + `encode_png_patches()`; `is_overview` by structural position (img_idx ≥ grid_cols×grid_rows); 1025×1025 probe proved token-count detection fails
+- TASK 6 ⬅ NEXT — `perception/arbiter.rs`: IoU-dedup → `FusedElement` / `Sense` enum (threshold <0.5, ±1 patch fuzz)
 - TASK 7 — `perception/harness.rs`: `PerceptionMode`, CSV measurement log, conditional wire
 
 ### Remaining (against 7-segment PDF plan)
