@@ -117,8 +117,63 @@ impl Default for QemuDesktopBackend {
     }
 }
 
+/// Kill any orphaned QEMU process that holds the ssh port forward we intend to use.
+///
+/// Detection: `pgrep -f "hostfwd=tcp::{ssh_port}-:22"` — matches only on the
+/// exact hostfwd argument emitted by our boot() call, so unrelated processes
+/// are never touched.  SIGTERM first, poll ≤2 s, SIGKILL if still alive.
+#[cfg(unix)]
+fn kill_stale_vm(ssh_port: u16) {
+    let pattern = format!("hostfwd=tcp::{ssh_port}-:22");
+    let output = match Command::new("pgrep").args(["-f", &pattern]).output() {
+        Ok(o) => o,
+        Err(_) => return,
+    };
+    if !output.status.success() {
+        return; // no matching processes
+    }
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        let pid: u32 = match line.trim().parse() {
+            Ok(p) => p,
+            Err(_) => continue,
+        };
+        tracing::warn!("kill_stale_vm: orphaned qemu pid={pid} holds port {ssh_port}, sending SIGTERM");
+        let _ = Command::new("kill").args(["-TERM", &pid.to_string()]).status();
+        // Poll up to 2 s for graceful exit
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        loop {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            let alive = Command::new("kill")
+                .args(["-0", &pid.to_string()])
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false);
+            if !alive || std::time::Instant::now() >= deadline {
+                break;
+            }
+        }
+        // Force-kill if still alive after grace period
+        let still_alive = Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if still_alive {
+            tracing::warn!("kill_stale_vm: pid={pid} still alive after SIGTERM, sending SIGKILL");
+            let _ = Command::new("kill").args(["-KILL", &pid.to_string()]).status();
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }
+    }
+}
+
 impl VmBackend for QemuDesktopBackend {
     fn boot(&self, cfg: &VmConfig) -> Result<VmHandle, String> {
+        // Kill any stale lagado VM holding the ssh port forward or QMP socket
+        // before removing the socket file — otherwise the spawned QEMU can never
+        // receive SSH connections (port collision) and QMP is also blocked.
+        #[cfg(unix)]
+        kill_stale_vm(cfg.ssh_port);
+
         let _ = std::fs::remove_file(&cfg.qmp_socket);
         let mut cmd = Command::new(&self.qemu_path);
         cmd.args([

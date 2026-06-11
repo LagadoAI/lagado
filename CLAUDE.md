@@ -67,7 +67,7 @@ Live feed:  QMP screendump (format:png) → /dev/shm/lagado_frame.png → base64
 **Seed ISO:** `~/.laputa-secure/vm-images/seed.iso` (cloud-init, first-boot only)
 **Guest:** user `laputa:laputa`, auto-login, XFCE4, xdotool + AT-SPI2 pre-installed
 **QMP screendump** — `format:png` required (default is PPM).
-**SSH readiness:** `vm_ssh_port` set asynchronously via background TCP poll.
+**SSH readiness:** `vm_ssh_port` set asynchronously via background SSH auth probe (`ssh whoami` → exit 0 + stdout contains "laputa").
 **Frame path:** `/dev/shm/lagado_frame.png` — constant `config::FRAME_PATH`.
 **Auto-kill:** `Drop for VmHandle` + `KillOnDrop` wrapper kills all child processes on app exit.
 
@@ -200,7 +200,7 @@ Agent avatar = `lagado-mark.png` (maze-tesseract logo). Thinking state = `HyperL
 5. **No `std::process::exit(1)`** from library code.
 6. **No AI attribution** in commits, code, PRs, or any artifact. Author: `Lagado Labs <lagadolabs@gmail.com>`.
 7. **DEK discipline**: never persist raw DEK. `active_key()` is the only crypto entry point.
-8. **SSH readiness**: never set `vm_ssh_port` before TCP poll confirms sshd is accepting.
+8. **SSH readiness**: never set `vm_ssh_port` before SSH auth probe (`ssh -o BatchMode=yes ... whoami`) returns exit 0 and stdout contains "laputa". Bare TCP connect is insufficient.
 
 ## Build / run
 

@@ -4,42 +4,65 @@
 Calls `python3 -m tine.cli tree` to read the desktop accessibility tree and
 emits a representation tuned to the active mode.
 
+tine contract:
+  - `tine.cli tree [--app NAME]` prints an indented text tree AND saves a ref
+    cache sidecar to TINE_REF_CACHE (default /tmp/tine-refs.json).
+  - Ref cache format: {"ref_N": {"role","name","bbox":{"x","y","w","h",
+    "coord":"window"}, "actions":[...]}, "_app":"..."}.  Keys starting with
+    "_" are metadata and are skipped.
+  - Bboxes in the cache are WINDOW-RELATIVE, not screen-absolute.
+    In --focused mode each bbox is converted to screen coords by adding the
+    window origin from `xdotool getwindowgeometry`.  In other modes bboxes
+    are emitted window-relative (acceptable for JSON consumers).
+  - Garbage/unrealized bboxes (x or y outside [-32768, 32768], or w/h ≤ 0)
+    are filtered out.  In --focused mode elements with no valid bbox are
+    dropped entirely — a ref the agent cannot click is noise.
+  - `tine click` is NOT used: it requires GNOME Mutter DisplayConfig D-Bus or
+    TINE_SCALE/TINE_PHYSICAL_* env, and its window-offset resolution fails on
+    XFCE ("could not list windows — using offset (0,0)").  All clicking goes
+    through xdotool in SshActuator.
+  - `tine.cli tree --json` DOES NOT EXIST and is dead code — removed.
+
 Modes (mutually exclusive; first one specified wins):
-  (default)            Full desktop JSON: {"apps":[...], "elements":[...], "terminals":[...]}.
-                       Backward-compatible with prior behaviour. No position hints.
-  --focused            Text dump of ONLY the focused window's interactive elements,
-                       one per line, with screen-relative bounding boxes and
-                       window-relative position hints. This is the format
-                       intended for the agent loop.
-  --interactive-only   Same JSON shape as default, but non-interactive elements
-                       removed across all apps.
-  --text               Terminal text content only (existing behaviour).
-  --raw                Raw `tine.cli tree` output (existing behaviour).
+  (default)            Full desktop JSON: {"apps":[...], "elements":[...],
+                       "terminals":[]}.  Bboxes are window-relative.
+  --focused            Text dump of ONLY the focused window's interactive
+                       elements, one per line, with screen-absolute bounding
+                       boxes and window-relative position hints.  This is the
+                       format intended for the agent loop.
+  --interactive-only   Same JSON shape as default, but non-interactive
+                       elements removed across all apps.
+  --text               (No-op — tine does not expose terminal text.)
+  --raw                Raw `tine.cli tree` output.
   --print-focus        Print the focused window title and exit (dry-run).
 
-All subprocess calls use a hard timeout so a wedged desktop can't hang the agent.
-
-Output is always UTF-8 text on stdout. Errors and diagnostics go to stderr.
+All subprocess calls use a hard timeout so a wedged desktop can't hang
+the agent.  Output is always UTF-8 text on stdout.  Errors go to stderr.
 """
 
 import argparse
 import json
+import os
 import re
 import shutil
 import subprocess
 import sys
 from typing import Any, Optional
 
-# ── Configuration ───────────────────────────────────────────────────────────
-TINE_CMD = ["env", "PYTHONPATH=/home/laputa/tine", "python3", "-m", "tine.cli", "tree"]
-TINE_JSON_CMD       = ["python3", "-m", "tine.cli", "tree", "--json"]
-SUBPROCESS_TIMEOUT  = 5      # seconds
-XDOTOOL_TIMEOUT     = 2      # seconds
-MAX_ELEMENTS_FULL   = 120    # cap for full-desktop output (existing behaviour)
-MAX_ELEMENTS_FOCUS  = 50     # cap for focused-mode output
+# ── Configuration ────────────────────────────────────────────────────────────
+# tine is a local Python package at guest:/home/laputa/tine/; importable when
+# PYTHONPATH=/home/laputa (so `import tine` resolves via /home/laputa/tine/__init__.py).
+TINE_CMD = ["env", "PYTHONPATH=/home/laputa", "python3", "-m", "tine.cli", "tree"]
 
-# AT-SPI2 roles that are actionable / worth keeping.
-# Roles are normalised to lowercase before lookup.
+SUBPROCESS_TIMEOUT  = 5      # seconds — hard cap on every external call
+XDOTOOL_TIMEOUT     = 2      # seconds — xdotool is fast; fail-fast on wedge
+MAX_ELEMENTS_FULL   = 120    # cap for full-desktop JSON output
+MAX_ELEMENTS_FOCUS  = 50     # cap for focused-mode text output
+
+# Default tine ref cache path; override with TINE_REF_CACHE env var.
+_DEFAULT_REF_CACHE = "/tmp/tine-refs.json"
+
+# AT-SPI2 roles that are actionable / worth surfacing to the agent.
 INTERACTIVE_ROLES = {
     # buttons
     "button", "push button", "toggle button",
@@ -55,17 +78,17 @@ INTERACTIVE_ROLES = {
     "tab", "page tab", "tab list",
     # ranges
     "slider", "scroll bar", "scrollbar",
-    # containers we treat as click targets in app launchers / file managers
+    # containers treated as click targets in app launchers / file managers
     "icon", "tool tip", "tool bar",
-    # date / color pickers
+    # pickers
     "date editor", "color chooser",
 }
 
-# Roles we explicitly drop as visual noise even in full mode.
+# Roles explicitly dropped as visual noise even in full mode.
 NOISE_ROLES = {"separator", "filler", "layered pane", "redundant object"}
 
 
-# ── Subprocess helpers ──────────────────────────────────────────────────────
+# ── Subprocess helpers ────────────────────────────────────────────────────────
 def _have(cmd: str) -> bool:
     return shutil.which(cmd) is not None
 
@@ -79,27 +102,75 @@ def _run(cmd: list[str], timeout: int = SUBPROCESS_TIMEOUT) -> tuple[bool, str, 
         return (False, "", str(e))
 
 
-# ── tine output ─────────────────────────────────────────────────────────────
-def tine_json() -> Optional[dict[str, Any]]:
-    """Try `tine.cli tree --json`. Returns parsed dict or None."""
-    ok, out, _ = _run(TINE_JSON_CMD)
-    if not ok or not out.strip():
-        return None
+# ── tine ref cache ────────────────────────────────────────────────────────────
+def _ref_cache_path() -> str:
+    return os.environ.get("TINE_REF_CACHE", _DEFAULT_REF_CACHE)
+
+
+def is_garbage_bbox(bbox: Optional[list]) -> bool:
+    """True if bbox contains sentinel/unrealized values or zero/negative size.
+
+    Unrealized AT-SPI2 elements use placeholder values like x=-2147483643
+    (INT_MIN-ish).  Filter condition: x or y outside [-32768, 32768], or
+    w ≤ 0, or h ≤ 0.
+    """
+    if not bbox or len(bbox) < 4:
+        return True
+    x, y, w, h = bbox[0], bbox[1], bbox[2], bbox[3]
+    return (x < -32768 or x > 32768 or
+            y < -32768 or y > 32768 or
+            w <= 0 or h <= 0)
+
+
+def read_ref_cache() -> list[dict]:
+    """Read the tine ref cache sidecar.  Returns a flat element list with
+    window-relative bboxes (callers must add window origin for screen coords).
+
+    Skips metadata keys (prefixed with "_").  Returns [] on missing / corrupt
+    cache — callers fall back to parse_text_tree().
+    """
+    path = _ref_cache_path()
     try:
-        data = json.loads(out)
-        return data if isinstance(data, dict) else None
-    except json.JSONDecodeError:
-        return None
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return []
+
+    elements: list[dict] = []
+    for key, val in data.items():
+        if key.startswith("_") or not isinstance(val, dict):
+            continue
+        bbox: Optional[list[int]] = None
+        bbox_raw = val.get("bbox")
+        if isinstance(bbox_raw, dict):
+            try:
+                bbox = [int(bbox_raw["x"]), int(bbox_raw["y"]),
+                        int(bbox_raw["w"]), int(bbox_raw["h"])]
+            except (KeyError, TypeError, ValueError):
+                bbox = None
+        elements.append({
+            "ref":   key,
+            "role":  str(val.get("role", "")).strip(),
+            "label": str(val.get("name", "")).strip(),
+            "state": "",
+            "bbox":  bbox,
+        })
+    return elements
 
 
-def tine_text() -> str:
-    """Raw text-tree output from tine. Empty string on failure."""
-    ok, out, _ = _run(TINE_CMD)
+# ── tine invocation ───────────────────────────────────────────────────────────
+def tine_text(app: Optional[str] = None) -> str:
+    """Run `tine.cli tree [--app APP]`.  Populates the ref cache sidecar.
+    Returns raw text-tree output, or empty string on failure.
+    """
+    cmd = list(TINE_CMD)
+    if app:
+        cmd += ["--app", app]
+    ok, out, _ = _run(cmd)
     return out if ok else ""
 
 
-# Parser for text-tree lines like:
-#   [ref_42] button "Submit" state=enabled bbox=100,200,80,30
+# Parser for text-tree lines — fallback when ref cache is absent/empty.
 _TEXT_LINE_RE = re.compile(
     r"\[(?P<ref>[\w.-]+)\]\s+"
     r"(?P<role>[a-z][a-z\s-]*?)\s+"
@@ -132,42 +203,7 @@ def parse_text_tree(text: str) -> list[dict]:
     return elements
 
 
-def normalize_elements(raw: Any) -> list[dict]:
-    """Convert tine JSON elements (whatever shape) into our flat dict form."""
-    if not isinstance(raw, list):
-        return []
-    out = []
-    for e in raw:
-        if not isinstance(e, dict):
-            continue
-        bbox = e.get("bbox") or e.get("bounding_box") or e.get("extents")
-        if isinstance(bbox, dict):
-            # convert {"x":..,"y":..,"width":..,"height":..} into list form
-            try:
-                bbox = [int(bbox["x"]), int(bbox["y"]),
-                        int(bbox["width"]), int(bbox["height"])]
-            except (KeyError, TypeError, ValueError):
-                bbox = None
-        elif isinstance(bbox, (list, tuple)) and len(bbox) >= 4:
-            try:
-                bbox = [int(x) for x in bbox[:4]]
-            except (TypeError, ValueError):
-                bbox = None
-        else:
-            bbox = None
-
-        out.append({
-            "ref":   str(e.get("ref")  or e.get("id")   or ""),
-            "role":  str(e.get("role") or "").strip(),
-            "label": str(e.get("label") or e.get("name") or ""),
-            "state": str(e.get("state") or ""),
-            "app":   str(e.get("app")   or e.get("application") or ""),
-            "bbox":  bbox,
-        })
-    return out
-
-
-# ── Focused window detection ────────────────────────────────────────────────
+# ── Focused window detection ──────────────────────────────────────────────────
 def get_focused_window() -> tuple[Optional[str], Optional[dict]]:
     """Return (title, {x,y,width,height}) for the active window, or (None, None)."""
     if not _have("xdotool"):
@@ -182,7 +218,7 @@ def get_focused_window() -> tuple[Optional[str], Optional[dict]]:
     title = title_out.strip() or None
 
     ok, geo_out, _ = _run(["xdotool", "getwindowgeometry", "--shell", wid],
-                          timeout=XDOTOOL_TIMEOUT)
+                           timeout=XDOTOOL_TIMEOUT)
     if not ok:
         return (title, None)
 
@@ -202,7 +238,16 @@ def get_focused_window() -> tuple[Optional[str], Optional[dict]]:
     return (title, geo)
 
 
-# ── Filtering ───────────────────────────────────────────────────────────────
+def _get_classname() -> Optional[str]:
+    """Return the WM_CLASS of the active window via xdotool, or None."""
+    if not _have("xdotool"):
+        return None
+    ok, out, _ = _run(["xdotool", "getactivewindow", "getwindowclassname"],
+                      timeout=XDOTOOL_TIMEOUT)
+    return out.strip() if ok and out.strip() else None
+
+
+# ── Filtering ─────────────────────────────────────────────────────────────────
 def is_interactive(role: str) -> bool:
     return role.strip().lower() in INTERACTIVE_ROLES
 
@@ -237,10 +282,15 @@ def position_hint(bbox: list[int], win: dict) -> str:
     return f"{vert}-{horiz}"
 
 
-# ── Output formatters ───────────────────────────────────────────────────────
+# ── Output formatters ─────────────────────────────────────────────────────────
 def format_focused(elements: list[dict], window_title: str,
                    win_geo: Optional[dict]) -> str:
-    """Text format consumed by the agent loop in focused mode."""
+    """Text format consumed by the agent loop in focused mode.
+
+    Each element line:  ref_N  role  "label"  (sx,sy,w,h)  [hint]  state=...
+    Bboxes in elements must already be screen-absolute when win_geo is provided.
+    When win_geo is None, no coord tuple or position hint is emitted.
+    """
     lines: list[str] = []
     lines.append(f"[focused: {window_title or '(unknown)'}]")
     if win_geo:
@@ -288,43 +338,59 @@ def emit_default_json(elements: list[dict], apps: list[str],
     }, indent=2)
 
 
-# ── Modes ───────────────────────────────────────────────────────────────────
-def gather_all() -> tuple[list[dict], list[str], list[dict]]:
-    """Try JSON first, fall back to parsing text tree. Returns (elements, apps, terminals)."""
-    data = tine_json()
-    if data is not None:
-        elements  = normalize_elements(data.get("elements", []))
-        apps      = list(data.get("apps", []))
-        terminals = list(data.get("terminals", []))
-        return (elements, apps, terminals)
+# ── Modes ─────────────────────────────────────────────────────────────────────
+def gather_all(app: Optional[str] = None) -> tuple[list[dict], list[str], list[dict]]:
+    """Run tine tree [--app APP], read the ref cache sidecar.
+    Returns (elements, apps, terminals=[]).
 
-    # Fallback: parse text tree, no terminal extraction possible
-    raw_text = tine_text()
-    elements = parse_text_tree(raw_text)
+    Bboxes in elements are WINDOW-RELATIVE.  Callers that need screen coords
+    must add the window origin.  Falls back to parsing the text output if the
+    ref cache is unreadable (text-tree parse yields no bbox data).
+    """
+    raw = tine_text(app)          # runs tine, populates ref cache sidecar
+    elements = read_ref_cache()
+    if not elements:
+        elements = parse_text_tree(raw)   # fallback: no bbox data
     apps = sorted({e.get("app", "") for e in elements if e.get("app")})
     return (elements, apps, [])
 
 
 def mode_focused() -> str:
-    title, win = get_focused_window()
-    elements, _apps, _terms = gather_all()
+    title, win    = get_focused_window()
+    classname     = _get_classname()
 
-    if not title and not win:
-        # Couldn't detect focus — gracefully fall back to default JSON so the
-        # agent still gets something useful.
-        print("perceive.py: focused window detection failed, falling back to "
-              "default JSON output", file=sys.stderr)
-        return emit_default_json(elements, _apps, _terms,
-                                 interactive_only=True)
+    if not classname or not win:
+        # Fallback: no classname or no window geometry.
+        # Run unscoped tine and emit WITHOUT coordinate tuples — window-relative
+        # bboxes without a screen origin would mislead the agent.
+        raw = tine_text()
+        elements = read_ref_cache()
+        if not elements:
+            elements = parse_text_tree(raw)
+        scoped = [e for e in elements if is_interactive(e.get("role", ""))]
+        # Null out bboxes — they are window-relative and we have no origin
+        scoped_no_coords = [{**e, "bbox": None} for e in scoped]
+        return format_focused(scoped_no_coords, title or "(unknown)", None)
 
-    # Filter to elements within the focused window's geometry (if available)
-    if win:
-        scoped = [e for e in elements if e.get("bbox") is None or bbox_inside(e.get("bbox"), win)]
-    else:
-        # Fall back to app-name matching if we only have a title
-        scoped = elements
+    # Scoped run: tine filters to the active app by classname.
+    raw = tine_text(app=classname)
+    elements = read_ref_cache()
+    if not elements:
+        elements = parse_text_tree(raw)
 
-    scoped = [e for e in scoped if is_interactive(e.get("role", ""))]
+    # Convert window-relative bboxes → screen-absolute by adding the window origin.
+    # Garbage bboxes (INT_MIN-ish placeholders) are filtered BEFORE conversion.
+    # In focused mode, elements with no valid bbox are dropped (unclickable = noise).
+    win_x, win_y = win["x"], win["y"]
+    screen_elements: list[dict] = []
+    for e in elements:
+        bbox = e.get("bbox")
+        if not bbox or is_garbage_bbox(bbox):
+            continue
+        screen_bbox = [bbox[0] + win_x, bbox[1] + win_y, bbox[2], bbox[3]]
+        screen_elements.append({**e, "bbox": screen_bbox})
+
+    scoped = [e for e in screen_elements if is_interactive(e.get("role", ""))]
     return format_focused(scoped, title or "", win)
 
 
@@ -334,15 +400,8 @@ def mode_print_focus() -> str:
 
 
 def mode_text() -> str:
-    """Terminal text content extracted from the tree."""
-    _, _, terminals = gather_all()
-    blobs = []
-    for t in terminals:
-        app  = t.get("app", "")
-        text = t.get("text", "")
-        if text:
-            blobs.append(f"--- {app} ---\n{text}")
-    return "\n\n".join(blobs)
+    """Terminal text content — not available via tine ref cache."""
+    return ""
 
 
 def mode_raw() -> str:
@@ -355,14 +414,13 @@ def mode_default(interactive_only: bool) -> str:
                              interactive_only=interactive_only)
 
 
-# ── CLI ─────────────────────────────────────────────────────────────────────
+# ── CLI ───────────────────────────────────────────────────────────────────────
 def parse_args() -> argparse.Namespace:
     ap = argparse.ArgumentParser(
         description="AT-SPI2 screen reader for the Laputa agent.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
-    # Mutually exclusive group so flags can't be combined in confusing ways.
     mode = ap.add_mutually_exclusive_group()
     mode.add_argument("--focused",          action="store_true",
                       help="Output focused window's interactive elements only (text format).")
@@ -395,7 +453,6 @@ def main() -> int:
         sys.stdout.write("\n")
         return 0
     except Exception as e:
-        # Never crash the agent — always return something
         print(f"perceive.py error: {e}", file=sys.stderr)
         sys.stdout.write('{"apps":[],"elements":[],"terminals":[]}\n')
         return 0

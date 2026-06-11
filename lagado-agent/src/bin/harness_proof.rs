@@ -111,6 +111,51 @@ fn main() {
         println!("[warn] X session not confirmed; perception/actuation may be degraded");
     }
 
+    // Deploy the repo's perceive.py to the guest so --focused emits screen coords.
+    // Run from the repo root (CWD when invoked as ./target/debug/harness_proof).
+    let perceive_src = std::env::current_dir()
+        .map(|d| d.join("perceive.py"))
+        .unwrap_or_else(|_| std::path::PathBuf::from("perceive.py"));
+    if perceive_src.exists() {
+        let ok = Command::new("scp")
+            .args([
+                "-o", "StrictHostKeyChecking=no",
+                "-o", "BatchMode=yes",
+                "-P", &port.to_string(),        // scp uses -P (capital) for port
+                perceive_src.to_str().unwrap_or("perceive.py"),
+                "laputa@127.0.0.1:/home/laputa/perceive.py",
+            ])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if ok {
+            println!("[ok] perceive.py deployed to guest");
+        } else {
+            println!("[warn] perceive.py scp failed — guest may have a stale copy");
+        }
+    } else {
+        println!("[warn] perceive.py not found at {} — using guest's existing copy",
+                 perceive_src.display());
+    }
+
+    // Open Thunar (file manager) in the guest so --focused has a window with
+    // real interactive AT-SPI2 elements (buttons, tree items, toolbar).
+    // Thunar is the verified test app (background facts: "Thunar at X=635,Y=315").
+    // Redirect all FDs so SSH exits immediately without waiting for the app.
+    let _ = Command::new("ssh")
+        .args([
+            "-o", "StrictHostKeyChecking=no",
+            "-o", "ConnectTimeout=5",
+            "-o", "BatchMode=yes",
+            "-p", &port.to_string(),
+            "laputa@127.0.0.1",
+            "DISPLAY=:0 setsid thunar </dev/null >/dev/null 2>&1 &",
+        ])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+    sleep(Duration::from_secs(5));  // Thunar needs ~5s to fully render its a11y tree
+
     // Shared cache: perceptor populates coords/bboxes, actuator resolves clicks from it.
     let cache = Arc::new(Mutex::new(PerceptionCache::new()));
     let perceptor = SshPerceptor::with_cache("127.0.0.1", port, "laputa", cache.clone());
@@ -127,6 +172,12 @@ fn main() {
     println!("[perceive] cache: {n_coords} coords, {n_bboxes} bboxes");
     for line in screen.lines().take(8) {
         println!("    | {line}");
+    }
+    if n_coords == 0 {
+        eprintln!("[FAIL] STAGE 4: coords cache is empty after read_screen() — \
+                   --focused emitted no parseable (x,y,w,h) tuples");
+        let _ = backend.shutdown(handle);
+        std::process::exit(1);
     }
 
     // ── STAGE 5: frame capture via QMP ──
@@ -160,6 +211,7 @@ fn main() {
     match &first_ref {
         Some(r) => {
             let res = actuator.click(r);
+            // Print verbatim — the raw string from SshActuator is the ground truth
             println!("[click] click('{r}') → {res}");
             if res.contains("not in screen cache") || res.starts_with("ssh error") {
                 println!("[warn] click path returned an error string");
@@ -193,7 +245,9 @@ fn main() {
                     Ok(changed) => {
                         println!("[delta] {} cells changed between before/after", changed.len());
                         if changed.is_empty() {
-                            println!("[note] no pixel change detected (actuation may not have altered the screen)");
+                            // WARN not FAIL: some clicks (e.g. on already-focused
+                            // elements) produce no visible pixel change.
+                            println!("[warn] 0 changed cells — click may not have altered the screen");
                         } else {
                             println!("[ok] actuation produced a visible screen change — loop closed");
                         }

@@ -337,18 +337,40 @@ async fn vm_boot(state: State<'_, Arc<AppState>>) -> Result<serde_json::Value, S
     let ssh_port = cfg.ssh_port;
     let handle = backend.boot(&cfg_clone)?;
     *vm = Some(handle);
-    // Poll for SSH readiness in background — do NOT set vm_ssh_port until guest sshd is up
+    // Poll for SSH readiness in background — do NOT set vm_ssh_port until SSH
+    // auth succeeds (whoami probe returns "laputa").  Bare TCP connect is NOT
+    // sufficient: sshd may accept connections before key auth is configured.
     let port_ref = state.vm_ssh_port.clone();
     tokio::spawn(async move {
         for _ in 0..120u32 {
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-            if tokio::net::TcpStream::connect(("127.0.0.1", ssh_port)).await.is_ok() {
+            let port_str = ssh_port.to_string();
+            let auth_ok = tokio::task::spawn_blocking(move || {
+                std::process::Command::new("ssh")
+                    .args([
+                        "-o", "StrictHostKeyChecking=no",
+                        "-o", "ConnectTimeout=5",
+                        "-o", "BatchMode=yes",
+                        "-p", &port_str,
+                        "laputa@127.0.0.1",
+                        "whoami",
+                    ])
+                    .output()
+                    .map(|out| {
+                        out.status.success()
+                            && String::from_utf8_lossy(&out.stdout).contains("laputa")
+                    })
+                    .unwrap_or(false)
+            })
+            .await
+            .unwrap_or(false);
+            if auth_ok {
                 *port_ref.write().unwrap() = Some(ssh_port);
-                tracing::info!("VM SSH ready on port {ssh_port}");
+                tracing::info!("VM SSH auth confirmed on port {ssh_port}");
                 return;
             }
         }
-        tracing::warn!("VM SSH never became ready (120s timeout)");
+        tracing::warn!("VM SSH auth never succeeded (120s timeout)");
     });
     Ok(serde_json::json!({ "status": "booting", "ssh_port": ssh_port }))
 }

@@ -27,7 +27,7 @@ impl Perceptor for SshPerceptor {
                 "-o", "BatchMode=yes",
                 "-p", &self.port.to_string(),
                 &format!("{}@{}", self.user, self.host),
-                "DISPLAY=:0 python3 ~/perceive.py 2>/dev/null || echo '[perception unavailable]'",
+                "DISPLAY=:0 python3 ~/perceive.py --focused 2>/dev/null || echo '[perception unavailable]'",
             ])
             .output()
         {
