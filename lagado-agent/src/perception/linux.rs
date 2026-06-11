@@ -1,7 +1,7 @@
 //! linux.rs — Real Linux perception via AT-SPI2 screen reader and xdotool actuator.
 
 use std::sync::{Arc, Mutex};
-use super::{PerceptionCache, parse_ref_coords};
+use super::{PerceptionCache, parse_ref_bboxes, parse_ref_coords};
 
 /// Linux-based perceptor: reads screen via perceive.py AT-SPI2 script.
 pub struct LinuxPerceptor {
@@ -62,11 +62,13 @@ impl crate::perception::Perceptor for LinuxPerceptor {
             }
         };
 
-        // Parse ref → bbox from the text and populate cache
+        // Parse ref → center-coords and full bboxes from the text, populate cache.
         let coords = parse_ref_coords(&text);
+        let bboxes = parse_ref_bboxes(&text);
         if let Ok(mut cache) = self.cache.lock() {
             cache.screen_text = text.clone();
             cache.coords = coords;
+            cache.bboxes = bboxes;
         }
         text
     }

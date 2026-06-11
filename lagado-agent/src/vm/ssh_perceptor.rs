@@ -1,4 +1,4 @@
-use crate::perception::{Perceptor, PerceptionCache, parse_ref_coords};
+use crate::perception::{Perceptor, PerceptionCache, parse_ref_bboxes, parse_ref_coords};
 use std::sync::{Arc, Mutex};
 
 pub struct SshPerceptor {
@@ -36,9 +36,11 @@ impl Perceptor for SshPerceptor {
         };
 
         let coords = parse_ref_coords(&text);
+        let bboxes = parse_ref_bboxes(&text);
         if let Ok(mut c) = self.cache.lock() {
             c.screen_text = text.clone();
             c.coords = coords;
+            c.bboxes = bboxes;
         }
         text
     }
