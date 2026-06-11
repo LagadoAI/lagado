@@ -269,6 +269,9 @@ impl SkillLibrary {
                 let reliability_boost = (success_ratio * 0.2).min(0.2);
                 let score = jaccard * 0.8 + reliability_boost;
 
+                // Require meaningful overlap — don't inject noise as "relevant"
+                if score < 0.05 { return None; }
+
                 Some((score, skill))
             })
             .collect();
@@ -328,13 +331,7 @@ fn now_unix() -> i64 {
 }
 
 fn uuid() -> String {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-    let mut h = DefaultHasher::new();
-    now_unix().hash(&mut h);
-    // Add some entropy from thread id
-    std::thread::current().id().hash(&mut h);
-    format!("{:016x}", h.finish())
+    uuid::Uuid::new_v4().to_string()
 }
 
 fn step_hint(call: &crate::types::ToolCall) -> String {

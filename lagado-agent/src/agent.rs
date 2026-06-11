@@ -285,20 +285,26 @@ pub async fn agent_loop(
 
         let screen = perceptor.read_screen();
         let context = memory.context_string();
-        let episodic_section = if episodic_context.is_empty() {
-            String::new()
-        } else {
+        // Taper retrieved priors by turn. Priors (episodic/visual/skills) are
+        // most useful at turn 1 when the model has no trajectory yet. By turn 4+
+        // the action history in `context` plus the live screen are fresher signal.
+        let prior_turn = enforcer.step();
+        let inject_priors = prior_turn <= 3;
+
+        let episodic_section = if inject_priors && !episodic_context.is_empty() {
             format!("Past sessions:\n{episodic_context}\n\n")
-        };
-        let visual_section = if visual_context.is_empty() {
-            String::new()
         } else {
+            String::new()
+        };
+        let visual_section = if inject_priors && !visual_context.is_empty() {
             format!("Visually similar past sessions:\n- {visual_context}\n\n")
-        };
-        let skill_section = if skill_context.is_empty() {
-            String::new()
         } else {
+            String::new()
+        };
+        let skill_section = if inject_priors && !skill_context.is_empty() {
             format!("{skill_context}\n")
+        } else {
+            String::new()
         };
         // Top-10 tools most relevant to the current goal — never flat-dump all tools
         let tool_section = {
