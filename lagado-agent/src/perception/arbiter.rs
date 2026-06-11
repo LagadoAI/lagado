@@ -141,7 +141,7 @@ pub fn fuse(
         }
     }
 
-    // ── Step 3: attach spatial patch embeddings ────────────────────────────
+    // ── Step 3: attach spatial patch embeddings (mean-pool all overlapping) ──
     // C3: filter out overview tiles before collecting patches.
     let spatial: Vec<&crate::vision::PatchEmbedding> = patches
         .iter()
@@ -151,37 +151,55 @@ pub fn fuse(
 
     if !spatial.is_empty() {
         for elem in &mut elements {
-            let mut best_score = 0.0f32;
-            let mut best_embd:  Option<Vec<f32>> = None;
+            // Collect ALL spatial patches that overlap this element.
+            // C2: inflate the element bbox by one patch dimension per side before
+            // the IoU test to absorb ±1 patch edge fuzz.
+            let overlapping: Vec<&crate::vision::PatchEmbedding> = spatial
+                .iter()
+                .copied()
+                .filter(|patch| {
+                    let patch_bbox = (
+                        patch.patch_x as i32,
+                        patch.patch_y as i32,
+                        patch.patch_w as i32,
+                        patch.patch_h as i32,
+                    );
+                    let inflated = inflate(
+                        elem.bbox,
+                        patch.patch_w as i32,
+                        patch.patch_h as i32,
+                    );
+                    iou(inflated, patch_bbox) > 0.0
+                })
+                .collect();
 
-            for patch in &spatial {
-                let patch_bbox = (
-                    patch.patch_x as i32,
-                    patch.patch_y as i32,
-                    patch.patch_w as i32,
-                    patch.patch_h as i32,
-                );
-                // C2: inflate element bbox by one patch dimension per side to absorb
-                // ±1 patch edge fuzz (empirically confirmed: boundary elements appear
-                // in two adjacent patches).
-                let inflated = inflate(
-                    elem.bbox,
-                    patch.patch_w as i32,
-                    patch.patch_h as i32,
-                );
-                let score = iou(inflated, patch_bbox);
-                if score > best_score {
-                    best_score = score;
-                    best_embd  = Some(patch.embd.clone());
-                }
+            if overlapping.is_empty() {
+                continue; // patch_embd stays None
             }
 
-            if best_score > 0.0 {
-                elem.patch_embd = best_embd;
+            // Plain arithmetic mean over all overlapping patches, dimension by dimension.
+            // No IoU weighting — matches lagado_encode_image()'s mean-pool convention.
+            // C4: derive length from first patch, never hardcode n_embd.
+            let n_embd = overlapping[0].embd.len();
+            let mut sum = vec![0.0f32; n_embd];
+            let mut count = 0usize;
+            for patch in &overlapping {
+                if patch.embd.len() != n_embd {
+                    continue; // skip mismatched-length patches rather than panic
+                }
+                for (d, &v) in patch.embd.iter().enumerate() {
+                    sum[d] += v;
+                }
+                count += 1;
+            }
+            if count > 0 {
+                elem.patch_embd = Some(sum.iter().map(|&s| s / count as f32).collect());
             }
         }
     }
 
+    // Sort is the final step — MUST come after step 2's index-based merging is complete.
+    elements.sort_by_key(|e| (e.bbox.1, e.bbox.0, e.bbox.2, e.bbox.3));
     elements
 }
 
@@ -377,5 +395,67 @@ mod tests {
     fn empty_inputs_returns_empty_no_panic() {
         let result = fuse(&HashMap::new(), &[], &[]);
         assert!(result.is_empty());
+    }
+
+    // ── Mean-pool over multiple overlapping patches ────────────────────────
+
+    #[test]
+    fn mean_pool_averages_multiple_overlapping_patches() {
+        // Element at (0,0,50,50). Two patches both overlapping via inflate margin.
+        // patch A at (0,0,27,25) embd=[2.0, 4.0]
+        // patch B at (20,0,27,25) embd=[4.0, 8.0]
+        // Expected mean: [3.0, 6.0]
+        let mut a11y = HashMap::new();
+        a11y.insert("ref_1".to_string(), (0, 0, 50, 50));
+
+        let tile = TilePatches {
+            is_overview:   false,
+            tile_origin_x: 0,
+            tile_origin_y: 0,
+            patches: vec![
+                PatchEmbedding { patch_x: 0,  patch_y: 0, patch_w: 27, patch_h: 25, embd: vec![2.0, 4.0] },
+                PatchEmbedding { patch_x: 20, patch_y: 0, patch_w: 27, patch_h: 25, embd: vec![4.0, 8.0] },
+            ],
+        };
+
+        let result = fuse(&a11y, &[], &[tile]);
+        let embd = result[0].patch_embd.as_ref().expect("patch_embd must be Some");
+        assert!(
+            (embd[0] - 3.0).abs() < 1e-5,
+            "dim 0 mean must be 3.0, got {}", embd[0]
+        );
+        assert!(
+            (embd[1] - 6.0).abs() < 1e-5,
+            "dim 1 mean must be 6.0, got {}", embd[1]
+        );
+    }
+
+    // ── Deterministic output order ────────────────────────────────────────
+
+    #[test]
+    fn deterministic_order_sorted_by_bbox() {
+        // Insert boxes in an order that does NOT match sorted (y, x, w, h).
+        // HashMap iteration is non-deterministic, so two fuse() calls may visit
+        // boxes in different orders — the sort guarantees identical output both times.
+        let mut a11y = HashMap::new();
+        a11y.insert("ref_c".to_string(), (200, 300, 50, 50)); // y=300
+        a11y.insert("ref_a".to_string(), (10,  100, 30, 20)); // y=100
+        a11y.insert("ref_b".to_string(), (5,   200, 40, 30)); // y=200
+
+        let result1 = fuse(&a11y, &[], &[]);
+        let result2 = fuse(&a11y, &[], &[]);
+
+        // Both runs must produce the same bbox sequence
+        let bboxes1: Vec<_> = result1.iter().map(|e| e.bbox).collect();
+        let bboxes2: Vec<_> = result2.iter().map(|e| e.bbox).collect();
+        assert_eq!(bboxes1, bboxes2, "fuse() must be deterministic across calls");
+
+        // And the sequence must be sorted ascending by (y, x, w, h)
+        let sorted = {
+            let mut v = bboxes1.clone();
+            v.sort_by_key(|&(x, y, w, h)| (y, x, w, h));
+            v
+        };
+        assert_eq!(bboxes1, sorted, "output must be sorted by (y, x, w, h)");
     }
 }
