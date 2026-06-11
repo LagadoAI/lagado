@@ -187,13 +187,13 @@ void lagado_encoder_free(lagado_encoder_t *enc)
  *   - Overview is the LAST image chunk (not first).
  *   - Spatial tiles are in row-major order: chunk idx = tile_row*grid_cols + tile_col.
  *   - Within a tile, token i is row-major: row = i/16, col = i%16.
- *   - Overview identification: n_tokens != (TILE_SIZE/PATCH_STRIDE)^2 = 256.
+ *   - Overview identification: structural position img_idx >= grid_cols*grid_rows.
+ *     (NOT by token count — at certain resolutions the overview can have 256 tokens
+ *      identical to spatial tiles, e.g. a 1025×1025 square input with a 2×2 grid.)
  */
 
 #define LFM2_TILE_SIZE        512
 #define LFM2_PATCH_STRIDE     32      /* patch_size(16) × n_merge(2) */
-#define LFM2_SPATIAL_N_TOK    ((LFM2_TILE_SIZE / LFM2_PATCH_STRIDE) * \
-                                (LFM2_TILE_SIZE / LFM2_PATCH_STRIDE))   /* 256 */
 #define LFM2_MIN_TILES        2
 #define LFM2_MAX_TILES        10
 #define LFM2_MAX_TOL          2.0f
@@ -330,9 +330,14 @@ lagado_patch_result_t *lagado_encode_image_patches(lagado_encoder_t   *enc,
 
         size_t n_tok = mtmd_input_chunk_get_n_tokens(chunk);
 
-        /* Overview identification: token count ≠ 256, or no tiling at all.
-         * Authoritative — Rust loop must gate on this flag, not on position. */
-        int is_ov = (!needs_tiling) || ((uint32_t)n_tok != LFM2_SPATIAL_N_TOK);
+        /* Overview identification: structural position, NOT token count.
+         * Spatial tiles occupy indices 0 .. grid_cols*grid_rows - 1.
+         * The overview is the trailing chunk at index >= grid_cols*grid_rows.
+         * Token count is NOT used here — at some resolutions (e.g. 1025×1025 with a
+         * 2×2 grid) the overview can also produce 256 tokens, identical to spatial tiles,
+         * making token-count detection wrong. Structure is always correct. */
+        int n_spatial = needs_tiling ? (grid_cols * grid_rows) : 0;
+        int is_ov     = (img_idx >= n_spatial);
 
         uint32_t tile_rx = 0, tile_ry = 0;
         if (!is_ov) {
