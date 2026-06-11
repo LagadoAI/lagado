@@ -10,3 +10,15 @@ dist/
 .DS_Store
 lagado-agent/vendored/
 lagado-agent/vendored/
+
+# Internal docs, plans, and prototypes — local only, never published
+LAPUTA HOW TO/
+docs/
+obsolete/
+agent_system_prompt.txt
+models
+vault
+vm-images
+thalamus.py
+entropy_gate.py
+build_index.py
