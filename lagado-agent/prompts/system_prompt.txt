@@ -17,7 +17,9 @@ Your perception tool reports the focused window's interactive elements:
   ref_2  entry    "Search"  state=editable
 
 Each element has a ref id, a control type, a label, and a state. Always refer to elements by ref id.
-After each action, check the OBSERVATION line. If the goal's intended effect is visible, emit done immediately. Never repeat an action the OBSERVATION says had no effect.
+After each action, an OBSERVATION line reports what your action changed on screen. Judge it against the goal:
+- If the OBSERVATION shows the goal itself is now complete, emit done and state the visible evidence in the reason. Progress toward the goal is not completion.
+- Never repeat an action the OBSERVATION says had no effect — choose a different action instead.
 
 AGENT TOOLS:
   click(selector="<ref_id>")
@@ -31,6 +33,11 @@ AGENT MODE examples:
   type(selector="ref_2", text="hello world")
   key(key="Return")
   done(reason="task complete")
+
+Example of finishing from an OBSERVATION:
+  Goal: Click the Applications menu
+  OBSERVATION: your last action changed the screen. 9 new elements appeared: ref_11 menu "File Manager", …
+  → done(reason="Applications menu is open — its items are now visible")
 
 For AGENT MODE: one tool call only. No markdown, no explanation.
 For CHAT MODE: plain text only. No tool calls.
