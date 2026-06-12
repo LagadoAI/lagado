@@ -183,6 +183,50 @@ async fn request_and_await_approval(
     }
 }
 
+// ── Observation helpers ───────────────────────────────────────────
+
+/// Returns Some(observation text) when an executed action's screen effect should be
+/// reported to the model, or None when no injection is appropriate (first turn,
+/// no prior action executed, or action was denied/blocked).
+///
+/// Injection rule:
+/// - `None`  when `prev_executed` is false (no action ran last turn).
+/// - `Some("did NOT change…")` when hashes are equal.
+/// - `Some("changed — N appeared, M disappeared")` otherwise, with up to 5 sample ref lines.
+pub fn observation_for(prev_executed: bool, prev: &str, curr: &str) -> Option<String> {
+    if !prev_executed {
+        return None;
+    }
+    if blake3::hash(prev.as_bytes()) == blake3::hash(curr.as_bytes()) {
+        return Some(
+            "OBSERVATION: the screen did NOT change after your last action — \
+             it had no visible effect. Do not repeat the same action; reconsider.".to_string(),
+        );
+    }
+    let prev_refs: std::collections::HashSet<&str> =
+        prev.lines().filter(|l| l.contains("ref_")).collect();
+    let curr_refs: std::collections::HashSet<&str> =
+        curr.lines().filter(|l| l.contains("ref_")).collect();
+    let n_new  = curr_refs.difference(&prev_refs).count();
+    let n_gone = prev_refs.difference(&curr_refs).count();
+    let sample: Vec<&str> = curr_refs.difference(&prev_refs).take(5).map(|s| s.trim()).collect();
+    let appeared = if sample.is_empty() { String::new() } else { format!(" {}", sample.join(", ")) };
+    Some(format!(
+        "OBSERVATION: your last action changed the screen. \
+         {n_new} new elements appeared:{appeared}. {n_gone} elements disappeared."
+    ))
+}
+
+/// True when the agent should abort rather than execute a 3rd+ identical consecutive action.
+///
+/// `count`          — number of times `last` was already EXECUTED (2 = this would be the 3rd).
+/// `screen_unchanged` — whether the screen is identical to what it was before the 2nd attempt.
+///
+/// Scroll-type repeats where the screen changed survive (`screen_unchanged = false`).
+pub fn should_cutoff(current: &str, last: &str, count: usize, screen_unchanged: bool) -> bool {
+    current == last && count >= 2 && screen_unchanged
+}
+
 // ── Agent loop ────────────────────────────────────────────────────
 pub async fn agent_loop(
     state: Arc<Mutex<AgentState>>,
@@ -226,6 +270,17 @@ pub async fn agent_loop(
 
     // Sliding window of recent action descriptions for loop/deadlock detection
     let mut recent_actions: Vec<String> = Vec::new();
+
+    // Screen-diff observation state — tracks previous screen text and whether
+    // an action actually executed last turn (denied/blocked actions don't count).
+    let mut prev_screen = String::new();
+    let mut prev_action_executed = false;
+
+    // Consecutive-identical-action cutoff state.
+    // Invariant: last_exec_action / consecutive_exec_count are updated only when
+    // action_executed == true; reset when a different action executes.
+    let mut last_exec_action = String::new();
+    let mut consecutive_exec_count: usize = 0;
 
     let goal = state.lock().await.goal.clone();
     let system_prompt = config::system_prompt();
@@ -284,6 +339,17 @@ pub async fn agent_loop(
         }
 
         let screen = perceptor.read_screen();
+
+        // Compute and log screen-effect observation from previous turn.
+        let observation = observation_for(prev_action_executed, &prev_screen, &screen);
+        if let Some(ref obs) = observation {
+            chronos::log(&format!("observation_injected: {}", &obs[..obs.len().min(120)]));
+        }
+        let observation_section = match &observation {
+            Some(obs) => format!("{obs}\n\n"),
+            None => String::new(),
+        };
+
         let context = memory.context_string();
         // Taper retrieved priors by turn. Priors (episodic/visual/skills) are
         // most useful at turn 1 when the model has no trajectory yet. By turn 4+
@@ -314,7 +380,7 @@ pub async fn agent_loop(
         };
 
         let prompt = format!(
-            "{system_prompt}\n\n{episodic_section}{visual_section}{skill_section}{tool_section}{context}\n\nScreen:\n{screen}\n\nGoal: {goal}\n\nWhat is your next action?"
+            "{system_prompt}\n\n{episodic_section}{visual_section}{skill_section}{tool_section}{context}\n\n{observation_section}Screen:\n{screen}\n\nGoal: {goal}\n\nWhat is your next action?"
         );
 
         let adapter_clone = adapter.clone();
@@ -340,6 +406,30 @@ pub async fn agent_loop(
                         "low_confidence: step={} conf={:.2} action={:?}",
                         enforcer.step(), confidence, tool_call
                     ));
+                }
+
+                // Pre-execution cutoff: 3rd+ identical action with no visible screen effect.
+                // Uses prev_screen (set at end of prior turn) to detect whether the 2nd
+                // identical execution actually changed anything.
+                let current_action_desc = gate::describe(&tool_call);
+                let screen_unchanged = !prev_screen.is_empty()
+                    && blake3::hash(screen.as_bytes()) == blake3::hash(prev_screen.as_bytes());
+                if should_cutoff(&current_action_desc, &last_exec_action, consecutive_exec_count, screen_unchanged) {
+                    let impasse = format!(
+                        "I attempted '{}' twice with no visible effect; stopping rather than repeating.",
+                        last_exec_action
+                    );
+                    chronos::log(&format!("impasse: {impasse}"));
+                    let _ = confirm_tx.send(envelope::make("action_log", envelope::ActionLogPayload {
+                        text: impasse.clone(),
+                    })).await;
+                    let _ = confirm_tx.send(envelope::make("status", envelope::StatusPayload {
+                        state: "goal_done".to_string(),
+                        detail: impasse,
+                    })).await;
+                    prev_screen = screen.clone();
+                    prev_action_executed = false;
+                    break;
                 }
 
                 // Conversational response — emit as chat message and end this goal
@@ -386,6 +476,10 @@ pub async fn agent_loop(
                     }
                 };
 
+                // An action "executed" if it wasn't denied by the user or blocked by the gate.
+                let action_executed = !output.starts_with("Denied by user:")
+                    && !output.starts_with("Blocked:");
+
                 memory.push(Step {
                     index: enforcer.step(),
                     prompt: prompt.clone(),
@@ -396,7 +490,34 @@ pub async fn agent_loop(
                 recent_actions.push(gate::describe(&tool_call));
                 if recent_actions.len() > 15 { recent_actions.remove(0); }
 
-                // Structural failure detection (loop / deadlock)
+                // Consecutive-identical-action tracking.
+                // At count == 2: fire urgency injection (recovery manager) so the model knows
+                // it has repeated the same action and should reconsider.
+                if action_executed {
+                    if current_action_desc == last_exec_action {
+                        consecutive_exec_count += 1;
+                    } else {
+                        last_exec_action = current_action_desc.clone();
+                        consecutive_exec_count = 1;
+                    }
+
+                    if consecutive_exec_count == 2 {
+                        if let Some(ref rm) = recovery_manager {
+                            match rm.recover(&FailureType::LoopDetected, &state_hash, &screen, &recent_actions).await {
+                                Some(RecoveryOutcome::PromptInjection { text, .. }) => {
+                                    tracing::info!("Repeated-action urgency injected at count=2");
+                                    memory.push(Step { index: enforcer.step(), prompt: text, output: "recovery_injection".to_string(), action: None });
+                                    prev_screen = screen.clone();
+                                    prev_action_executed = false;
+                                    continue;
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+
+                // Structural failure detection (loop / deadlock — still guards scroll-type repeats)
                 if let Some(structural) = FailureType::detect_structural(&recent_actions) {
                     tracing::warn!("Structural failure detected: {structural}");
                     if let Some(ref rm) = recovery_manager {
@@ -405,14 +526,28 @@ pub async fn agent_loop(
                             Some(RecoveryOutcome::PromptInjection { text, .. }) => {
                                 tracing::info!("Recovery injection: {}", &text[..text.len().min(80)]);
                                 memory.push(Step { index: enforcer.step(), prompt: text, output: "recovery_injection".to_string(), action: None });
+                                prev_screen = screen.clone();
+                                prev_action_executed = false;
                                 continue;
                             }
-                            _ => break,
+                            _ => {
+                                prev_screen = screen.clone();
+                                prev_action_executed = false;
+                                break;
+                            }
                         }
                     } else {
+                        prev_screen = screen.clone();
+                        prev_action_executed = false;
                         break;
                     }
                 }
+
+                // Update screen observation state for next turn.
+                // Done here so all `continue` paths above that explicitly set these
+                // are the only exceptions; normal fall-through always updates both.
+                prev_screen = screen.clone();
+                prev_action_executed = action_executed;
 
                 match &tool_call {
                     ToolCall::Done { reason } => {
@@ -469,16 +604,22 @@ pub async fn agent_loop(
                             Some(RecoveryOutcome::PromptInjection { text, .. }) => {
                                 tracing::info!("Recovery: prompt injection");
                                 memory.push(Step { index: enforcer.step(), prompt: text, output: "recovery_injection".to_string(), action: None });
+                                prev_screen = screen.clone();
+                                prev_action_executed = false;
                                 continue;
                             }
                             Some(RecoveryOutcome::MemoryReset { discard_steps }) => {
                                 tracing::info!("Recovery: memory reset ({discard_steps} steps)");
+                                prev_screen = screen.clone();
+                                prev_action_executed = false;
                                 // Phase 2: implement memory.discard_last(discard_steps)
                                 continue;
                             }
                             Some(RecoveryOutcome::HealedAction(action)) => {
                                 tracing::info!("Recovery: healed action from graph");
                                 memory.push(Step { index: enforcer.step(), prompt: action, output: "healed".to_string(), action: None });
+                                prev_screen = screen.clone();
+                                prev_action_executed = false;
                                 continue;
                             }
                             None => {}
@@ -582,6 +723,67 @@ fn parse_skill_json(text: &str, fallback_goal: &str) -> Option<Skill> {
     let description = if description.len() >= 5 { description } else { fallback_goal.to_string() };
 
     Some(Skill::from_episode(name, description, approach, vec![]))
+}
+
+// ── Observation + cutoff tests ────────────────────────────────────
+
+#[cfg(test)]
+mod observation_tests {
+    use super::*;
+
+    #[test]
+    fn no_observation_when_no_prior_action() {
+        // First turn: prev_executed = false → always None regardless of content
+        assert!(observation_for(false, "ref_1 button", "ref_1 button").is_none());
+        assert!(observation_for(false, "",            "ref_1 button").is_none());
+    }
+
+    #[test]
+    fn unchanged_screen_emits_no_effect_message() {
+        let s = "[focused: Thunar]\n  ref_1  button  \"Back\"  (14,113,37,35)";
+        let obs = observation_for(true, s, s).unwrap();
+        assert!(obs.contains("did NOT change"), "got: {obs}");
+    }
+
+    #[test]
+    fn appeared_elements_reported_with_count() {
+        let prev = "[focused: Thunar]\n  ref_1  button  \"Back\"";
+        let curr = "[focused: Thunar]\n  ref_1  button  \"Back\"\n  ref_2  menu  \"File\"";
+        let obs = observation_for(true, prev, curr).unwrap();
+        assert!(obs.contains("changed"), "got: {obs}");
+        assert!(obs.contains("1 new"), "expected '1 new', got: {obs}");
+    }
+
+    #[test]
+    fn disappeared_elements_reported_with_count() {
+        let prev = "[focused: Thunar]\n  ref_1  button  \"Back\"\n  ref_2  menu  \"File\"";
+        let curr = "[focused: Thunar]\n  ref_1  button  \"Back\"";
+        let obs = observation_for(true, prev, curr).unwrap();
+        assert!(obs.contains("changed"), "got: {obs}");
+        assert!(obs.contains("1 elements disappeared"), "got: {obs}");
+    }
+
+    #[test]
+    fn cutoff_fires_on_third_identical_with_no_change() {
+        assert!(should_cutoff("click(ref_1)", "click(ref_1)", 2, true));
+    }
+
+    #[test]
+    fn cutoff_suppressed_when_screen_changed_scroll_type() {
+        // Scroll-type repeat: same action but screen DID change → must NOT cut off
+        assert!(!should_cutoff("scroll(ref_1)", "scroll(ref_1)", 2, false));
+    }
+
+    #[test]
+    fn cutoff_suppressed_before_count_two() {
+        // First repeat (count=1 already executed, this is the 2nd) — not yet cutoff territory
+        assert!(!should_cutoff("click(ref_1)", "click(ref_1)", 1, true));
+    }
+
+    #[test]
+    fn cutoff_suppressed_on_different_action() {
+        assert!(!should_cutoff("click(ref_2)", "click(ref_1)", 2, true));
+    }
 }
 
 // ── Distillation tests ────────────────────────────────────────────

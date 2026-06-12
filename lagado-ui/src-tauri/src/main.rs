@@ -619,6 +619,10 @@ fn main() {
         skill_library,
     });
 
+    // Clone for the SIGTERM/SIGINT handler — must happen before .manage() consumes state.
+    #[cfg(unix)]
+    let state_for_signal = state.clone();
+
     tauri::Builder::default()
         .setup(move |app| {
             // Clean up empty cgroup leaves from any previous Lagado run
@@ -660,6 +664,35 @@ fn main() {
                 let _handle = gate.start();
                 std::future::pending::<()>().await;
             });
+            // SIGTERM / SIGINT handler: shut down the VM cleanly before exiting.
+            // Drop does not run on signals, so we must do this explicitly.
+            // Guard is dropped before .await — mutex invariant satisfied.
+            #[cfg(unix)]
+            {
+                tauri::async_runtime::spawn(async move {
+                    use tokio::signal::unix::{signal, SignalKind};
+                    let mut sigterm = match signal(SignalKind::terminate()) {
+                        Ok(s) => s,
+                        Err(e) => { tracing::warn!("SIGTERM handler setup failed: {e}"); return; }
+                    };
+                    let mut sigint = match signal(SignalKind::interrupt()) {
+                        Ok(s) => s,
+                        Err(e) => { tracing::warn!("SIGINT handler setup failed: {e}"); return; }
+                    };
+                    tokio::select! {
+                        _ = sigterm.recv() => { tracing::info!("SIGTERM received — shutting down VM"); }
+                        _ = sigint.recv()  => { tracing::info!("SIGINT received — shutting down VM"); }
+                    }
+                    let handle = {
+                        let mut vm = state_for_signal.vm.lock().await;
+                        vm.take()
+                    }; // Mutex guard dropped here before any further .await
+                    if let Some(h) = handle {
+                        let _ = state_for_signal.vm_backend.shutdown(h);
+                    }
+                    std::process::exit(0);
+                });
+            }
             Ok(())
         })
         .manage(state)

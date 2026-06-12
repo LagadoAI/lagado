@@ -17,6 +17,7 @@ Your perception tool reports the focused window's interactive elements:
   ref_2  entry    "Search"  state=editable
 
 Each element has a ref id, a control type, a label, and a state. Always refer to elements by ref id.
+After each action, check the OBSERVATION line. If the goal's intended effect is visible, emit done immediately. Never repeat an action the OBSERVATION says had no effect.
 
 AGENT TOOLS:
   click(selector="<ref_id>")

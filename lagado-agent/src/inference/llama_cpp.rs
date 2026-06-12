@@ -40,7 +40,8 @@ impl InferenceAdapter for LlamaCppAdapter {
             "top_k": 80,
             "repeat_penalty": 1.05,
             "max_tokens": max_tokens,
-            "stream": false
+            "stream": false,
+            "cache_prompt": true
         });
 
         let response = ureq::post(&format!("{}/v1/chat/completions", self.base_url))
@@ -66,7 +67,8 @@ impl InferenceAdapter for LlamaCppAdapter {
             "repeat_penalty": 1.05,
             "max_tokens": max_tokens,
             "stream": false,
-            "logprobs": true
+            "logprobs": true,
+            "cache_prompt": true
         });
 
         let response = ureq::post(&format!("{}/v1/chat/completions", self.base_url))
