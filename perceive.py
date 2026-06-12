@@ -62,6 +62,12 @@ MAX_ELEMENTS_FOCUS  = 50     # cap for focused-mode text output
 # Default tine ref cache path; override with TINE_REF_CACHE env var.
 _DEFAULT_REF_CACHE = "/tmp/tine-refs.json"
 
+# The desktop panel's AT-SPI application name. The panel is docked at the screen
+# edge and its frame origin is the screen origin, so its window-relative bboxes
+# are screen-absolute — the one app whose elements are clickable with no focused
+# window. Override with LAGADO_PANEL_APP for other desktop environments.
+PANEL_APP = os.environ.get("LAGADO_PANEL_APP", "xfce4-panel")
+
 # AT-SPI2 roles that are actionable / worth surfacing to the agent.
 INTERACTIVE_ROLES = {
     # buttons
@@ -360,17 +366,23 @@ def mode_focused() -> str:
     classname     = _get_classname()
 
     if not classname or not win:
-        # Fallback: no classname or no window geometry.
-        # Run unscoped tine and emit WITHOUT coordinate tuples — window-relative
-        # bboxes without a screen origin would mislead the agent.
-        raw = tine_text()
+        # Bootstrap fallback: nothing is focused (fresh desktop, no windows yet).
+        # The desktop panel is the only actionable surface, and its AT-SPI frame
+        # origin IS the screen origin — so for panel elements, window-relative
+        # bboxes are already screen-absolute. Scope the tine run to the panel so
+        # every ref in the cache is a panel element, and emit those coordinates.
+        # Without this the agent can see panel buttons but never reach them —
+        # locked out of the very click that would bootstrap a session.
+        raw = tine_text(app=PANEL_APP)
         elements = read_ref_cache()
         if not elements:
             elements = parse_text_tree(raw)
-        scoped = [e for e in elements if is_interactive(e.get("role", ""))]
-        # Null out bboxes — they are window-relative and we have no origin
-        scoped_no_coords = [{**e, "bbox": None} for e in scoped]
-        return format_focused(scoped_no_coords, title or "(unknown)", None)
+        usable = [
+            e for e in elements
+            if e.get("bbox") and not is_garbage_bbox(e["bbox"])
+        ]
+        scoped = [e for e in usable if is_interactive(e.get("role", ""))]
+        return format_focused(scoped, title or "(desktop)", None)
 
     # Scoped run: tine filters to the active app by classname.
     raw = tine_text(app=classname)
@@ -381,7 +393,15 @@ def mode_focused() -> str:
     # Convert window-relative bboxes → screen-absolute by adding the window origin.
     # Garbage bboxes (INT_MIN-ish placeholders) are filtered BEFORE conversion.
     # In focused mode, elements with no valid bbox are dropped (unclickable = noise).
-    win_x, win_y = win["x"], win["y"]
+    #
+    # PANEL EXCEPTION: the panel's frame origin IS the screen origin, so its bboxes
+    # are already screen-absolute. When the focused app is the panel itself (e.g.
+    # right after clicking it), adding the active window's origin would double-offset
+    # every coordinate — observed live: Applications at x=1068 on a 1280px screen.
+    if classname.lower() == PANEL_APP.lower():
+        win_x, win_y = 0, 0
+    else:
+        win_x, win_y = win["x"], win["y"]
     screen_elements: list[dict] = []
     for e in elements:
         bbox = e.get("bbox")

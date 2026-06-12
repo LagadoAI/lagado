@@ -39,19 +39,39 @@ impl Actuator for SshActuator {
     fn click(&self, selector: &str) -> String {
         let coords = self.cache.lock().ok().and_then(|c| c.coords.get(selector).copied());
         match coords {
-            Some((cx, cy)) => self.ssh_run(&format!(
-                "DISPLAY=:0 xdotool mousemove --sync {cx} {cy} click 1"
-            )),
+            Some((cx, cy)) => {
+                let out = self.ssh_run(&format!(
+                    "DISPLAY=:0 xdotool mousemove --sync {cx} {cy} click 1"
+                ));
+                // xdotool is silent on success; an empty result tells the model
+                // nothing. Return an explicit confirmation so the agent gets a
+                // feedback signal it can reason about.
+                if out.is_empty() {
+                    format!("Clicked {selector} at ({cx},{cy})")
+                } else {
+                    out
+                }
+            }
             None => format!("click failed: {selector} not in screen cache — call read_screen first"),
         }
     }
 
     fn type_text(&self, selector: &str, text: &str) -> String {
         let _ = self.click(selector);
-        self.ssh_run(&format!("DISPLAY=:0 xdotool type --clearmodifiers -- {text:?}"))
+        let out = self.ssh_run(&format!("DISPLAY=:0 xdotool type --clearmodifiers -- {text:?}"));
+        if out.is_empty() {
+            format!("Typed {} chars into {selector}", text.chars().count())
+        } else {
+            out
+        }
     }
 
     fn key(&self, key: &str) -> String {
-        self.ssh_run(&format!("DISPLAY=:0 xdotool key --clearmodifiers {key}"))
+        let out = self.ssh_run(&format!("DISPLAY=:0 xdotool key --clearmodifiers {key}"));
+        if out.is_empty() {
+            format!("Pressed {key}")
+        } else {
+            out
+        }
     }
 }

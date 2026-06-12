@@ -25,7 +25,8 @@ async fn main() {
     use lagado_agent::inference::llama_cpp::LlamaCppAdapter;
     use lagado_agent::perception::{Actuator, PerceptionCache, Perceptor};
     use lagado_agent::skill_library::SkillLibrary;
-    use lagado_agent::vm::{QemuDesktopBackend, SshActuator, SshPerceptor, VmBackend, VmConfig};
+    use lagado_agent::perception::frame::FrameProcessor;
+    use lagado_agent::vm::{QemuDesktopBackend, QmpClient, SshActuator, SshPerceptor, VmBackend, VmConfig};
     use lagado_agent::{agent, config, hydra, memory_tiers::MemoryTiers};
     use tokio::sync::mpsc;
 
@@ -159,6 +160,14 @@ async fn main() {
         n_approved
     });
 
+    // Visual evidence: frame before the agent acts.
+    let frame_before = "/dev/shm/first_walk_before.png";
+    let frame_after = "/dev/shm/first_walk_after.png";
+    if let Ok(mut qmp) = QmpClient::connect(&cfg.qmp_socket) {
+        let _ = qmp.screendump(frame_before);
+        tokio::time::sleep(Duration::from_millis(400)).await;
+    }
+
     // ── Hand the goal to the full pipeline ──
     println!("\n[walk] handing goal to hydra::run — watching…\n");
     let walk = hydra::run(
@@ -184,6 +193,25 @@ async fn main() {
 
     let approvals = listener.await.unwrap_or(0);
     println!("[walk] HITL gate fired {approvals} time(s)");
+
+    // Visual evidence: frame after, plus cell-level delta.
+    if let Ok(mut qmp) = QmpClient::connect(&cfg.qmp_socket) {
+        let _ = qmp.screendump(frame_after);
+        tokio::time::sleep(Duration::from_millis(400)).await;
+    }
+    if let (Ok(b), Ok(a)) = (std::fs::read(frame_before), std::fs::read(frame_after)) {
+        let mut fp = FrameProcessor::new();
+        if fp.process_frame(&b).is_ok() {
+            match fp.process_frame(&a) {
+                Ok(changed) => println!(
+                    "[walk] screen delta across the whole walk: {} of 48 cells changed \
+                     (frames kept at {frame_before} / {frame_after})",
+                    changed.len()
+                ),
+                Err(e) => println!("[walk] delta failed: {e}"),
+            }
+        }
+    }
 
     // Final screen evidence
     let final_screen = perceptor.read_screen();
