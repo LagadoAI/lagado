@@ -101,4 +101,4 @@ SQLite (memory, encrypted at rest)
 
 ---
 
-*Lagado Labs — built local-first because the alternative is someone else's computer.*
+*Lagado Labs*
