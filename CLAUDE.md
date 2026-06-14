@@ -296,3 +296,22 @@ backed up). Fixes applied: DHCP eth0, `ufw allow ssh`, install host pubkey, gene
 - GGUF MoE parser (auto-set moe_experts_on_cpu)
 - grammar.rs GBNF constraint (accuracy lever, currently stub)
 - security/audit.rs (tamper-evident append-only log)
+
+## Harness doctrine (2026-06-14) — direction for the rebuild
+
+Full plan: `docs/plans/LAGADO_HARNESS_DOCTRINE_AND_PLAN_v1.md`. Verified LFM facts: `/home/alucard/projects/research/LFM research.txt`.
+
+**The harness is the moat; the model is swappable** (`InferenceAdapter`). LFM2 is NOT a continuous-reflex ODE net (that's the LTC/CfC/NCP drone line) — it's a discrete edge-CPU transformer-hybrid. Use it for edge efficiency + shippable license + agentic variants + cheap fine-tune, not for "liquid" magic. The word "Liquid" must not load-bear in an architecture decision.
+
+**Core problem (verified):** small models degrade over multi-turn history (~0.63⁵≈10%/5 turns; premature commitment; no recovery; temperature doesn't help). So:
+- **Externalize state; every model step is single-turn-fresh.** Re-present a clean, fully-specified slice each step. The slice-assembler is **deterministic code, not a model call.** Mitigate the re-encode cost with llama-server `/slots` KV-prefix reuse (seam exists in `inference/mod.rs`, stubbed).
+- **The "board" = a standard scored memory store (Park / Generative Agents), NOT a physics engine.** `score = α·recency + β·relevance + γ·importance`, recomputed stateless per step, top-k. **`memory_tiers.rs` already implements recency (`information_value`) + relevance (`find_similar_by_embedding`) + top-k** — extend it (add importance + one scorer + wire as slice-assembler), don't rebuild. Hot tier in `/dev/shm` (zero-copy, already the frame path). **Conduction (ACT-R spreading activation) OFF by default** — add only if a retrieval eval proves it earns the complexity.
+- **Retrieval ≠ planning.** Board surfaces candidate ingredients; a separate, named, **deterministic sequencer** does ordering/dependencies.
+- **`supervisor.rs` = reset-from-corrected-board + bounded-retry escalation ladder** (N retries → 8B → optional cloud → HITL). Not "think harder."
+- **Born flightworthy via LEARNED pipes** (record traces → promote to action-graph), not 25–30k hand-authored entries (they rot like perceive.py's DOM assumptions). Seed thin (~50) if at all.
+
+**Four gaps that are hard requirements:** G1 eviction/archival tier (cool-don't-delete needs a disk tier, not infinite RAM); G2 write-quality/importance gate; G3 retrieval eval set (build BEFORE tuning α/β/γ); **G4 particle trust tier** (perceived DOM/screen text → board → model context is a prompt-injection vector; tag `perceived-untrusted` vs `user-intent-trusted` — the perception-side analog of the HITL gate; critical for the browser surface).
+
+**Steal, don't invent:** ACT-R (1983), Park Generative Agents (2023), Hearsay-II blackboard (1980). Convergence = the shape is right, not that we're first. Invention budget goes ONLY to the LFM2 edge-CPU single-turn-reset harness. **Build the boring stateless version; let the eval decide if anything fancier earns its keep.**
+
+Open decisions (need user): QEMU vs libkrun (research gate); board embedding source; extend memory_tiers vs new organ; G2 deterministic-vs-model importance; sequencing.
