@@ -125,7 +125,7 @@ async fn main() {
         Arc::new(SshActuator::with_cache("127.0.0.1", port, "laputa", cache.clone()));
 
     let adapter: Arc<dyn lagado_agent::inference::InferenceAdapter> = Arc::new(
-        LlamaCppAdapter::with_url(&config::llama_base_url(), "LFM2.5-8B-A1B", config::CONTEXT_SIZE),
+        LlamaCppAdapter::with_url(&config::llama_base_url(), "LFM2-8B-A1B", config::CONTEXT_SIZE),
     );
 
     let memory_db = config::data_dir().join("memory.db");

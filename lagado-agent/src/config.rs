@@ -6,15 +6,22 @@
 use std::path::PathBuf;
 use directories::ProjectDirs;
 
-const DEFAULT_MODEL_FILE: &str = "LFM2.5-8B-A1B-Q4_K_M.gguf";
+const DEFAULT_MODEL_FILE: &str = "LFM2-8B-A1B-Q4_K_M.gguf";
 pub const CLASSIFIER_MODEL_FILE: &str = "LFM2.5-1.2B-Instruct-Q4_K_M.gguf";
 pub const CLASSIFIER_CONTEXT_SIZE: usize = 512;
 const CLASSIFIER_PORT: u16 = 8081;
 
-pub const VLM_MODEL_FILE: &str = "LFM2.5-VL-450M-F16.gguf";
-pub const VLM_MMPROJ_FILE: &str = "mmproj-LFM2.5-VL-450m-F16.gguf";
+pub const VLM_MODEL_FILE: &str = "LFM2-VL-450M-F16.gguf";
+pub const VLM_MMPROJ_FILE: &str = "mmproj-LFM2-VL-450M-F16.gguf";
 pub const VLM_CONTEXT_SIZE: usize = 2048;
 const VLM_PORT: u16 = 8082;
+
+// Sampling parameters per model generation.
+// LFM2 (gen2, main 8B): min_p controls nucleus, no top_k.
+// LFM2.5 (gen2.5, classifier 1.2B): top_k nucleus, no min_p.
+pub const GEN2_MIN_P: f32 = 0.15;
+pub const GEN25_TOP_K: u32 = 50;
+pub const REPEAT_PENALTY: f32 = 1.05;
 
 /// Reads an env override ONLY in debug builds. Release builds ignore env-based
 /// path/binary/prompt overrides to remove a code-loading / tamper surface.
@@ -40,8 +47,12 @@ fn project_dirs() -> Option<ProjectDirs> {
 }
 
 /// Base data directory (models, binaries, logs). Override: LAGADO_DATA_DIR.
+///
+/// LAGADO_DATA_DIR is honored in both debug and release builds — it points at
+/// data, not executable code, so it is not a tamper/code-loading surface.
+/// Other dev_override() paths (binary, prompt) remain debug-only.
 pub fn data_dir() -> PathBuf {
-    if let Some(p) = dev_override("LAGADO_DATA_DIR") {
+    if let Ok(p) = std::env::var("LAGADO_DATA_DIR") {
         return PathBuf::from(p);
     }
     project_dirs()

@@ -23,14 +23,15 @@ Single Tauri binary (`lagado-ui/src-tauri/`) wraps:
 - Rust agent core (`lagado-agent/` as a library)
 - Vendored `llama-server` subprocess (HTTP inference on :8080, NOT FFI) — main 8B model
 - Classifier subprocess on :8081 (LFM2.5-1.2B-Instruct, intent classification, CPU-only)
-- Visual encoder: in-process `libmtmd.so` FFI (LFM2.5-VL-450M + mmproj, vision → embedding vectors, no subprocess)
+- Visual encoder: in-process `libmtmd.so` FFI (LFM2-VL-450M + mmproj, vision → embedding vectors, no subprocess)
 - QEMU desktop VM (agent's sandboxed working surface)
 
 Inference: HTTP to `llama-server` → `/v1/chat/completions`.
 Models in `~/.laputa-secure/models/`:
-- `LFM2.5-8B-A1B-Q4_K_M.gguf` — main agent model
-- `LFM2.5-1.2B-Instruct-Q4_K_M.gguf` — intent classifier
-- `LFM2.5-VL-450M-F16.gguf` + `mmproj-LFM2.5-VL-450m-F16.gguf` — vision encoder
+- `LFM2-8B-A1B-Q4_K_M.gguf` — main agent model (gen2, temp 0.3/min_p 0.15)
+- `LFM2.5-1.2B-Instruct-Q4_K_M.gguf` — intent classifier (gen2.5, temp 0.1/top_k 50)
+- `LFM2-VL-450M-F16.gguf` + `mmproj-LFM2-VL-450M-F16.gguf` — vision encoder
+- `LFM2-ColBERT-350M-Q4_K_M.gguf` — Board embeddings (Phase 1)
 
 ### Agent pipeline (Hydra orchestrator)
 
