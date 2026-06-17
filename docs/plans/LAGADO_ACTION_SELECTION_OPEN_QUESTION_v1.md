@@ -316,6 +316,29 @@ those elements can only be matched geometrically, against a location the model c
 specify. The structured-descriptor gate is strong for a11y-labeled elements and weak again exactly
 at the label-less elements; the extra senses' elements remain the hard case.
 
+## 2.9 SPINE WIRED + VM walk (2026-06-17, commit pending) — selection FIXED live
+
+The validated spine wired into agent_loop (memory-isolated prompt + late-band ranking +
+deterministic fail-closed) and run end-to-end against the VM, same goal that failed before
+("Click the Applications menu in the top panel"; Applications at (0,0) = token el_0).
+
+- **SELECTION FIXED:** the model clicked `el_0` at (51,13) = Applications (center of its box) —
+  the CORRECT element. The Applications menu OPENED (final screen: ref_6 menu + items "Run
+  Program...", "Terminal Emulator", "File Manager", "Mail Reader", "Web Browser"). Goal achieved.
+  Pre-spine (§2.1) the same goal wandered el_4/el_5/el_12/el_22 and never found it. The offline
+  findings (late-band ranking lands the relevant candidate where attention holds; memory isolation
+  stops priors from dragging the pick) TRANSFER to the live loop.
+- **Done-detection still open (parked, as designed):** it clicked Applications 5x (toggling the
+  menu) and never recognized the open menu = goal satisfied; the supervisor stopped it. This is
+  the SEPARATE completion signal (Opus): the same select machinery that now picks correctly will
+  re-pick a still-relevant target forever — selection and done-detection cannot be one call.
+
+**Status:** Tier 1 (a11y-labeled) executor spine is real and live-confirmed. Next: (1) done-
+detection as its own signal (goal-vs-current-screen, not inferred from the verifier rejecting
+everything); (2) the v2 planner (memory-informed intent → memory-free executor) with the
+structured semantic descriptor + deterministic geometric gate; (3) Tier-2 label-less promotion
+(relational descriptor (B) then cross-modal (A)) as enhancement. 214 lib tests.
+
 ## 3. The flawed fix (committed as a labeled checkpoint, NOT to build on)
 
 `agent::most_relevant_ref(screen, goal, exclude)` — token-overlap (coverage-weighted, stopword-

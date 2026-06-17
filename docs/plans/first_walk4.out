@@ -1,0 +1,47 @@
+══ FIRST WALK ══════════════════════════════════════════
+goal: Click the Applications menu in the top panel
+
+[pre] 8B brain on :8080 — up
+[pre] classifier on :8081 — up
+[vm] booting…
+[vm] ssh up after 11.500054453s
+[vm] X up
+
+[walk] handing goal to hydra::run — watching…
+
+[agent] {"kind":"status","payload":{"detail":"Click the Applications menu in the top panel","state":"goal_received"},"v":1}
+[agent] {"kind":"permission","payload":{"action":"click(selector=\"el_0\")","id":"a3bb97c0-2d73-4d2b-8fbf-125ffa847a14","origin_agent":"main","origin_surface":"immersive","reason":"Write action requires confirmation","tool":"click","type":"typed"},"v":1}
+[walk]  ↳ HITL gate fired — auto-approving (#1)
+[agent] {"kind":"action_log","payload":{"text":"click(selector=\"el_0\") -> Clicked el_0 at (51,13)"},"v":1}
+[agent] {"kind":"permission","payload":{"action":"click(selector=\"el_0\")","id":"c32099d3-e0af-4a0d-8322-a03ee2067128","origin_agent":"main","origin_surface":"immersive","reason":"Write action requires confirmation","tool":"click","type":"typed"},"v":1}
+[walk]  ↳ HITL gate fired — auto-approving (#2)
+[agent] {"kind":"action_log","payload":{"text":"click(selector=\"el_0\") -> Clicked el_0 at (51,13)"},"v":1}
+[agent] {"kind":"permission","payload":{"action":"click(selector=\"el_0\")","id":"39f79253-071c-46fe-b868-38d4201a6a7f","origin_agent":"main","origin_surface":"immersive","reason":"Write action requires confirmation","tool":"click","type":"typed"},"v":1}
+[walk]  ↳ HITL gate fired — auto-approving (#3)
+[agent] {"kind":"action_log","payload":{"text":"click(selector=\"el_0\") -> Clicked el_0 at (51,13)"},"v":1}
+[agent] {"kind":"permission","payload":{"action":"click(selector=\"el_0\")","id":"44c95335-fa2e-4586-98d0-3daaf5f57b0e","origin_agent":"main","origin_surface":"immersive","reason":"Write action requires confirmation","tool":"click","type":"typed"},"v":1}
+[walk]  ↳ HITL gate fired — auto-approving (#4)
+[agent] {"kind":"action_log","payload":{"text":"click(selector=\"el_0\") -> Clicked el_0 at (51,13)"},"v":1}
+[agent] {"kind":"permission","payload":{"action":"click(selector=\"el_0\")","id":"8f792c34-094c-4b60-b2d6-b3c1eeff82fc","origin_agent":"main","origin_surface":"immersive","reason":"Write action requires confirmation","tool":"click","type":"typed"},"v":1}
+[walk]  ↳ HITL gate fired — auto-approving (#5)
+[agent] {"kind":"action_log","payload":{"text":"click(selector=\"el_0\") -> Clicked el_0 at (51,13)"},"v":1}
+
+[walk] pipeline returned cleanly in 78.754546037s
+[walk] HITL gate fired 5 time(s)
+[walk] screen delta across the whole walk: 7 of 48 cells changed (frames kept at /dev/shm/first_walk_before.png / /dev/shm/first_walk_after.png)
+
+── final screen (first 12 lines) ──
+    | [focused: (desktop)]
+    |      ref_1  toggle button   "Applications"  (0,0,102,26)
+    |      ref_2  toggle button   "2026-06-17"  (1161,0,68,26)
+    |      ref_3  toggle button   "laputa"  (1237,0,43,26)
+    |      ref_4  toggle button   "Show Desktop"  (488,752,48,48)
+    |      ref_5  toggle button   "Directory Menu"  (744,752,48,48)
+    |      ref_6  menu            ""  (0,27,173,308)
+    |      ref_7  menu item       "Run Program..."  (0,29,173,25)
+    |      ref_8  menu item       "Terminal Emulator"  (0,55,173,25)
+    |      ref_9  menu item       "File Manager"  (0,80,173,25)
+    |     ref_10  menu item       "Mail Reader"  (0,105,173,25)
+    |     ref_11  menu item       "Web Browser"  (0,130,173,25)
+
+[first_walk] done — total 83.159468436s
