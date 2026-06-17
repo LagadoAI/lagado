@@ -568,12 +568,40 @@ pub async fn agent_loop(
                     }
                 }
 
-                // Pre-execution cutoff: 3rd+ identical action with no visible screen effect.
-                // Uses prev_screen (set at end of prior turn) to detect whether the 2nd
-                // identical execution actually changed anything.
                 let current_action_desc = gate::describe(&tool_call);
                 let screen_unchanged = !prev_screen.is_empty()
                     && blake3::hash(screen.as_bytes()) == blake3::hash(prev_screen.as_bytes());
+
+                // Q1 ACTION-EFFECT DETECTION (deterministic, no goal-string judgment). The model
+                // is single-turn-fresh, so after an action takes effect it re-derives the SAME
+                // action from a screen it doesn't remember acting on (the menu re-click: clicked
+                // Applications, menu opened, then re-clicked it 5× and toggled it). If the current
+                // pick REPEATS the immediately-prior action AND that prior action CHANGED the
+                // screen (effect confirmed), the action already succeeded — repeating only
+                // toggles/undoes. Stop re-deriving. This is the COMPLEMENT of should_cutoff below
+                // (same-action-with-NO-effect = stuck; here same-action-WITH-effect = accomplished).
+                // NOT goal-satisfaction (that is Q2, the v2 planner's terminal case) — purely "this
+                // action already had its effect; don't repeat it."
+                let prior_had_effect = !prev_screen.is_empty() && !screen_unchanged;
+                if !last_exec_action.is_empty() && current_action_desc == last_exec_action && prior_had_effect {
+                    let msg = format!(
+                        "'{}' already took effect (the screen changed); not repeating it.",
+                        last_exec_action
+                    );
+                    chronos::log(&format!("action_effect_complete: {msg}"));
+                    let _ = confirm_tx.send(envelope::make("action_log", envelope::ActionLogPayload {
+                        text: msg.clone(),
+                    })).await;
+                    let _ = confirm_tx.send(envelope::make("status", envelope::StatusPayload {
+                        state: "goal_done".to_string(),
+                        detail: msg,
+                    })).await;
+                    break;
+                }
+
+                // Pre-execution cutoff: 3rd+ identical action with no visible screen effect.
+                // Uses prev_screen (set at end of prior turn) to detect whether the 2nd
+                // identical execution actually changed anything.
                 if should_cutoff(&current_action_desc, &last_exec_action, consecutive_exec_count, screen_unchanged) {
                     let impasse = format!(
                         "I attempted '{}' twice with no visible effect; stopping rather than repeating.",

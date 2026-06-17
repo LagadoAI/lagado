@@ -339,6 +339,31 @@ everything); (2) the v2 planner (memory-informed intent → memory-free executor
 structured semantic descriptor + deterministic geometric gate; (3) Tier-2 label-less promotion
 (relational descriptor (B) then cross-modal (A)) as enhancement. 214 lib tests.
 
+## 2.10 Q1 action-effect detection (2026-06-17) — re-click bug FIXED live
+
+Opus's done-detection decomposition: Q1 (did my last action take effect?) is deterministic and
+distinct from Q2 (is the goal satisfied?). The re-click bug is a Q1 failure — single-turn-fresh
+selection is blind to its own prior action, so it re-derives the same effective click.
+
+Built Q1 as the COMPLEMENT of should_cutoff (no new model call):
+- should_cutoff: same action + screen UNCHANGED ×2 → stuck (impasse).
+- Q1 (new): current pick repeats the prior action AND the prior action CHANGED the screen
+  (effect confirmed via the screen-hash diff already computed) → accomplished; stop re-deriving.
+Purely "this action already had its effect; don't repeat it" — NOT goal-string judgment.
+
+**VM walk (same goal):** clicks el_0=Applications ONCE → menu opens (6 cells changed, ref_7 menu
++ items appear) → model re-derives click el_0 → Q1 fires "already took effect; not repeating" →
+clean goal_done. ONE HITL gate, one click, graceful stop — vs 5× toggling before (§2.9). The
+destructive re-click is eliminated; single-action goals now complete cleanly end-to-end:
+select-right-element → act-once → recognize-effect → stop. 214 lib tests.
+
+**Still open (Q2, for multi-step goals):** full goal-satisfaction is the v2 planner's terminal
+case — planner receives post-action screen + the deterministic action-outcome FACT (from Q1) +
+goal, and emits next-sub-goal OR `complete`. Completion = the null of planning (generative, not
+isolated-binary which the model fails — the verify-mode lesson). Gating experiment before trusting
+it: does the planner re-emit a satisfied sub-goal (the re-click one layer up), with vs without the
+action-outcome fact? Q1 today kills the live failure; Q2 makes multi-step report "done" vs "stall".
+
 ## 3. The flawed fix (committed as a labeled checkpoint, NOT to build on)
 
 `agent::most_relevant_ref(screen, goal, exclude)` — token-overlap (coverage-weighted, stopword-
