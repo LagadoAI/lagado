@@ -264,6 +264,36 @@ pub fn decompose_goal(goal: &str) -> Vec<String> {
     parts.into_iter().filter(|s| !s.is_empty()).collect()
 }
 
+/// The focused-window label from a perception dump line `[focused: X]`, or "" if absent.
+fn screen_focus(screen: &str) -> String {
+    for line in screen.lines() {
+        let t = line.trim();
+        if let Some(rest) = t.strip_prefix("[focused:") {
+            return rest.trim_end_matches(']').trim().to_string();
+        }
+    }
+    String::new()
+}
+
+/// Did the prior action produce a STRUCTURAL effect — a change in the set of element labels, or a
+/// change of focused window? Deterministic and ELEMENT-level (not raw pixels), so it does NOT
+/// advance the sequencer on ambient pixel noise or a transient tooltip that isn't an accessibility
+/// element (§2.15 failure shapes 1+3: effect-without-accomplishment / wrong-change-coincidence).
+/// The sequencer's advance signal. Empty prev → false (no prior step to judge). Pure.
+pub fn structural_change(prev_screen: &str, screen: &str) -> bool {
+    if prev_screen.is_empty() {
+        return false;
+    }
+    use std::collections::BTreeSet;
+    let labels = |s: &str| -> BTreeSet<String> {
+        crate::perception::parse_ref_labels(s)
+            .into_values()
+            .filter(|l| !l.is_empty())
+            .collect()
+    };
+    labels(prev_screen) != labels(screen) || screen_focus(prev_screen) != screen_focus(screen)
+}
+
 /// Map a step's observable result to a supervisor outcome. Pure — unit-testable.
 /// Observed at the TOP of the next loop iteration, where the prior action's on-screen
 /// effect is finally readable (the effect of an action at step N isn't visible until the
@@ -355,6 +385,14 @@ pub async fn agent_loop(
     // and semantically-compound goals fall to the executor + supervisor handback).
     let sub_goals = decompose_goal(&goal);
     let mut current_sub: usize = 0;
+    // DEVIATION DETECTION (§2.15): consecutive re-perceptions where NOTHING on screen matches the
+    // current sub-goal. The deterministic plan is BLIND and cannot re-plan, so when the world goes
+    // off-plan (error dialog, permission prompt, an already-done/ambiguous state) the safe move is
+    // a clean handback, not looping or marching a dead plan. Reset on any progress; escalate at the
+    // threshold. This also SAFELY subsumes "already-satisfied" — rather than risk a wrong auto-skip,
+    // we hand back and let the human say "that's done, skip it."
+    let mut subgoal_stuck: usize = 0;
+    const SUBGOAL_STUCK_LIMIT: usize = 4;
     if sub_goals.len() > 1 {
         chronos::log(&format!("sequencer: {} sub-goals: {:?}", sub_goals.len(), sub_goals));
     }
@@ -497,8 +535,11 @@ pub async fn agent_loop(
             // the single-action completion case (one sub-goal → effect → advance past end → done).
             // v1 advance signal = structural screen change; the per-action-class effect SIGNATURE +
             // precondition (already-satisfied → advance without acting) are the §2.15 refinement.
-            if prev_action_executed && screen_changed {
+            // Advance on a STRUCTURAL effect (element-set / focus change), not a raw screen hash —
+            // a tooltip or ambient pixel change must not advance the plan (§2.15 failures 1+3).
+            if prev_action_executed && structural_change(&prev_screen, &screen) {
                 current_sub += 1;
+                subgoal_stuck = 0; // fresh sub-goal — reset the deviation counter
                 if current_sub >= sub_goals.len() {
                     chronos::log("sequencer_complete: all sub-goals done");
                     let _ = confirm_tx.send(envelope::make("action_log", envelope::ActionLogPayload {
@@ -548,9 +589,28 @@ pub async fn agent_loop(
         if !candidates.is_empty()
             && !crate::perception::selection::goal_matches_any(active_goal, &candidates)
         {
-            chronos::log("fail_closed: no candidate matches sub-goal → re-perceive");
+            subgoal_stuck += 1;
+            // DEVIATION → ESCALATE: the screen has not matched this sub-goal for several
+            // re-perceptions → the world is off-plan (or this step is already done / ambiguous).
+            // The deterministic plan can't re-plan → clean handback, not an infinite re-perceive.
+            if subgoal_stuck >= SUBGOAL_STUCK_LIMIT {
+                let msg = format!(
+                    "The screen doesn't match what this step needs (\"{active_goal}\") — handing back to you. \
+                     It may already be done, or the screen went somewhere I didn't plan for."
+                );
+                chronos::log(&format!("deviation_escalate: stuck on sub-goal after {subgoal_stuck} re-perceptions"));
+                let _ = confirm_tx.send(envelope::make("action_log", envelope::ActionLogPayload {
+                    text: msg.clone(),
+                })).await;
+                let _ = confirm_tx.send(envelope::make("status", envelope::StatusPayload {
+                    state: "goal_done".to_string(),
+                    detail: msg,
+                })).await;
+                break;
+            }
+            chronos::log(&format!("fail_closed: no candidate matches sub-goal → re-perceive ({subgoal_stuck}/{SUBGOAL_STUCK_LIMIT})"));
             let _ = confirm_tx.send(envelope::make("action_log", envelope::ActionLogPayload {
-                text: "No on-screen element matches the goal; re-perceiving.".to_string(),
+                text: "No on-screen element matches the current step; re-perceiving.".to_string(),
             })).await;
             memory.push(Step {
                 index: enforcer.step(), prompt: String::new(),
@@ -560,6 +620,7 @@ pub async fn agent_loop(
             prev_action_executed = false;
             continue;
         }
+        subgoal_stuck = 0; // a candidate matches this sub-goal → not stuck
         // Deterministic LATE-BAND RANK (verified §2.2–2.6): place the most goal-relevant candidate
         // LAST, where the model's label-reading holds (it collapses for early rows). Determinism on
         // the RAILS (ordering); the model still picks. Tokens/coords stay stable under the reorder.
@@ -1081,6 +1142,41 @@ mod observation_tests {
     #[test]
     fn decompose_trims_and_drops_empty() {
         assert_eq!(decompose_goal("  open A ;  open B  "), vec!["open A", "open B"]);
+    }
+
+    // ── structural_change (sequencer advance signal) ─────────────────
+
+    const DESK: &str = "[focused: (desktop)]\n  ref_1 toggle button \"Applications\" (0,0,102,26)\n  ref_2 toggle button \"Show Desktop\" (488,752,48,48)";
+    const MENU: &str = "[focused: (desktop)]\n  ref_1 toggle button \"Applications\" (0,0,102,26)\n  ref_2 toggle button \"Show Desktop\" (488,752,48,48)\n  ref_7 menu item \"Terminal Emulator\" (0,55,173,25)";
+
+    #[test]
+    fn structural_change_true_when_new_element_appears() {
+        // menu opened → "Terminal Emulator" label is new → structural change.
+        assert!(structural_change(DESK, MENU));
+    }
+
+    #[test]
+    fn structural_change_false_when_label_set_identical() {
+        assert!(!structural_change(DESK, DESK));
+    }
+
+    #[test]
+    fn structural_change_true_on_focus_change() {
+        let term = "[focused: Terminal - laputa@vm]\n  ref_1 toggle button \"Applications\" (0,0,102,26)\n  ref_2 toggle button \"Show Desktop\" (488,752,48,48)";
+        assert!(structural_change(DESK, term));
+    }
+
+    #[test]
+    fn structural_change_false_on_empty_prev() {
+        assert!(!structural_change("", MENU));
+    }
+
+    #[test]
+    fn structural_change_ignores_non_a11y_noise() {
+        // Same a11y label set + same focus, even if other (non-label) text differs → no advance
+        // (a tooltip / pixel animation that isn't an accessibility element must not advance).
+        let with_trailing = format!("{DESK}\n  (cursor moved)");
+        assert!(!structural_change(DESK, &with_trailing));
     }
 }
 

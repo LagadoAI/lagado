@@ -575,6 +575,34 @@ planner, NO Board memory in the action path. KNOWN V1 scope limits (documented, 
 precondition-skip (§2.15 refinement); (c) semantically-compound goals (no sequential marker) stay
 one sub-goal → executor + supervisor handback; (d) Tier-2 label-less elements escalate (v2).
 
+## 2.17 Sequencer refinements (2026-06-17) — structural advance + deviation→escalate
+
+Built two of the three §2.15 refinements (the buildable, high-value ones):
+- **Structural effect signature** (`agent::structural_change`, 5 tests): the sequencer advances on a
+  change in the ELEMENT-LABEL SET or the FOCUSED-WINDOW, not a raw screen/pixel hash. Dodges
+  false-advance on a tooltip (not an a11y element) or ambient pixel noise (§2.15 failures 1+3).
+- **Deviation→escalate** (`subgoal_stuck` counter, limit 4): when nothing on screen matches the
+  current sub-goal across repeated re-perceptions, hand back cleanly ("the screen doesn't match this
+  step… it may already be done, or went somewhere I didn't plan for"). The deterministic plan can't
+  re-plan, so off-plan screens (error dialog, permission prompt) and ambiguous already-done states
+  escalate instead of looping or marching a dead plan. This SAFELY subsumes "already-satisfied"
+  (hand back rather than risk a wrong auto-skip). Reset on advance / on a matching sub-goal.
+- **NOT built (documented):** the fully-general "already-satisfied → auto-skip WITHOUT acting"
+  precondition — it needs semantic sub-goal→screen-predicate mapping the model can't do; the safe
+  behavior is the deviation-handback above.
+
+**Regression walks (both pass):** single-step "Click the Applications menu" → 1 click → menu opens →
+"all steps completed." Multi-step "open menu then launch terminal" → 2 clicks → terminal launched
+(focus = "Terminal - laputa@lagado-vm"). 224 lib tests.
+
+**HONEST open item (selection-layer, NOT the sequencer):** live single-step selection is not yet
+characterized for run-to-run stability. On one multi-step run step 1 clicked the Directory Menu's
+coords rather than Applications (task still completed — correct end state — but via a different
+path). The offline probes were 12/12 under a fixed prompt; the live loop varies prompt text per
+sub-goal. NEXT honest measurement: a reliability pass — N goals × M runs on the VM — to get an
+actual success/path-correctness rate, before claiming reliability is "done." The sequencer +
+deviation handling are sound; the residual is selection variance under live phrasings.
+
 ## 3. The flawed fix (committed as a labeled checkpoint, NOT to build on)
 
 `agent::most_relevant_ref(screen, goal, exclude)` — token-overlap (coverage-weighted, stopword-
