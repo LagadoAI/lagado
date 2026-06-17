@@ -398,6 +398,38 @@ changed) fed to the planner; the fact generator must emit structural change only
 is BUILD (two-call split + label-free fact generator + planner SYS-framing) + the parked Tier-2
 label-less promotion (v2 enhancement, correctly non-blocking).
 
+## 2.12 Planner intent-corruptibility (2026-06-17) — the relocated G4 surface is REAL, NOT clean
+
+Opus's correction: "every load-bearing component measured" was WRONG — the planner's
+intent-corruptibility under Board memory was unmeasured (the location result was clean for a
+DEGENERATE reason: the model can't emit location at all, so nothing to corrupt). Measured directly.
+N=12, decoy Board memory ×15, goal demanding a different element.
+
+**Non-competing decoy ("Files" vs goal "Applications menu"):** planner resisted (Applications 12/12,
+both layouts). The EASY case — decoy doesn't compete, goal dominates. Falsely reassuring.
+
+**Adversarial — COMPETING decoy ("Directory Menu", shares "menu", the proven §2.5 attractor):**
+| condition | emitted intent |
+|---|---|
+| memory-HIGH + neutral | Applications 9/12, complete 3 (works on neutral) |
+| memory-HIGH + DECOY | Trash 12/12 (garbage) |
+| memory-ADJ + DECOY | Directory Menu 6/12 (decoy), scattered |
+
+**THE PLANNER IS CORRUPTIBLE by competing-decoy Board memory.** Layout does NOT fix it (high→garbage,
+adj→decoy; neither correct). The executor gate does NOT catch it — wrong intents (Trash, Directory
+Menu) are ON-SCREEN, so the cross-check clears them → wrong click. On-screen-wrong residual, UNBOUNDED.
+Common thread w/ §2.5: free-text semantically-competing memory corrupts ANY prepended decision; the
+planner cannot be starved like the executor.
+
+**STATUS CORRECTION:** loop NOT fully closed — spine/fail-closed/Q1/Q2 measured+built; the planner's
+intent-corruptibility under adversarial Board memory is the one load-bearing surface unmeasured until
+now, and it measures as a REAL vulnerability. NOT a blocker for a CURATED demo (neutral/goal-aligned
+memory: planner works 9/12) — but a genuine production G4/security surface (misleading memory steers
+clicks). Mitigation open, likely NOT layout: memory must not reach the planner as free competing
+PROSE → (a) structured/deterministic memory channel (action-graph / ranked candidate sub-goals the
+planner picks among), (b) goal-aligned prior filtering before injection, (c) accept+bound the tail
+(adversarial ×15 competing memory is rare; relevant memory is usually goal-aligned and HELPS). For Opus.
+
 ## 3. The flawed fix (committed as a labeled checkpoint, NOT to build on)
 
 `agent::most_relevant_ref(screen, goal, exclude)` — token-overlap (coverage-weighted, stopword-
