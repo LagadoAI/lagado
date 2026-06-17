@@ -1,0 +1,72 @@
+#cloud-config
+# Lagado guest provisioning (cloud-init first boot). Builds the agent's working
+# surface: XFCE desktop + autologin + SSH (host key auth) + AT-SPI2 + xdotool + tine.
+# See CLAUDE.md "VM Architecture". The host SSHes in (BatchMode key auth) and runs
+# perceive.py (tine/AT-SPI2) + xdotool; frames come via QMP screendump.
+hostname: lagado-vm
+
+users:
+  - name: laputa
+    plain_text_passwd: laputa
+    lock_passwd: false
+    shell: /bin/bash
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    groups: [sudo, adm]
+    ssh_authorized_keys:
+      - __HOST_PUBKEY__
+
+ssh_pwauth: true
+chpasswd:
+  expire: false
+
+package_update: true
+package_upgrade: false
+packages:
+  - openssh-server
+  - xserver-xorg
+  - xfce4
+  - xfce4-terminal
+  - lightdm
+  - dbus-x11
+  - at-spi2-core
+  - gir1.2-atspi-2.0
+  - python3-gi
+  - python3-pip
+  - pipx
+  - xdotool
+  - firefox
+
+write_files:
+  # Autologin laputa into an XFCE session on lightdm.
+  - path: /etc/lightdm/lightdm.conf.d/50-lagado-autologin.conf
+    content: |
+      [Seat:*]
+      autologin-user=laputa
+      autologin-user-timeout=0
+      user-session=xfce
+  # Turn on the GTK accessibility bridge for the whole session so AT-SPI2 sees apps.
+  - path: /etc/profile.d/lagado-a11y.sh
+    content: |
+      export GTK_MODULES=gail:atk-bridge
+      export QT_ACCESSIBILITY=1
+      export NO_AT_BRIDGE=0
+
+runcmd:
+  # lightdm autologin requires membership in the autologin group on Ubuntu.
+  - groupadd -r autologin || true
+  - gpasswd -a laputa autologin || true
+  # AT-SPI2: enable toolkit accessibility for the session default.
+  - su - laputa -c 'gsettings set org.gnome.desktop.interface toolkit-accessibility true' || true
+  # tine (the AT-SPI2 tree reader perceive.py drives). MUST be system-installed, not
+  # pipx-isolated: perceive.py invokes `python3 -m tine.cli tree` with the system python,
+  # which can't import a pipx venv → silent zero elements. --break-system-packages puts
+  # tine.cli on the system path so `python3 -m tine.cli` resolves and writes the ref cache.
+  - su - laputa -c 'pip3 install --break-system-packages tine-cli' || true
+  - systemctl enable ssh
+  - systemctl restart ssh
+  - systemctl set-default graphical.target
+  - systemctl enable lightdm
+  # Bring the desktop up now so the first proof run doesn't wait on a reboot.
+  - systemctl start lightdm || true
+
+final_message: "lagado guest ready after $UPTIME seconds"

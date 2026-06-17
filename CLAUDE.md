@@ -272,12 +272,22 @@ backed up). Fixes applied: DHCP eth0, `ufw allow ssh`, install host pubkey, gene
 `~/.ssh/id_ed25519`. Now: boot → SSH (~14–24s) → AT-SPI2 tree read → QMP screendump → clean shutdown all work.
 **Raw actuation proven**: `xdotool mousemove/click/type` over SSH changed the screen (1076-px diff).
 
-**Open gaps (see memory `vm-harness-control-channel`):**
-- `tine` (pip tine-cli) rejects `tree --json` and its `tree` text format doesn't match perceive.py's
-  `parse_text_tree` → zero elements → no `ref_id→(x,y,w,h)` → **click-by-selector blocked** (raw coord click works).
-- `SshPerceptor` calls `perceive.py` without `--focused` (so emits JSON parse_ref_coords can't read).
-- `QemuDesktopBackend::boot()` has no kill-stale pre-flight → orphaned VMs block fresh boots.
-- VM readiness gates on bare TCP poll, not real SSH-auth success → false "ready" while sshd unreachable.
+**VM control channel — FULLY PROVEN end-to-end 2026-06-17 (Fedora 44 rebuild).** `harness_proof`
+green on all 8 stages through the real modules in 24.9s: boot → sshd (11.8s) → X(1280×800) →
+SshPerceptor **8 coords/8 bboxes** → QMP screendump → SshActuator **`click('ref_4')→Clicked at (1140,13)`**
+(click-by-selector via coord cache) → FrameProcessor delta (6 cells) → clean shutdown. Guest = Ubuntu
+24.04 cloud image + XFCE/autologin/SSH/AT-SPI2/xdotool/tine, provisioned via cloud-init. Reproducible:
+`vm-provision/build-guest.sh` (downloads base, builds `seed.iso` with the host pubkey, makes the 20G
+working disk). Images live in `~/.laputa-secure/vm-images/` (outside the repo); `vm-provision/` is committed.
+
+**Prior open gaps — ALL RESOLVED 2026-06-17:**
+- ✓ `tine` zero-elements: root cause was **pipx isolation**, not a format mismatch — perceive.py runs
+  `python3 -m tine.cli` (system python), which can't import a pipx venv. Fix: `pip install
+  --break-system-packages tine-cli` (in cloud-init). The pip ref-cache format DOES match perceive.py.
+- ✓ click-by-selector: works (`Clicked ref_4 at (1140,13)` through the coord cache).
+- ✓ `SshPerceptor` `--focused`: emits parseable `(x,y,w,h)` now that tine is reachable.
+- ✓ `QemuDesktopBackend::boot()` kill-stale pre-flight: present and exercised.
+- ✓ VM readiness: `harness_proof` gates on real BatchMode `whoami` SSH-auth, not bare TCP.
 
 ### Perception fusion harness (TASK 6 code complete, committed)
 - TASK 6 ✓ — `perception/arbiter.rs` IoU-dedup fusion (commit 0c8c99e): `iou()`, `fuse(a11y,cv,patches)`,

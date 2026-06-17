@@ -27,7 +27,7 @@ impl Default for VmConfig {
         });
         let seed = format!("{data_dir}/vm-images/seed.iso");
         Self {
-            disk_image: format!("{data_dir}/vm-images/Arch-Linux-x86_64-cloudimg.qcow2"),
+            disk_image: format!("{data_dir}/vm-images/lagado-guest.qcow2"),
             seed_iso: if std::path::Path::new(&seed).exists() { Some(seed) } else { None },
             mem_mib: 4096,
             vcpus: 4,
