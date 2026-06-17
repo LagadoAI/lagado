@@ -227,6 +227,19 @@ pub fn should_cutoff(current: &str, last: &str, count: usize, screen_unchanged: 
     current == last && count >= 2 && screen_unchanged
 }
 
+/// Map a step's observable result to a supervisor outcome. Pure — unit-testable.
+/// Observed at the TOP of the next loop iteration, where the prior action's on-screen
+/// effect is finally readable (the effect of an action at step N isn't visible until the
+/// fresh `read_screen()` at step N+1). `action_executed == false` covers blocked/denied
+/// actions and recovery-injection turns. Done/Task never reach this point (they break the
+/// loop), so a terminal `Done` outcome is intentionally not produced here.
+pub fn classify_step_outcome(action_executed: bool, screen_changed: bool) -> crate::supervisor::StepOutcome {
+    use crate::supervisor::StepOutcome;
+    if !action_executed { StepOutcome::Failed }
+    else if screen_changed { StepOutcome::Progressed }
+    else { StepOutcome::NoChange }
+}
+
 // ── Agent loop ────────────────────────────────────────────────────
 pub async fn agent_loop(
     state: Arc<Mutex<AgentState>>,
@@ -267,6 +280,17 @@ pub async fn agent_loop(
             )
         })
     };
+
+    // Supervisor — the OUTER escalation bound. It observes every step's outcome (keeping
+    // its stall/loop/retry state live) but the loop acts ONLY on its terminal directives:
+    // Escalate→Human (clean HITL handoff) and Abort (ladder exhausted). Continue / Done /
+    // ResetFromBoard / Escalate→Model defer to the existing inner machinery (recovery_manager,
+    // should_cutoff, structural-failure detection). The ladder is governor-built from
+    // hardware + mode + user settings — the supervisor stays model-agnostic.
+    let mut supervisor = crate::supervisor::Supervisor::new(crate::governor::escalation_ladder());
+    // Whether a step has been attempted yet — gates the top-of-loop observe (no prior step
+    // to judge on the first iteration).
+    let mut had_prior_step = false;
 
     // Sliding window of recent action descriptions for loop/deadlock detection
     let mut recent_actions: Vec<String> = Vec::new();
@@ -349,6 +373,47 @@ pub async fn agent_loop(
             Some(obs) => format!("{obs}\n\n"),
             None => String::new(),
         };
+
+        // Supervisor observes the PRIOR step now that its on-screen effect is readable.
+        // (An action's effect at step N isn't visible until this fresh `screen` at N+1.)
+        // Acts only on terminal directives; everything else defers to the inner machinery.
+        if had_prior_step {
+            let screen_changed = !prev_screen.is_empty()
+                && blake3::hash(screen.as_bytes()) != blake3::hash(prev_screen.as_bytes());
+            let outcome = classify_step_outcome(prev_action_executed, screen_changed);
+            let step_hash = u64::from_le_bytes(
+                blake3::hash(screen.as_bytes()).as_bytes()[..8].try_into().unwrap()
+            );
+            match supervisor.observe(outcome, step_hash) {
+                crate::supervisor::Directive::Escalate(tier)
+                    if tier.kind == crate::supervisor::TierKind::Human =>
+                {
+                    let msg = "I've stalled on this and can't make progress on my own — \
+                               handing back to you for direction.";
+                    chronos::log("supervisor_escalate_human");
+                    let _ = confirm_tx.send(envelope::make("action_log", envelope::ActionLogPayload {
+                        text: msg.to_string(),
+                    })).await;
+                    let _ = confirm_tx.send(envelope::make("status", envelope::StatusPayload {
+                        state: "goal_done".to_string(),
+                        detail: msg.to_string(),
+                    })).await;
+                    break;
+                }
+                crate::supervisor::Directive::Abort(reason) => {
+                    chronos::log(&format!("supervisor_abort: {reason}"));
+                    let _ = confirm_tx.send(envelope::make("status", envelope::StatusPayload {
+                        state: "goal_aborted".to_string(),
+                        detail: reason,
+                    })).await;
+                    break;
+                }
+                // Continue / Done / ResetFromBoard / Escalate(Model): defer to the inner
+                // tactical machinery (recovery_manager, should_cutoff, structural detection).
+                _ => {}
+            }
+        }
+        had_prior_step = true;
 
         let context = memory.context_string();
         // Taper retrieved priors by turn. Priors (episodic/visual/skills) are
@@ -783,6 +848,26 @@ mod observation_tests {
     #[test]
     fn cutoff_suppressed_on_different_action() {
         assert!(!should_cutoff("click(ref_2)", "click(ref_1)", 2, true));
+    }
+
+    #[test]
+    fn step_outcome_unexecuted_is_failed() {
+        use crate::supervisor::StepOutcome;
+        // Blocked/denied action or recovery-injection turn → no real attempt landed.
+        assert_eq!(classify_step_outcome(false, false), StepOutcome::Failed);
+        assert_eq!(classify_step_outcome(false, true), StepOutcome::Failed);
+    }
+
+    #[test]
+    fn step_outcome_executed_with_screen_change_is_progress() {
+        use crate::supervisor::StepOutcome;
+        assert_eq!(classify_step_outcome(true, true), StepOutcome::Progressed);
+    }
+
+    #[test]
+    fn step_outcome_executed_without_screen_change_is_nochange() {
+        use crate::supervisor::StepOutcome;
+        assert_eq!(classify_step_outcome(true, false), StepOutcome::NoChange);
     }
 }
 
