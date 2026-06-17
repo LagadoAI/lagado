@@ -502,6 +502,54 @@ planner (measured-out). NO Board memory in the action path (structural). Complet
 **Next (build):** deterministic goal→sub-goal sequencer + step-pointer in agent_loop; per-sub-goal
 executor; Q1 advances the pointer; re-run the 2-step walk.
 
+## 2.15 Advance-criterion + the rigidity cost (2026-06-17, Opus read) — sequencer design
+
+Before wiring the deterministic sequencer, Opus sharpened the advance-criterion (the real risk)
+and surfaced the cost of deleting the planner.
+
+**Doctrine caveat:** deterministic sequencing matches "planning is deterministic" ONLY for
+explicitly-sequential goals ("X then Y"). Goals needing semantic decomposition ("find the cheapest
+flight and book it") do NOT sentence-split. So V1 scope = parseable sequential goals; un-parseable
+goals must FAIL LOUD → clean handback, never a confidently-mangled plan.
+
+**Bare Q1 "screen changed" is the WRONG advance-criterion** (right on the bench, wrong in the
+world) — three failure shapes:
+1. effect-without-accomplishment: click → a TOOLTIP appears (screen changed!) → advance, but the
+   menu never opened.
+2. accomplishment-without-expected-effect (the INVERSE, worse): sub-goal already satisfied on
+   arrival (menu already open) → click changes nothing → "no change" reads as "not done" → STALL.
+3. wrong-change-coincidence: a notification/animation/clock changes the screen → advance on ambient
+   noise (real desktops are never static).
+
+**Fix — per-sub-goal expected-effect SIGNATURES keyed to ACTION CLASS (structural, not semantic):**
+a small enum (click-open, click-activate, type, key, navigate, wait), each with ONE structural
+signature (click-open → "a cluster of new FusedElements appeared near the click"; type → "target
+field text changed"; launch → "a new large top-level region appeared"). Two deterministic checks
+per sub-goal, NOT a change-diff:
+- PRECONDITION: is this sub-goal's expected end-state ALREADY true? → advance WITHOUT acting (fixes
+  failure 2, the already-satisfied stall — the sub-goal-level analogue of Q1's don't-re-derive).
+- POSTCONDITION: after acting, did the ACTION-CLASS-SPECIFIC effect occur? → advance (fixes 1 and 3
+  — tooltip and coincidence both fail the class signature). This is structural-per-class, NOT the
+  semantic goal-vs-screen judgment the model fails (Q2 spurious-complete) — keeps it deterministic.
+
+**The rigidity cost (the price of deleting the planner):** a deterministic sequencer is BLIND and
+COMMITTED — it holds a fixed sub-goal list + pointer and CANNOT re-plan. A model planner could
+react to an unexpected screen; the sequencer marches the original plan into error dialogs / modals
+/ permission prompts / unanticipated states. Mitigation (NOT a model planner — the escalation
+ladder): DEVIATION DETECTION → ESCALATE as a first-class transition — when the current screen
+matches NEITHER the current sub-goal's precondition NOR its post-effect, the world has gone
+off-plan → clean handback, because the sequencer can't fix it. "Determinism on the rails, human on
+the divergence." Correct for a sovereign agent: hand back when reality diverges, never execute a
+dead plan.
+
+**V1 sequencer, completed (the build spec):**
+1. Deterministic decomposition, scoped to parseable sequential goals; un-parseable → clean handback.
+2. Per-sub-goal expected-effect signatures (action-class enum) for BOTH precondition (already-
+   satisfied → advance w/o acting) AND postcondition (class effect occurred → advance). Not bare change.
+3. Deviation detection → escalate (screen matches neither precondition nor post-effect → handback).
+Carry: "replaced a corruptible reactive planner with an uncorruptible BLIND one; the escalation
+ladder is what makes blind safe — it hands back when plan and world diverge."
+
 ## 3. The flawed fix (committed as a labeled checkpoint, NOT to build on)
 
 `agent::most_relevant_ref(screen, goal, exclude)` — token-overlap (coverage-weighted, stopword-
