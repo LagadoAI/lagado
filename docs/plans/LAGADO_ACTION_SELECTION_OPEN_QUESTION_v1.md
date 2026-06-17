@@ -430,6 +430,40 @@ PROSE → (a) structured/deterministic memory channel (action-graph / ranked can
 planner picks among), (b) goal-aligned prior filtering before injection, (c) accept+bound the tail
 (adversarial ×15 competing memory is rare; relevant memory is usually goal-aligned and HELPS). For Opus.
 
+## 2.13 Multi-step walk + the V1-PERFECT resolution (2026-06-17) — memory-FREE planner
+
+User directive: V1 must be PERFECT (no accept-the-tail, no defer-hardening-to-v2). Tested the
+current memory-free single-call architecture on a 2-step goal ("Open the Applications menu then
+launch the Terminal Emulator").
+
+**FAILED:** step1 clicked el_5 (Directory Menu — WRONG); step2 clicked el_0 (Applications); then Q1
+fired "already took effect → done" with only 1/48 cells changed (menu barely opened); never reached
+step 2 (Terminal). Two causes: (1) Q1 (action-effect) is SINGLE-action completion — it prematurely
+declared done; multi-step needs Q2 (goal-LEVEL complete-vs-next) = a planner. (2) compound-goal
+selection was unstable (wrong first pick) — one executor call doesn't cleanly decompose a multi-part
+goal.
+
+**THE RESOLUTION (perfect, not deferred): a MEMORY-FREE planner.** The §2.12 vulnerability was
+specifically the memory-EATING planner. Decomposition only needs goal + current screen + the
+label-free action-outcome fact → next sub-goal or `complete`. NO Board memory in the action path —
+not the executor, not the planner. The Board serves chat + skill-advisory OUTSIDE the action loop.
+This gives multi-step capability with ZERO memory-corruption surface — there is no competing memory
+to corrupt the planner, so there is NO tail (unlike Opus's memory-eating-planner + partial-check +
+accepted-tail). We do not build the unsafe component at all; we replace it with the memory-free one.
+
+**V1-PERFECT architecture (both halves memory-free):**
+- Planner: goal + current screen + label-free action-outcome fact (Q1 diff, structural, no element
+  names) → emit next sub-goal OR `complete` (Q2). Memory-free.
+- Executor: sub-goal + screen → target (the proven spine). Memory-free.
+- Q1 deterministic action-effect diff feeds BOTH consumers: HALT (built) and the label-free PROCEED
+  fact to the planner (to be wired).
+- Fail-closed (goal/sub-goal vs candidate labels) unchanged.
+Board/memory: chat RAG + skill-advisory only, never the action path. The §2.12 corruption surface
+simply does not exist in this design.
+
+**Next (build):** the memory-free planner call upstream of the executor; the label-free fact
+generator from the FusedElement pre/post diff; wire Q2 `complete`. Then re-run the 2-step walk.
+
 ## 3. The flawed fix (committed as a labeled checkpoint, NOT to build on)
 
 `agent::most_relevant_ref(screen, goal, exclude)` — token-overlap (coverage-weighted, stopword-
