@@ -687,6 +687,64 @@ every piece is BUILT + tested — per-element visual-embedding attach in the IoU
 is assembled into the live loop (`agent_loop` fuses a11y only: `fuse(&bboxes, &[], &[])`). On the shelf,
 wired-but-unfed, awaiting the discrimination probe + the layering order above.
 
+## 2.19 Floor-mastering arc — phrasing + divergence rail + RE-TOKEN (2026-06-17) — selection reliable
+
+Stress exposed filemanager/browser 0/12. Per-step chronos audit + probes drove three measured fixes
+(all verified fresh: terminal clean PASS, filemanager PASS, browser clicks the matched Web Browser):
+
+1. **Step-1 decoy** ("Directory Menu" picked for "Open the Applications **menu**"): the sequencer
+   leaked the category token into the goal string → `selection::discriminating_phrase` strips the
+   action verb + colliding category noun ("Applications", not "Open the Applications menu"). Probe:
+   "Applications"→12/12, "Open the Applications menu"→10/12 decoy.
+2. **False completion** (wrong app opened → "Goal accomplished"): the executor selected FREELY
+   instead of confirming the deterministically-intended target → `selection::best_match_token`
+   (unique best-match) + the SELECTION-INTENT DIVERGENCE rail: if the model clicks a DIFFERENT
+   element than the unique match, fail closed BEFORE acting (re-perceive→escalate). Kills false-
+   completion at the source AND makes completion the honest instrument.
+3. **★ THE TOKEN-ASSIGNMENT ROOT CAUSE (preserve this loudest) ★** — step-2 "Web Browser" → clicked
+   "Run Program". Position-varied probe (count held at 19) ruled out band-overflow (last works 12/12)
+   and pure lexical. Replication nailed it: **the model attends to the HIGHEST TOKEN NUMBER / last
+   item, NOT the last-RENDERED row.** `rank_late_band` reordered the DISPLAY but kept the SPATIAL
+   tokens, so the late-band target carried a mid-range token (Web Browser = el_9) while the model
+   picked whatever had the max token (el_18 = Directory Menu) → 0/12. Re-tokened-by-render-position
+   → 12/12. **FIX: `rank_late_band` re-numbers tokens to match render order, so the most-relevant
+   target carries el_{n-1}.** ⚠️ **WHY THIS STEP EXISTS — DO NOT DELETE AS REDUNDANT:** without it,
+   ranking and tokens disagree and the model picks by token-number not relevance; the late-band fix
+   silently dies. A refactor that "cleans up" the re-tokenization re-grows the 0/12 bug. The code
+   comment in `rank_late_band` says the same — keep both.
+
+**THE TWO OPEN ITEMS ARE ONE: act ≠ effect (Opus).** "Firefox clicked but window not yet painted"
+(benign: effect coming, read too early) and the §2.15 residual "right element clicked but effect
+didn't follow" (effect NOT coming) are the SAME gap — the click landing is not the goal; the
+world changing is. Browser verified to click the matched Web Browser (el_18, no divergence), but
+focus read desktop because Firefox cold-start hadn't painted ("0 new elements, 13 disappeared" =
+menu closed, window pending).
+
+**SEQUENCING INVERTS (Opus): effect-signature FIRST, then harden, then stress.** The settle delay is
+the effect-signature WITH A CLOCK — building a stress harness to get "honest pass-rate" before
+defining what a pass IS measures against a definition about to be replaced (pre-signature "pass" =
+clicked-right-element [already established at probe level]; post = app-actually-opened). So:
+- **Build the effect-signature** = what "done" OBSERVES (window/top-level a11y node appeared, title
+  changed, screen-region delta). It CONTAINS the settle as **poll-until-fire-or-timeout → escalate**
+  — NOT a fixed sleep tuned to Firefox's paint time (a hardcoded per-app latency bet = the fixed-
+  parameter brittleness killed repeatedly this session; derive it, don't constant it).
+- **DESIGN CONSTRAINT:** the signature must distinguish **"goal already satisfied on entry"** from
+  **"nothing happened"** — compare goal-vs-CURRENT-state, not only before-click vs after-click.
+  (The re-click-the-open-menu failure was a screen already in the goal state on arrival; a
+  before/after-only signature reads that as a no-effect click and escalates a success.)
+- **WHY IT'S STRUCTURAL, NOT POLISH:** completion-detection is the LAST place the model still has
+  unsupervised authority over a TERMINAL state, and the model is bad exactly there (the false-
+  completion proved it). The divergence rail took the SELECTION half out of the model's hands; the
+  effect-signature takes the COMPLETION half out — grounding "done" in observed world-change. This
+  is the §7c answer (done-detection its own component, not the model's call, not the grammar's).
+- Then harden the harness (periodic VM reboot for state-cleanliness — independent, correct anyway;
+  the per-run reset degraded over many runs in re-stress-2). Then stress → pass-rate that means
+  GOALS ACCOMPLISHED, not clicks landed.
+
+**State:** floor SELECTION reliable (step-1 phrasing + step-2 re-token, both verified; false-
+completion killed by divergence rail). NEXT BUILD = the effect-signature (act≠effect; observe
+world-change incl. already-satisfied-on-entry; settle = poll-until-fire). 229 lib tests.
+
 ## 3. The flawed fix (committed as a labeled checkpoint, NOT to build on)
 
 `agent::most_relevant_ref(screen, goal, exclude)` — token-overlap (coverage-weighted, stopword-
