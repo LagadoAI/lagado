@@ -140,6 +140,96 @@ fn cpu_config(default_ctx: usize, threads: usize, gpu: Option<GpuInfo>) -> Serve
     }
 }
 
+// ── VRAM prediction (Option A — measured + calibrated, NO arch formula) ─────────
+//
+// Invariant #9 applied to the governor itself: we do NOT compute KV-cache from a
+// transformer formula (LFM2 is a hybrid conv+attention arch; head_count_kv is absent —
+// a formula would be an assumption). Instead we DISCOVER the model size (file_bytes,
+// block_count) and MEASURE actual VRAM at a couple of contexts, then fit. KV cache is
+// linear in sequence length (a real property), so `vram = base + slope·ctx` holds; the
+// per-token slope is measured, not assumed. Weights re-scale by offloaded-layer fraction.
+
+/// One observed (config → measured VRAM) point for a model on THIS machine. The
+/// calibration that turns the governor from guessing into measuring.
+#[derive(Debug, Clone, Copy)]
+pub struct CalPoint {
+    pub ctx: u32,
+    pub n_gpu_layers: u32,
+    pub measured_vram_mb: f32,
+}
+
+/// VRAM headroom policy (DEFER item — overridable). Leave 15% free for the display
+/// compositor and transient spikes; not a model/hardware assumption, a safety policy.
+pub const VRAM_HEADROOM_FRACTION: f32 = 0.85;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Feasibility {
+    Green, // fits with headroom
+    Amber, // fits but tight (eats the headroom)
+    Red,   // predicted to exceed free VRAM → will OOM or spill
+}
+
+/// Least-squares linear fit → (intercept, slope). None if <2 points or no x-spread.
+fn linear_fit(points: &[(f32, f32)]) -> Option<(f32, f32)> {
+    if points.len() < 2 {
+        return None;
+    }
+    let n = points.len() as f32;
+    let sx: f32 = points.iter().map(|p| p.0).sum();
+    let sy: f32 = points.iter().map(|p| p.1).sum();
+    let sxx: f32 = points.iter().map(|p| p.0 * p.0).sum();
+    let sxy: f32 = points.iter().map(|p| p.0 * p.1).sum();
+    let denom = n * sxx - sx * sx;
+    if denom.abs() < f32::EPSILON {
+        return None; // all the same ctx → can't separate slope from intercept
+    }
+    let slope = (n * sxy - sx * sy) / denom;
+    let intercept = (sy - slope * sx) / n;
+    Some((intercept, slope))
+}
+
+/// Predict GPU VRAM (MiB) for a `(ctx, n_gpu_layers)` config from discovered model size +
+/// measured calibration. Returns None on cold start (no usable calibration) — the caller
+/// then falls back to safe ceilings rather than guessing. Honest by construction.
+pub fn predict_vram_mb(
+    file_bytes: u64,
+    block_count: u32,
+    n_gpu_layers: u32,
+    ctx: u32,
+    cal: &[CalPoint],
+) -> Option<f32> {
+    if block_count == 0 {
+        return None;
+    }
+    // Fit from FULL-offload points so weights are fully on the GPU in the fit; we then
+    // re-scale weights for partial offload.
+    let full: Vec<(f32, f32)> = cal
+        .iter()
+        .filter(|p| p.n_gpu_layers >= block_count)
+        .map(|p| (p.ctx as f32, p.measured_vram_mb))
+        .collect();
+    let (intercept, slope) = linear_fit(&full)?;
+    let weights_full_mb = file_bytes as f32 / (1024.0 * 1024.0);
+    let fixed_overhead = intercept - weights_full_mb; // non-weight, non-ctx VRAM
+    let layer_frac = n_gpu_layers.min(block_count) as f32 / block_count as f32;
+    Some(weights_full_mb * layer_frac + fixed_overhead + slope * ctx as f32)
+}
+
+/// Classify a predicted footprint against free VRAM.
+pub fn feasibility(predicted_mb: f32, free_mb: f32) -> Feasibility {
+    if free_mb <= 0.0 {
+        return Feasibility::Red;
+    }
+    let ratio = predicted_mb / free_mb;
+    if ratio <= VRAM_HEADROOM_FRACTION {
+        Feasibility::Green
+    } else if ratio <= 1.0 {
+        Feasibility::Amber
+    } else {
+        Feasibility::Red
+    }
+}
+
 // ── GPU detection ─────────────────────────────────────────────────────────────
 
 /// Detect the NVIDIA GPU with the most free VRAM via `nvidia-smi`.
@@ -266,6 +356,48 @@ mod tests {
         // Unknown model → assume full GPU (llama.cpp will error if it truly doesn't fit)
         let (ngl, _) = compute_offload(8_000, 0);
         assert_eq!(ngl, 99);
+    }
+
+    // ── VRAM prediction (Option A) ──
+    // Real 8B: file_bytes=5_044_779_712 (≈4811 MiB), block_count=24.
+    // Point A is the REAL measurement (5074 MiB @ ctx 4096, full offload); Point B is
+    // synthetic here until a second real measurement is gathered.
+    const F8B: u64 = 5_044_779_712;
+
+    #[test]
+    fn predict_reproduces_a_calibration_point() {
+        let cal = [
+            CalPoint { ctx: 4096,  n_gpu_layers: 24, measured_vram_mb: 5074.0 },
+            CalPoint { ctx: 16384, n_gpu_layers: 24, measured_vram_mb: 5800.0 },
+        ];
+        let p = predict_vram_mb(F8B, 24, 24, 4096, &cal).unwrap();
+        assert!((p - 5074.0).abs() < 1.0, "should reproduce point A, got {p}");
+    }
+
+    #[test]
+    fn predict_scales_down_with_fewer_layers() {
+        let cal = [
+            CalPoint { ctx: 4096,  n_gpu_layers: 24, measured_vram_mb: 5074.0 },
+            CalPoint { ctx: 16384, n_gpu_layers: 24, measured_vram_mb: 5800.0 },
+        ];
+        let full = predict_vram_mb(F8B, 24, 24, 4096, &cal).unwrap();
+        let half = predict_vram_mb(F8B, 24, 12, 4096, &cal).unwrap();
+        assert!(half < full, "partial offload must predict less VRAM: {half} !< {full}");
+    }
+
+    #[test]
+    fn predict_cold_start_is_none() {
+        // No calibration → no guess. Caller falls back to safe ceilings.
+        assert!(predict_vram_mb(F8B, 24, 24, 4096, &[]).is_none());
+        let one = [CalPoint { ctx: 4096, n_gpu_layers: 24, measured_vram_mb: 5074.0 }];
+        assert!(predict_vram_mb(F8B, 24, 24, 4096, &one).is_none()); // 1 point can't fit a slope
+    }
+
+    #[test]
+    fn feasibility_levels() {
+        assert_eq!(feasibility(4000.0, 5787.0), Feasibility::Green); // 0.69
+        assert_eq!(feasibility(5074.0, 5787.0), Feasibility::Amber); // 0.88 — over headroom, still fits
+        assert_eq!(feasibility(6000.0, 5787.0), Feasibility::Red);   // > free
     }
 
     #[test]
