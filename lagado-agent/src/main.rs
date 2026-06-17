@@ -11,6 +11,7 @@ mod embedding;
 mod envelope;
 mod forge;
 mod gate;
+mod gguf;
 mod governor;
 mod grammar;
 mod hydra;

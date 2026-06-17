@@ -11,6 +11,7 @@ pub mod embedding;
 pub mod envelope;
 pub mod forge;
 pub mod gate;
+pub mod gguf;
 pub mod governor;
 pub mod grammar;
 pub mod hydra;
