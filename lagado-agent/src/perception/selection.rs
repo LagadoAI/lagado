@@ -118,6 +118,24 @@ fn relevance(goal_toks: &[String], label: &str) -> (usize, f32) {
     (matched, matched as f32 / lab.len() as f32)
 }
 
+/// The DISCRIMINATING phrasing of a goal/sub-goal for the prompt's goal-slot: the content words
+/// (action verbs, articles, and colliding CATEGORY nouns like "menu"/"button" stripped), original
+/// case preserved. Verified 2026-06-17 (§2.18): the model is pulled by lexical salience, so a
+/// verbose sub-goal ("Open the Applications **menu**") leaks the category token "menu" and the model
+/// clicks the decoy "Directory **Menu**" (10/12); the discriminating phrasing ("Applications") clicks
+/// correctly (12/12). The sequencer must NOT utter the word that promotes the decoy. Fallback to the
+/// trimmed raw goal if every word is a stopword (nothing discriminating to lead with).
+pub fn discriminating_phrase(goal: &str) -> String {
+    let kept: Vec<&str> = goal
+        .split_whitespace()
+        .filter(|w| {
+            let clean: String = w.chars().filter(|c| c.is_alphanumeric()).collect::<String>().to_lowercase();
+            !clean.is_empty() && !RELEVANCE_STOPWORDS.contains(&clean.as_str())
+        })
+        .collect();
+    if kept.is_empty() { goal.trim().to_string() } else { kept.join(" ") }
+}
+
 /// Re-order candidates so the MOST goal-relevant lands LAST — the model's attended late band
 /// (verified 2026-06-17: a11y label-reading holds in the late band, collapses for early rows).
 /// Ascending by (matched, coverage); STABLE, so equal-relevance candidates keep their spatial
@@ -305,6 +323,20 @@ mod tests {
                                      center: (0, 0), sense: "vision", trusted: false }];
         assert!(!goal_matches_any("Click the Applications menu", &cands),
                 "no label shares a content token → must fail closed");
+    }
+
+    #[test]
+    fn discriminating_phrase_strips_verb_and_category_noun() {
+        // "Open the Applications menu" leaks "menu" (→ decoy "Directory Menu"); strip to "Applications".
+        assert_eq!(discriminating_phrase("Open the Applications menu"), "Applications");
+        assert_eq!(discriminating_phrase("open the File Manager"), "File Manager");
+        assert_eq!(discriminating_phrase("open the Web Browser"), "Web Browser");
+    }
+
+    #[test]
+    fn discriminating_phrase_falls_back_when_all_stopwords() {
+        // nothing discriminating → keep the raw goal rather than emit empty.
+        assert_eq!(discriminating_phrase("click the button"), "click the button");
     }
 
     #[test]

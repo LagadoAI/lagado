@@ -651,8 +651,12 @@ pub async fn agent_loop(
         } else {
             format!("{candidate_block}\n")
         };
+        // Goal-slot uses the DISCRIMINATING phrasing (§2.18): the verbose sub-goal leaks category
+        // tokens ("…menu") that lexically pull a decoy ("Directory Menu"); the discriminating token
+        // ("Applications") clicks correctly. Deterministic, at the handoff — not a ranker.
+        let prompt_goal = crate::perception::selection::discriminating_phrase(active_goal);
         let prompt = format!(
-            "{system_prompt}\n\n{screen_section}Goal: {active_goal}\n\nWhat is your next action?"
+            "{system_prompt}\n\n{screen_section}Goal: {prompt_goal}\n\nWhat is your next action?"
         );
 
         let adapter_clone = adapter.clone();

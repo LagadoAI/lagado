@@ -358,7 +358,8 @@ mod tests {
 
     fn test_lib() -> SkillLibrary {
         let n = TEST_N.fetch_add(1, Ordering::SeqCst);
-        let dir = std::env::temp_dir().join(format!("lagado_skill_test_{n}"));
+        let dir = std::env::temp_dir().join(format!("lagado_skill_test_{}_{n}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir); // start clean — temp dirs persist across cargo-test runs
         std::fs::create_dir_all(&dir).ok();
         SkillLibrary::open(&dir)
     }
