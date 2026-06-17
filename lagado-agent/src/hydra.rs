@@ -122,9 +122,24 @@ impl Hydra {
              {message} →"
         );
 
-        match self.classifier.generate(&prompt, 10, 0.0) {
-            Ok(response) => parse_intent_label(&response),
-            Err(_) => Intent::Chat, // safe default on error
+        // Grammar-constrained: the model can ONLY emit a valid label, eliminating the
+        // silent "unparseable output → CHAT default" failure (observed: "press Escape"
+        // produced "Escape" → parsed to CHAT → agent does nothing). Falls back to the
+        // 8B main adapter if the classifier server is down, still grammar-constrained.
+        let grammar = crate::grammar::intent_grammar();
+        let result = self
+            .classifier
+            .generate_constrained(&prompt, 10, 0.0, &grammar)
+            .or_else(|_| self.adapter.generate_constrained(&prompt, 10, 0.0, &grammar));
+
+        match result {
+            Ok((response, confidence)) => {
+                // Logged so the routing eval can later calibrate a C5 "when unsure, treat
+                // as planning" confidence floor — deliberately NOT a vibes threshold now.
+                tracing::debug!(confidence, "intent classified (grammar-constrained)");
+                parse_intent_label(&response)
+            }
+            Err(_) => Intent::Chat, // inference fully unavailable — graceful degrade
         }
     }
 

@@ -26,6 +26,21 @@ pub trait InferenceAdapter: Send + Sync {
         self.generate(prompt, max_tokens, temperature).map(|s| (s, 1.0))
     }
 
+    /// Like `generate_with_confidence`, but constrains decoding to a GBNF `grammar`.
+    /// An empty grammar means "no constraint". The default impl ignores the grammar
+    /// (so adapters that cannot constrain still compile and behave as before); real
+    /// server-backed adapters override it to pass the grammar through.
+    fn generate_constrained(
+        &self,
+        prompt: &str,
+        max_tokens: usize,
+        temperature: f32,
+        grammar: &str,
+    ) -> Result<(String, f32), String> {
+        let _ = grammar;
+        self.generate_with_confidence(prompt, max_tokens, temperature)
+    }
+
     fn supports_kv_slots(&self) -> bool;
     fn save_kv_slot(&self, key: &str) -> Result<(), String>;
     fn restore_kv_slot(&self, key: &str) -> Result<bool, String>;

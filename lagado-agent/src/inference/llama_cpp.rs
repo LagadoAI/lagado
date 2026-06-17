@@ -40,69 +40,59 @@ impl LlamaCppAdapter {
             min_p: 0.0,
         }
     }
+
+    /// Build + POST a chat-completions request and return the parsed JSON body.
+    /// `grammar` empty = unconstrained; `logprobs` toggles per-token logprobs.
+    /// Single source of truth for request shape so the public methods can never
+    /// drift in their sampling params (they did once — a stale hardcoded top_k=80).
+    fn request(
+        &self,
+        prompt: &str,
+        max_tokens: usize,
+        temperature: f32,
+        grammar: &str,
+        logprobs: bool,
+    ) -> Result<serde_json::Value, String> {
+        let mut body = serde_json::json!({
+            "messages": [{ "role": "user", "content": prompt }],
+            "temperature": temperature,
+            "repeat_penalty": crate::config::REPEAT_PENALTY,
+            "max_tokens": max_tokens,
+            "stream": false,
+            "cache_prompt": true
+        });
+        if self.top_k > 0 { body["top_k"] = serde_json::json!(self.top_k); }
+        if self.min_p > 0.0 { body["min_p"] = serde_json::json!(self.min_p); }
+        if logprobs { body["logprobs"] = serde_json::json!(true); }
+        if !grammar.is_empty() { body["grammar"] = serde_json::json!(grammar); }
+
+        let response = ureq::post(&format!("{}/v1/chat/completions", self.base_url))
+            .set("Content-Type", "application/json")
+            .send_json(body)
+            .map_err(|e| format!("HTTP request failed: {}", e))?;
+
+        response
+            .into_json()
+            .map_err(|e| format!("Failed to parse response JSON: {}", e))
+    }
 }
 
 impl InferenceAdapter for LlamaCppAdapter {
     fn generate(&self, prompt: &str, max_tokens: usize, temperature: f32) -> Result<String, String> {
-        let mut body = serde_json::json!({
-            "messages": [{ "role": "user", "content": prompt }],
-            "temperature": temperature,
-            "repeat_penalty": crate::config::REPEAT_PENALTY,
-            "max_tokens": max_tokens,
-            "stream": false,
-            "cache_prompt": true
-        });
-        if self.top_k > 0 { body["top_k"] = serde_json::json!(self.top_k); }
-        if self.min_p > 0.0 { body["min_p"] = serde_json::json!(self.min_p); }
-        let body = body;
-
-        let response = ureq::post(&format!("{}/v1/chat/completions", self.base_url))
-            .set("Content-Type", "application/json")
-            .send_json(body)
-            .map_err(|e| format!("HTTP request failed: {}", e))?;
-
-        let json: serde_json::Value = response
-            .into_json()
-            .map_err(|e| format!("Failed to parse response JSON: {}", e))?;
-
-        json["choices"][0]["message"]["content"]
-            .as_str()
-            .map(|s| s.to_string())
-            .ok_or_else(|| format!("Missing choices[0].message.content in response: {}", json))
+        let json = self.request(prompt, max_tokens, temperature, "", false)?;
+        extract_content(&json)
     }
 
     fn generate_with_confidence(&self, prompt: &str, max_tokens: usize, temperature: f32) -> Result<(String, f32), String> {
-        let mut body = serde_json::json!({
-            "messages": [{ "role": "user", "content": prompt }],
-            "temperature": temperature,
-            "repeat_penalty": crate::config::REPEAT_PENALTY,
-            "max_tokens": max_tokens,
-            "stream": false,
-            "logprobs": true,
-            "cache_prompt": true
-        });
-        if self.top_k > 0 { body["top_k"] = serde_json::json!(self.top_k); }
-        if self.min_p > 0.0 { body["min_p"] = serde_json::json!(self.min_p); }
-        let body = body;
+        // Unconstrained is just a constrained call with an empty grammar.
+        self.generate_constrained(prompt, max_tokens, temperature, "")
+    }
 
-        let response = ureq::post(&format!("{}/v1/chat/completions", self.base_url))
-            .set("Content-Type", "application/json")
-            .send_json(body)
-            .map_err(|e| format!("HTTP request failed: {}", e))?;
-
-        let json: serde_json::Value = response
-            .into_json()
-            .map_err(|e| format!("Failed to parse response JSON: {}", e))?;
-
-        let content = json["choices"][0]["message"]["content"]
-            .as_str()
-            .map(|s| s.to_string())
-            .ok_or_else(|| format!("Missing choices[0].message.content in response: {}", json))?;
-
-        // Compute geometric mean of per-token probabilities from logprobs.
-        // Falls back to 1.0 (no gating) if the server doesn't return logprobs.
+    fn generate_constrained(&self, prompt: &str, max_tokens: usize, temperature: f32, grammar: &str) -> Result<(String, f32), String> {
+        let json = self.request(prompt, max_tokens, temperature, grammar, true)?;
+        let content = extract_content(&json)?;
+        // Geometric mean of per-token probabilities; 1.0 when logprobs absent (no gating).
         let confidence = compute_confidence(&json["choices"][0]["logprobs"]);
-
         Ok((content, confidence))
     }
 
@@ -112,6 +102,14 @@ impl InferenceAdapter for LlamaCppAdapter {
     fn has_kv_slot(&self, _key: &str) -> bool { false }
     fn model_name(&self) -> &str { &self.model_name }
     fn context_size(&self) -> usize { self.context_size }
+}
+
+/// Pull the assistant message text out of a chat-completions response.
+fn extract_content(json: &serde_json::Value) -> Result<String, String> {
+    json["choices"][0]["message"]["content"]
+        .as_str()
+        .map(|s| s.to_string())
+        .ok_or_else(|| format!("Missing choices[0].message.content in response: {}", json))
 }
 
 /// Geometric mean of per-token probabilities from a logprobs block.

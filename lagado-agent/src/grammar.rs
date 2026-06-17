@@ -15,10 +15,29 @@ pub fn selector_grammar(ref_ids: &[String]) -> String {
     String::new()
 }
 
-/// Generate a GBNF grammar that forces a binary CHAT/INTERACTIVE/REASONING choice.
-/// Used by hydra intent classifier to guarantee clean output.
+/// GBNF that forces the intent classifier to emit exactly one label token.
+/// Eliminates the silent "unparseable output → CHAT default" failure mode:
+/// without this, the 1.2B echoes message words ("Escape", "Search") that parse
+/// to no label and fall through to CHAT, so an action request silently no-ops.
 pub fn intent_grammar() -> String {
-    // Phase 2: return GBNF that forces one of these three tokens
-    // r#"root ::= ("CHAT" | "INTERACTIVE" | "REASONING")"#.to_string()
-    String::new() // stub
+    r#"root ::= ("CHAT" | "INTERACTIVE" | "REASONING")"#.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn intent_grammar_lists_all_three_labels() {
+        let g = intent_grammar();
+        assert!(!g.is_empty());
+        assert!(g.contains("CHAT"));
+        assert!(g.contains("INTERACTIVE"));
+        assert!(g.contains("REASONING"));
+    }
+
+    #[test]
+    fn selector_grammar_empty_without_refs() {
+        assert!(selector_grammar(&[]).is_empty());
+    }
 }
