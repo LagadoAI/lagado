@@ -245,6 +245,42 @@ section, keep the SYS framing*, not *write a lean selector*. Carry forward (Opus
 isolating the executor RELOCATES G4 to the planner — measure the planner's single-line
 corruptibility before trusting it. New item: pin + regression-guard the executor prompt.
 
+## 2.7 Step-0 SYS audit + escape test (2026-06-17) — escape is NON-FUNCTIONAL
+
+Opus's step-0 before pinning: audit "full SYS minus Board" for goal-independent selection bias,
+and check the escape path. N=12, live 8B.
+
+**SYS content audit (fixed label set, PERMUTED order, NO-MATCH goal):** no hard baked-in offset.
+The pick does not cluster on a single position OR a single label across permutations — it
+scatters (Directory Menu / Applications / Files / Volume / done), with only a WEAK salience lean
+to "Directory Menu"/"Applications". => "full SYS minus Board" has no strong constant content-bias
+to neutralize; pinning is defensible (with the regression guard + length comment).
+
+**Escape test (SELECTOR-ONLY grammar `click(el_N) | click(none)`, NO-MATCH goal):**
+| condition | `none` fired |
+|---|---|
+| every permutation, both no-match goals | **0/12** — forces a click on an arbitrary salient element |
+| control (real match, target late-band) | n/a — picks target el_4 12/12 ✓ |
+
+**THE ESCAPE TOKEN IS NON-FUNCTIONAL.** The model NEVER voluntarily escapes on no-match — it
+forces a wrong click 12/12. With `done` in the grammar it bails to `done`; strip that and it
+clicks arbitrarily. It will not emit `none`.
+
+**Architecture correction:** the "mandatory none->re-perceive escape" (spec §2, the grammar-rail
+cornerstone and the fail-closed path) CANNOT be model-driven. In production, whenever the right
+element is not yet on screen (scroll/navigate/wait first — common), the executor will confidently
+click a WRONG element rather than escape. => FAIL-CLOSED MUST BE DETERMINISTIC: the harness
+cross-checks the planner's target descriptor against candidate labels and forces escape/re-perceive
+on no-match. Bias toward escape-when-uncertain (false escape recoverable; false click terminal).
+This upgrades Opus's "fails closed on no-label-match" from prudent to MANDATORY, and makes the
+`none` grammar token a deterministic-only path (the model never reaches it).
+
+**Step-0 verdict:** (1) pin "full SYS minus Board" — no constant offset, OK; add regression guard
+(position sweep, length-sensitive) + "preamble length is load-bearing" comment. (2) escape is
+deterministic, not a model choice. (3) control confirms label-reading holds on a real match in
+the late band (12/12). Ready to build the two-call split: pinned template (intent slot + late-band
+candidate list), deterministic fail-closed handoff, planner corruptibility measured next.
+
 ## 3. The flawed fix (committed as a labeled checkpoint, NOT to build on)
 
 `agent::most_relevant_ref(screen, goal, exclude)` — token-overlap (coverage-weighted, stopword-
