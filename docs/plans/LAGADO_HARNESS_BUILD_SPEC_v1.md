@@ -59,6 +59,16 @@ The routing eval showed the 1.2B emits un-parseable tokens ("Escape", "Search") 
 - KV-slot prefix reuse (C2a): cache the stable prefix (system+tools), re-encode only the volatile slice (the `kv_slots` seam is stubbed in `inference/mod.rs`).
 - **Acceptance:** measurable — the single-turn loop beats the growing-context loop on a multi-step task on this hardware (the core bet).
 
+**④b SURGERY PLAN (oriented 2026-06-17 — the highest-risk change in the codebase; do it advisor-backed + fresh, not at the tail of a long session):**
+- **④a DONE:** `supervisor.rs` (governor-injected ladder, pure state machine, commit cef238e) + `governor::escalation_ladder()` (local→human; builds what the supervisor consumes).
+- **The two integration points in `agent.rs`:**
+  - `agent.rs:353` `let context = memory.context_string();` → **the growing prompt.** Single-turn-fresh replaces this with a freshly-assembled board slice each step. The current-turn trajectory must be written to the board as particles (each action+result), and `memory_tiers::assemble_slice(...)` (③a) re-assembles the slice — instead of accumulating a string via `memory.push(Step)`.
+  - `agent.rs:382` the `prompt = format!(...)` → restructure to refill from the board slice; keep the tapered priors / tool_section / screen / goal scaffolding.
+- **DO NOT bulldoze the existing machinery — integrate.** The loop already has: `should_cutoff`/impasse (line 417), screen-hash loop detection (416), `StepEnforcer` (step cap), `RecoveryManager` (inner tactical recovery). The supervisor is the OUTER ladder; map the loop's signals → `StepOutcome` (executed? screen_unchanged? Done/Task? error?) → `supervisor.observe(outcome, state_hash)` → obey `Directive` (Continue / ResetFromBoard / Escalate(tier) / Done / Abort). Reconcile the supervisor's stall/loop detection with the existing impasse/cutoff logic (pick one owner; likely the supervisor subsumes `should_cutoff`).
+- **Escalate(tier):** local-only ladder = `[model("local"), human()]`, so Escalate(Model) currently == retry-on-8B (already the main adapter) and Escalate(Human) == HITL handoff. Keep it minimal until hybrid/cloud land.
+- **KV-slot reuse (C2a):** cache the stable prefix (system+tools), re-encode only the volatile slice — the `kv_slots` seam is stubbed in `inference/mod.rs`. Optional first cut; correctness before this optimization.
+- **Build it floor-first + tested:** (1) a pure `classify_step_outcome(...)` mapping fn (testable); (2) write-trajectory-to-board + assemble_slice refill (the single-turn-fresh core); (3) supervisor.observe wiring + Directive handling; (4) reconcile/retire `should_cutoff`. Test each before the next.
+
 ---
 
 ## 2. SELECTOR GRAMMAR over the FUSED set (Phase 3 forward — design locked)

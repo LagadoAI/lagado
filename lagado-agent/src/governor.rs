@@ -230,6 +230,18 @@ pub fn feasibility(predicted_mb: f32, free_mb: f32) -> Feasibility {
     }
 }
 
+// ── Escalation ladder (the governor builds it; the supervisor walks it) ─────────
+
+/// Build the supervisor's escalation ladder from what's available. The supervisor owns
+/// the LOGIC; the governor owns WHICH tiers exist (user correction, 2026-06-16).
+/// LOCAL-only for now (hybrid/cloud stubbed): the agent runs on the main local model,
+/// and when local retries exhaust it hands to the human. Cloud tiers get appended here
+/// once those land — the supervisor needs no change.
+pub fn escalation_ladder() -> Vec<crate::supervisor::EscalationTier> {
+    use crate::supervisor::EscalationTier;
+    vec![EscalationTier::model("local"), EscalationTier::human()]
+}
+
 // ── Engine planner (ModelInfo × hardware × user × calibration → plan) ───────────
 
 use crate::gguf::ModelInfo;
@@ -594,6 +606,14 @@ mod tests {
     fn plan_moe_offers_cpu_moe_in_rationale() {
         let p = plan_engine(&model_8b(), Some(&gpu_6gb()), &EnginePrefs::default(), &cal_8b());
         assert!(p.rationale.contains("MoE") && p.rationale.contains("cpu-moe"));
+    }
+
+    #[test]
+    fn escalation_ladder_is_local_then_human() {
+        let l = escalation_ladder();
+        assert_eq!(l.len(), 2);
+        assert_eq!(l[0].kind, crate::supervisor::TierKind::Model);
+        assert_eq!(l[1].kind, crate::supervisor::TierKind::Human); // terminal fallback
     }
 
     #[test]
