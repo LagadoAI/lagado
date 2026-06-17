@@ -9,16 +9,14 @@ node_modules/
 dist/
 .DS_Store
 lagado-agent/vendored/
-lagado-agent/vendored/
 
-# Internal docs, plans, and prototypes — local only, never published
-LAPUTA HOW TO/
-docs/
-obsolete/
-agent_system_prompt.txt
+# Large / secret / regenerable data dirs — stay local
 models
 vault
 vm-images
-thalamus.py
-entropy_gate.py
-build_index.py
+
+# 2026-06-16 POLICY REVERSAL (user decision): docs/, LAPUTA HOW TO/, all plans and
+# the master-plan PDFs are now COMMITTED. The dev machine is the single point of
+# failure (a prior crash already lost the master plan once); the repo is private
+# FOREVER and only the finished binary ships, so disaster-recovery beats secrecy.
+# Do NOT re-ignore docs/plans, and never make the repo public.

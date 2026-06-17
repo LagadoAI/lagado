@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Laputa — Build Progress Map v2</title>
+<style>
+:root{
+  --bg:#0f1117; --surface:#1a1c23; --surface2:#21242e; --border:#30363d; --border-l:#3d4450;
+  --text:#c8ccd4; --text-bright:#ffffff; --text-dim:#6b7280;
+  --red:#e94560; --purple:#6a5acd; --green:#22c55e; --yellow:#f59e0b;
+  --g:#97C459; --a:#EF9F27; --r:#E24B4A; --done:#3FB6E0;
+  --gD:#3B6D11; --aD:#854F0B; --rD:#A32D2D; --doneD:#1E6E8C;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);color:var(--text);font-family:'Rajdhani',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;line-height:1.6;padding:24px}
+.wrap{max-width:1200px;margin:0 auto}
+h1{color:var(--text-bright);font-size:32px;font-weight:700;letter-spacing:0.04em;margin-bottom:4px}
+.sub{color:var(--text-dim);font-size:14px;margin-bottom:16px}
+.legend{display:flex;gap:16px;flex-wrap:wrap;align-items:center;margin:0 0 12px;font-size:13px;color:var(--text-dim)}
+.legend span{display:flex;align-items:center;gap:6px}
+.cir{width:11px;height:11px;border-radius:50%;display:inline-block}
+.bar{height:14px;border-radius:7px;background:var(--surface2);overflow:hidden;display:flex;margin:10px 0 4px}
+.bar>div{height:100%}
+.controls{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:0 0 12px}
+input,button{font-family:inherit;font-size:14px}
+input#q{flex:1;min-width:160px;height:36px;padding:0 12px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);outline:none}
+input#q:focus{border-color:var(--red)}
+button{height:36px;padding:0 14px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);cursor:pointer;transition:border-color .15s}
+button:hover{border-color:var(--red)}
+button.warn:hover{border-color:var(--red);color:var(--red)}
+#wrap2{position:relative;width:100%;height:680px;border:1px solid var(--border);border-radius:12px;overflow:hidden;background:var(--surface)}
+#tip{position:absolute;pointer-events:none;opacity:0;background:var(--surface2);border:1px solid var(--border-l);border-radius:8px;padding:6px 10px;font-size:13px;color:var(--text-bright);max-width:260px;line-height:1.4;z-index:5;transition:opacity .1s}
+svg text{font-family:'Rajdhani',sans-serif}
+.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:12px;margin-top:14px}
+.metric{background:var(--surface2);border-radius:8px;padding:12px}
+.metric .lbl{font-size:12px;color:var(--text-dim)}
+.metric .val{font-size:22px;font-weight:600;color:var(--text-bright);margin-top:2px}
+.foot{color:var(--text-dim);font-size:12px;margin-top:24px;border-top:1px solid var(--border);padding-top:14px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>LAPUTA — Build Progress Map v2</h1>
+  <div class="sub">v3 dual-brain / security-first / Liquid-native. <b style="color:var(--text)">Click a file to cycle its status</b>: not started → in progress → done. Saved in this browser. Drag · scroll · hover for path.</div>
+
+  <div class="legend">
+    <span><span class="cir" style="background:var(--r)"></span>Not started</span>
+    <span><span class="cir" style="background:var(--a)"></span>In progress</span>
+    <span><span class="cir" style="background:var(--g)"></span>Working (baseline)</span>
+    <span><span class="cir" style="background:var(--done)"></span>Done (you marked)</span>
+  </div>
+
+  <div class="bar" id="bar"></div>
+  <div class="sub" id="barlbl" style="margin:0 0 12px"></div>
+
+  <div class="controls">
+    <input id="q" placeholder="Search files…">
+    <button id="f-all">All</button>
+    <button id="f-r">Not started</button>
+    <button id="f-a">In progress</button>
+    <button id="f-done">Done</button>
+    <button id="reset">Reset view</button>
+    <button id="clear" class="warn">Clear my marks</button>
+  </div>
+
+  <div id="wrap2"><svg id="g" width="100%" height="100%"></svg><div id="tip"></div></div>
+
+  <div class="metrics">
+    <div class="metric"><div class="lbl">Total files</div><div class="val" id="m-total">0</div></div>
+    <div class="metric"><div class="lbl">Done</div><div class="val" id="m-done">0</div></div>
+    <div class="metric"><div class="lbl">In progress</div><div class="val" id="m-prog">0</div></div>
+    <div class="metric"><div class="lbl">Remaining</div><div class="val" id="m-rem">0</div></div>
+    <div class="metric"><div class="lbl">Complete</div><div class="val" id="m-pct">0%</div></div>
+  </div>
+
+  <div class="foot">Marks are stored locally (localStorage key <code>laputa_progress_v2</code>). They persist across reopens on this browser. v3 changes: removed latent.rs/projector_mlp.rs/vision_encoder.rs/text_grid.rs. Added inference/{liquid,hydra,memory_handoff,retrieval}.rs, perception/{vlm_adapter,atspi}.rs, security/* (incl. profile.rs), vm/gateway.rs. expert_cache.rs is optional (Phase 15.5).</div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+<script>
+(function(){
+if(typeof d3==="undefined"){document.getElementById("wrap2").innerHTML='<div style="padding:24px;color:#6b7280">Could not load D3 (no internet?). Reconnect and reload.</div>';return;}
+const groups={
+  ui_core:{l:"UI core",x:120,y:90}, ui_comp:{l:"UI components",x:120,y:250},
+  ui_pages:{l:"UI pages",x:340,y:90}, ui_hooks:{l:"Hooks",x:120,y:410},
+  ui_utils:{l:"Utils",x:120,y:560}, ui_cfg:{l:"UI config",x:340,y:560},
+  core:{l:"Agent core",x:560,y:90}, infer:{l:"Inference (dual-brain)",x:780,y:90},
+  percept:{l:"Perception",x:780,y:250}, project:{l:"Projector",x:1000,y:250},
+  security:{l:"Security",x:1000,y:90}, mcp:{l:"MCP (core)",x:560,y:410},
+  term:{l:"Terminal",x:780,y:410}, vm:{l:"VM (Whonix)",x:1000,y:410},
+  sys:{l:"System",x:560,y:560}, url:{l:"URL handler",x:780,y:560},
+  authp:{l:"Auth/Perms",x:1000,y:560}, conn:{l:"Connectors",x:560,y:680},
+  data:{l:"Data/Vault",x:340,y:410}, py:{l:"Python",x:340,y:680}, build:{l:"Build",x:120,y:680},
+  moe:{l:"MoE (optional)",x:1000,y:680}, lens:{l:"Lens (v1.1)",x:1200,y:90}
+};
+const N=[
+  ["main.tsx","ui_core","g"],["App.tsx","ui_core","a"],["index.css","ui_core","g"],["index.html","ui_core","g"],
+  ["Button","ui_comp","g"],["Input","ui_comp","g"],["Card","ui_comp","g"],["Header","ui_comp","g"],["Tabs","ui_comp","g"],["Dialog","ui_comp","g"],["FormGroup","ui_comp","g"],["Checkbox","ui_comp","g"],["Radio","ui_comp","g"],["Select","ui_comp","g"],["Slider","ui_comp","g"],["Alert","ui_comp","g"],["ProgressBar","ui_comp","g"],["Badge","ui_comp","g"],["CodeBlock","ui_comp","g"],["Spinner","ui_comp","g"],["FileTree","ui_comp","g"],["MetadataList","ui_comp","g"],["Layout","ui_comp","g"],["PermissionBrowserDialog","ui_comp","g"],["SessionRestoreDialog","ui_comp","g"],["URLHandlerConfirmationDialog","ui_comp","g"],["ClipboardAccessDialog","ui_comp","g"],["ExitImmersiveDialog","ui_comp","g"],["HostModeGate","ui_comp","r"],
+  ["useAgentSocket","ui_hooks","a"],["useAsync","ui_hooks","g"],["useLocalStorage","ui_hooks","g"],
+  ["colors.ts","ui_utils","g"],["format.ts","ui_utils","g"],
+  ["LoginPage","ui_pages","g"],["FirstLaunchWelcome","ui_pages","g"],["FirstLaunchSystemDetected","ui_pages","g"],["FirstLaunchModelSelection","ui_pages","g"],["FirstLaunchPermissionsSetup","ui_pages","g"],["ChatDefault","ui_pages","a"],["ImmersiveDefault","ui_pages","a"],["ImmersiveTyping","ui_pages","a"],["ImmersiveAgentRunning","ui_pages","a"],["ImmersiveAgentPaused","ui_pages","a"],["ImmersiveWithSidebar","ui_pages","a"],["CodePage","ui_pages","a"],["CodeWithSandboxOutput","ui_pages","a"],["CodeWithTerminal","ui_pages","a"],["VaultDefault","ui_pages","a"],["VaultFilePreview","ui_pages","a"],["VaultStorageWarning","ui_pages","a"],["TerminalDefault","ui_pages","a"],["TerminalMultipleTabs","ui_pages","a"],["TerminalAgentRunning","ui_pages","a"],["SettingsMain","ui_pages","a"],["SettingsBackup","ui_pages","a"],["SettingsModels","ui_pages","a"],["SettingsInference","ui_pages","a"],["SettingsKVCache","ui_pages","a"],["SettingsPermissions","ui_pages","a"],["SettingsVault","ui_pages","a"],["SettingsSystemIntegration","ui_pages","a"],["SettingsAppConnections","ui_pages","a"],["SettingsAdvanced","ui_pages","a"],["MCPManager","ui_pages","a"],["MCPAddTool","ui_pages","a"],["ServerManagement","ui_pages","a"],["VMManager","ui_pages","a"],
+  ["package.json","ui_cfg","g"],["tailwind.config.js","ui_cfg","g"],["vite.config.ts","ui_cfg","g"],["tsconfig.json","ui_cfg","g"],["postcss.config.js","ui_cfg","g"],
+  ["main.rs","core","a"],["forge.rs","core","g"],["action_graph.rs","core","a"],["recovery.rs","core","a"],["parser.rs","core","g"],["verifier.rs","core","g"],["operator.rs","core","a"],["types.rs","core","a"],["memory.rs","core","a"],["input_arbiter.rs","core","r"],
+  ["inference/mod.rs","infer","r"],["llama_cpp.rs","infer","r"],["hydra.rs","infer","r"],["liquid.rs","infer","r"],["memory_handoff.rs","infer","r"],["retrieval.rs","infer","r"],["memory_tiers.rs","infer","r"],["sleep_gate.rs","infer","r"],["LFM2-8B-A1B","infer","r"],["kv_slots.rs","infer","r"],["grammar.rs","infer","r"],
+  ["perception/mod.rs","percept","r"],["capture.rs","percept","r"],["delta.rs","percept","r"],["vlm_adapter.rs","percept","r"],["atspi.rs","percept","r"],["cache.rs","percept","r"],
+  ["projector/mod.rs","project","r"],["capturer.rs","project","r"],["detector.rs","project","r"],["executor.rs","project","r"],["validator.rs","project","r"],["platform/linux.rs","project","r"],["platform/macos.rs","project","r"],["platform/windows.rs","project","r"],
+  ["security/mod.rs","security","r"],["security/sandbox.rs","security","r"],["security/crypto.rs","security","r"],["security/audit.rs","security","r"],["security/isolation.rs","security","r"],["security/profile.rs","security","r"],
+  ["mcp/server.rs","mcp","r"],["mcp/protocol.rs","mcp","r"],["mcp/tools","mcp","r"],
+  ["pty_manager.rs","term","r"],["tabs.rs","term","r"],["term_sandbox.rs","term","r"],["sanitizer.rs","term","r"],
+  ["vm/manager.rs","vm","r"],["vm/gateway.rs","vm","r"],["iso_loader.rs","vm","r"],["vm/network.rs","vm","r"],
+  ["tray.rs","sys","r"],["clipboard.rs","sys","r"],["pii_detector.rs","sys","r"],["detect.rs","sys","r"],
+  ["url/server.rs","url","r"],["whitelist.rs","url","r"],["url/security.rs","url","r"],["hmac.rs","url","r"],
+  ["auth/login.rs","authp","r"],["gate.rs","authp","r"],["perm/storage.rs","authp","r"],
+  ["imap.rs","conn","r"],["caldav.rs","conn","r"],["credentials.rs","conn","r"],["registry.rs","conn","r"],
+  ["FAISS index","data","a"],["action_graph.db","data","a"],["/dev/shm","data","r"],["vault (AES)","data","a"],
+  ["perceive.py","py","g"],["entropy_gate.py","py","a"],["thalamus.py","py","a"],["build_index.py","py","a"],["run_cortex.sh","py","a"],["arise.sh","py","a"],
+  ["Cargo.toml","build","a"],["build.rs","build","r"],
+  ["expert_cache.rs","moe","r"],
+  ["lens/mod.rs","lens","r"],["lens/encoder.rs","lens","r"]
+];
+const L=[
+  ["main.tsx","App.tsx"],["main.tsx","index.css"],["index.html","main.tsx"],
+  ["App.tsx","LoginPage"],["App.tsx","ChatDefault"],["App.tsx","ImmersiveDefault"],["App.tsx","CodePage"],["App.tsx","VaultDefault"],["App.tsx","TerminalDefault"],["App.tsx","SettingsMain"],["App.tsx","MCPManager"],["App.tsx","ServerManagement"],["App.tsx","VMManager"],["App.tsx","FirstLaunchWelcome"],
+  ["ChatDefault","useAgentSocket"],["ChatDefault","Button"],["ChatDefault","Input"],["ImmersiveDefault","HostModeGate"],["ImmersiveDefault","useAgentSocket"],["CodePage","Header"],["VaultDefault","FileTree"],["VaultDefault","ProgressBar"],["TerminalDefault","Header"],["SettingsMain","Tabs"],["MCPManager","Card"],["ServerManagement","Card"],["VMManager","Card"],["LoginPage","Input"],["LoginPage","Button"],
+  ["Button","colors.ts"],["Header","format.ts"],["Card","colors.ts"],["Alert","colors.ts"],
+  ["useAgentSocket","main.rs"],
+  ["main.rs","forge.rs"],["main.rs","action_graph.rs"],["main.rs","recovery.rs"],["main.rs","parser.rs"],["main.rs","verifier.rs"],["main.rs","operator.rs"],["main.rs","types.rs"],["main.rs","memory.rs"],["main.rs","input_arbiter.rs"],["main.rs","inference/mod.rs"],["main.rs","perception/mod.rs"],["main.rs","projector/mod.rs"],["main.rs","security/mod.rs"],["main.rs","mcp/server.rs"],["main.rs","pty_manager.rs"],["main.rs","vm/manager.rs"],["main.rs","tray.rs"],["main.rs","url/server.rs"],["main.rs","auth/login.rs"],["main.rs","gate.rs"],
+  ["forge.rs","parser.rs"],["forge.rs","verifier.rs"],["action_graph.rs","memory.rs"],["action_graph.rs","action_graph.db"],["operator.rs","mcp/server.rs"],
+  ["inference/mod.rs","llama_cpp.rs"],["inference/mod.rs","hydra.rs"],["inference/mod.rs","liquid.rs"],["inference/mod.rs","memory_handoff.rs"],["inference/mod.rs","kv_slots.rs"],["inference/mod.rs","grammar.rs"],
+  ["hydra.rs","liquid.rs"],["hydra.rs","llama_cpp.rs"],["hydra.rs","action_graph.rs"],["hydra.rs","retrieval.rs"],["hydra.rs","memory_handoff.rs"],
+  ["liquid.rs","llama_cpp.rs"],["liquid.rs","vlm_adapter.rs"],
+  ["memory_handoff.rs","action_graph.rs"],["memory_handoff.rs","types.rs"],
+  ["retrieval.rs","FAISS index"],["retrieval.rs","action_graph.rs"],["retrieval.rs","memory.rs"],["retrieval.rs","memory_tiers.rs"],["memory_tiers.rs","/dev/shm"],["memory_tiers.rs","security/crypto.rs"],["memory_tiers.rs","FAISS index"],["memory_tiers.rs","memory.rs"],["sleep_gate.rs","memory_tiers.rs"],["sleep_gate.rs","hydra.rs"],["sleep_gate.rs","main.rs"],["hydra.rs","LFM2-8B-A1B"],
+  ["llama_cpp.rs","kv_slots.rs"],["llama_cpp.rs","grammar.rs"],["kv_slots.rs","/dev/shm"],["grammar.rs","parser.rs"],
+  ["perception/mod.rs","capture.rs"],["perception/mod.rs","delta.rs"],["perception/mod.rs","vlm_adapter.rs"],["perception/mod.rs","atspi.rs"],["perception/mod.rs","cache.rs"],
+  ["vlm_adapter.rs","liquid.rs"],["atspi.rs","perceive.py"],["cache.rs","/dev/shm"],["capture.rs","/dev/shm"],
+  ["projector/mod.rs","capturer.rs"],["projector/mod.rs","detector.rs"],["projector/mod.rs","executor.rs"],["projector/mod.rs","validator.rs"],
+  ["capturer.rs","platform/linux.rs"],["detector.rs","platform/linux.rs"],["executor.rs","platform/linux.rs"],["capturer.rs","platform/macos.rs"],["capturer.rs","platform/windows.rs"],
+  ["input_arbiter.rs","executor.rs"],["input_arbiter.rs","vm/manager.rs"],["validator.rs","gate.rs"],["validator.rs","security/profile.rs"],
+  ["security/mod.rs","security/sandbox.rs"],["security/mod.rs","security/crypto.rs"],["security/mod.rs","security/audit.rs"],["security/mod.rs","security/isolation.rs"],["security/mod.rs","security/profile.rs"],
+  ["security/profile.rs","perm/storage.rs"],
+  ["pty_manager.rs","security/sandbox.rs"],["mcp/server.rs","security/sandbox.rs"],
+  ["memory.rs","security/crypto.rs"],["auth/login.rs","security/crypto.rs"],
+  ["gate.rs","security/audit.rs"],["gate.rs","security/profile.rs"],["gate.rs","perm/storage.rs"],
+  ["mcp/server.rs","mcp/protocol.rs"],["mcp/server.rs","mcp/tools"],["mcp/tools","vault (AES)"],
+  ["pty_manager.rs","term_sandbox.rs"],["pty_manager.rs","sanitizer.rs"],["pty_manager.rs","tabs.rs"],
+  ["vm/manager.rs","iso_loader.rs"],["vm/manager.rs","vm/network.rs"],["vm/manager.rs","vm/gateway.rs"],["vm/gateway.rs","vm/network.rs"],
+  ["tray.rs","detect.rs"],["clipboard.rs","pii_detector.rs"],
+  ["url/server.rs","whitelist.rs"],["url/server.rs","url/security.rs"],["url/security.rs","hmac.rs"],["url/security.rs","security/audit.rs"],
+  ["auth/login.rs","vault (AES)"],
+  ["registry.rs","imap.rs"],["registry.rs","caldav.rs"],["registry.rs","credentials.rs"],
+  ["memory.rs","FAISS index"],["memory.rs","vault (AES)"],["build_index.py","FAISS index"],["entropy_gate.py","vault (AES)"],["thalamus.py","main.rs"],["perceive.py","main.rs"],["run_cortex.sh","llama_cpp.rs"],["arise.sh","/dev/shm"],
+  ["build.rs","llama_cpp.rs"],["Cargo.toml","main.rs"],
+  ["expert_cache.rs","llama_cpp.rs"],["expert_cache.rs","hydra.rs"],["expert_cache.rs","/dev/shm"],
+  ["lens/mod.rs","lens/encoder.rs"],["lens/encoder.rs","cache.rs"],["lens/mod.rs","action_graph.rs"]
+];
+const col={g:"#97C459",a:"#EF9F27",r:"#E24B4A",done:"#3FB6E0"};
+const colD={g:"#3B6D11",a:"#854F0B",r:"#A32D2D",done:"#1E6E8C"};
+const stat={g:"Working (baseline)",a:"In progress",r:"Not started",done:"Done"};
+
+const KEY="laputa_progress_v2";
+let saved={};
+try{saved=JSON.parse(localStorage.getItem(KEY)||"{}");}catch(e){saved={};}
+function statusOf(d){ return saved[d.id] || d.base; }
+function save(){ try{localStorage.setItem(KEY,JSON.stringify(saved));}catch(e){} }
+
+const nodes=N.map(d=>({id:d[0],g:d[1],base:d[2],ax:groups[d[1]].x,ay:groups[d[1]].y}));
+const idset=new Set(nodes.map(n=>n.id));
+const links=L.filter(l=>idset.has(l[0])&&idset.has(l[1])).map(l=>({source:l[0],target:l[1]}));
+const svg=d3.select("#g"),wrap=document.getElementById("wrap2");
+const W=wrap.clientWidth,H=wrap.clientHeight;
+const root=svg.append("g");
+const z=d3.zoom().scaleExtent([0.25,4]).on("zoom",e=>root.attr("transform",e.transform));
+svg.call(z);
+root.append("g").selectAll("text").data(Object.values(groups)).join("text").attr("x",d=>d.x).attr("y",d=>d.y).attr("text-anchor","middle").attr("fill","#6b7280").attr("font-size","13px").attr("font-weight","600").attr("opacity",0.4).text(d=>d.l);
+const link=root.append("g").attr("stroke","#6b7280").attr("stroke-opacity",0.22).selectAll("line").data(links).join("line").attr("stroke-width",0.6);
+const node=root.append("g").selectAll("circle").data(nodes).join("circle").attr("r",6).attr("fill",d=>col[statusOf(d)]).attr("stroke",d=>colD[statusOf(d)]).attr("stroke-width",1).style("cursor","pointer");
+const tip=document.getElementById("tip");
+
+function paint(){ node.attr("fill",d=>col[statusOf(d)]).attr("stroke",d=>colD[statusOf(d)]); updateMetrics(); }
+function cycle(d){
+  const order=["r","a","done"];
+  const cur=statusOf(d);
+  let next;
+  if(d.base==="g"){ next = (cur==="g")?"done":"g"; }
+  else { const i=order.indexOf(cur==="g"?"r":cur); next=order[(i+1)%order.length]; }
+  if(next===d.base) delete saved[d.id]; else saved[d.id]=next;
+  save(); paint();
+}
+node.on("mousemove",function(e,d){const r=wrap.getBoundingClientRect();tip.style.opacity=1;tip.style.left=(e.clientX-r.left+12)+"px";tip.style.top=(e.clientY-r.top+12)+"px";tip.innerHTML="<b>"+d.id+"</b><br>"+groups[d.g].l+" · "+stat[statusOf(d)]+"<br><span style='color:#6b7280'>click to change status</span>";})
+.on("mouseleave",function(){tip.style.opacity=0;})
+.on("click",function(e,d){e.stopPropagation();cycle(d);});
+
+const sim=d3.forceSimulation(nodes)
+ .force("link",d3.forceLink(links).id(d=>d.id).distance(34).strength(0.25))
+ .force("charge",d3.forceManyBody().strength(-72))
+ .force("x",d3.forceX(d=>d.ax).strength(0.22))
+ .force("y",d3.forceY(d=>d.ay).strength(0.22))
+ .force("collide",d3.forceCollide(9.5))
+ .on("tick",()=>{link.attr("x1",d=>d.source.x).attr("y1",d=>d.source.y).attr("x2",d=>d.target.x).attr("y2",d=>d.target.y);node.attr("cx",d=>d.x).attr("cy",d=>d.y);});
+node.call(d3.drag().on("start",(e,d)=>{if(!e.active)sim.alphaTarget(0.3).restart();d.fx=d.x;d.fy=d.y;}).on("drag",(e,d)=>{d.fx=e.x;d.fy=e.y;}).on("end",(e,d)=>{if(!e.active)sim.alphaTarget(0);d.fx=null;d.fy=null;}));
+function fitView(){const x0=d3.min(nodes,n=>n.x),y0=d3.min(nodes,n=>n.y),x1=d3.max(nodes,n=>n.x),y1=d3.max(nodes,n=>n.y);const dx=x1-x0,dy=y1-y0,cx=(x0+x1)/2,cy=(y0+y1)/2;const s=Math.min(0.9,0.9/Math.max(dx/W,dy/H));svg.transition().duration(500).call(z.transform,d3.zoomIdentity.translate(W/2,H/2).scale(s).translate(-cx,-cy));}
+setTimeout(fitView,1400);
+
+function applyFilter(f){node.attr("opacity",d=>{const s=statusOf(d);if(f==="all")return 1;return s===f?1:0.12;});}
+document.getElementById("f-all").onclick=()=>applyFilter("all");
+document.getElementById("f-r").onclick=()=>applyFilter("r");
+document.getElementById("f-a").onclick=()=>applyFilter("a");
+document.getElementById("f-done").onclick=()=>applyFilter("done");
+document.getElementById("reset").onclick=fitView;
+document.getElementById("clear").onclick=function(){if(confirm("Clear all your progress marks and reset to baseline?")){saved={};save();paint();}};
+document.getElementById("q").addEventListener("input",function(){const v=this.value.toLowerCase().trim();node.attr("opacity",d=>!v||d.id.toLowerCase().includes(v)?1:0.1).attr("r",d=>v&&d.id.toLowerCase().includes(v)?9:6);});
+
+function updateMetrics(){
+  let done=0,prog=0,total=nodes.length;
+  nodes.forEach(d=>{const s=statusOf(d);if(s==="done")done++;else if(s==="a")prog++;});
+  const rem=total-done;
+  const pct=Math.round((done/total)*100);
+  document.getElementById("m-total").textContent=total;
+  document.getElementById("m-done").textContent=done;
+  document.getElementById("m-prog").textContent=prog;
+  document.getElementById("m-rem").textContent=rem;
+  document.getElementById("m-pct").textContent=pct+"%";
+  const bar=document.getElementById("bar");
+  bar.innerHTML="";
+  const segs=[["done",done],["a",prog],["r",total-done-prog]];
+  segs.forEach(([k,n])=>{if(n>0){const div=document.createElement("div");div.style.width=(n/total*100)+"%";div.style.background=col[k];bar.appendChild(div);}});
+  document.getElementById("barlbl").textContent=done+" of "+total+" files done · "+prog+" in progress";
+}
+updateMetrics();
+})();
+</script>
+</body>
+</html>

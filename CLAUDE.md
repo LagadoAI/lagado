@@ -223,8 +223,10 @@ cd lagado-ui && npx tsc --noEmit
 
 ## Delegation workflow
 
-Opus/Sonnet: planning, review, architecture. Haiku: all implementation and file edits.
-Verify with `cargo check --workspace` + `npx tsc --noEmit` after every Haiku task.
+**2026-06-16: Opus does ALL work — planning AND implementation. No Haiku, no Sonnet delegation** (user directive, until they say otherwise). Use the `advisor` tool for the adversarial-review/skeptic pass before load-bearing designs and when declaring done.
+Verify with `cargo check --workspace` + `npx tsc --noEmit` after changes.
+
+**Docs policy (2026-06-16 reversal):** `docs/`, `LAPUTA HOW TO/`, and all plans/PDFs are now COMMITTED (was: local-only). Machine = single point of failure; repo is private forever, only the binary ships → disaster-recovery beats secrecy. Never make the repo public.
 
 ## Status (2026-06-11)
 
@@ -300,7 +302,9 @@ backed up). Fixes applied: DHCP eth0, `ufw allow ssh`, install host pubkey, gene
 
 ## Harness doctrine (2026-06-14) — direction for the rebuild
 
-Full plan: `docs/plans/LAGADO_HARNESS_DOCTRINE_AND_PLAN_v1.md`. Verified LFM facts: `/home/alucard/projects/research/LFM research.txt`.
+Full plan: `docs/plans/LAGADO_HARNESS_DOCTRINE_AND_PLAN_v1.md`. **Execution spec (current build):** `docs/plans/LAGADO_HARNESS_BUILD_SPEC_v1.md`. Verified LFM facts: `/home/alucard/projects/research/LFM research.txt`.
+
+**Build progress (2026-06-16, Fedora 44 rebuild):** CUDA llama.cpp built; models on disk; GPU inference proven (8B-A1B Q4 full-offload, 188 tok/s). **The spine:** deterministic floor that always works + model upgrade when affordable, governor-arbitrated, off the hot path (recurs in router/importance-gate/conduction/perception/model-modes). Work order: **① DONE** grammar-constrained router + 8B fallback (closed the silent UNPARSED→CHAT hole; `generate_constrained` on the adapter). **② DONE** G3 baseline — Jaccard F1=0.43/R=0.75 → ColBERT-350M mean-pool cosine F1=0.52/R=0.92 (the Board relevance path; MaxSim deferred). **③ NEXT** the Board (Park scorer as a NEW fn ≠ `information_value`; relevance MUST be rank/min-max normalized before the additive sum — pooled cosines are compressed [0.96,0.99]; G3 tunes β only, α/γ by principle; Rust↔Python parity test; sequenced ③a floor / ③b G4 trust / ③c G2 model-refinement). **④** single-turn loop + `supervisor.rs` escalation ladder. 166 lib tests.
 
 **The harness is the moat; the model is swappable** (`InferenceAdapter`). LFM2 is NOT a continuous-reflex ODE net (that's the LTC/CfC/NCP drone line) — it's a discrete edge-CPU transformer-hybrid. Use it for edge efficiency + shippable license + agentic variants + cheap fine-tune, not for "liquid" magic. The word "Liquid" must not load-bear in an architecture decision.
 
