@@ -231,6 +231,84 @@ pub fn should_cutoff(current: &str, last: &str, count: usize, screen_unchanged: 
     current == last && count >= 2 && screen_unchanged
 }
 
+/// Words that carry no grounding signal — action verbs, articles, prepositions, and the
+/// generic chrome nouns goals use ("button", "menu", "icon"). Stripped before matching so
+/// "Click the Applications menu" grounds on "applications", not the generic "menu".
+const GROUNDING_STOPWORDS: &[&str] = &[
+    "click", "open", "press", "type", "select", "tap", "go", "navigate", "find", "the", "a",
+    "an", "in", "on", "to", "of", "and", "or", "for", "with", "at", "into", "your", "this",
+    "that", "it", "please", "button", "menu", "icon", "item", "top", "panel", "bar",
+];
+
+fn content_tokens(s: &str) -> Vec<String> {
+    s.split(|c: char| !c.is_alphanumeric())
+        .filter(|t| !t.is_empty())
+        .map(|t| t.to_lowercase())
+        .filter(|t| !GROUNDING_STOPWORDS.contains(&t.as_str()))
+        .collect()
+}
+
+/// Deterministic element grounding — the perception-side of "the board surfaces ingredients."
+/// Small models are label-blind (they pick by position, not by matching the goal's words to
+/// element labels), so the harness does the match and hands the model a hint. Parses the
+/// `--focused` screen text for `ref_N … "label"` rows and returns the single best ref whose
+/// label matches the goal, scored by (#goal-matched label tokens, fraction of the label
+/// covered). Returns None unless there's a STRICT winner — a wrong hint is worse than none,
+/// since the model tends to follow it. The lexical floor; a semantic upgrade is future work
+/// (ColBERT mean-pool cosine does NOT separate short labels — verified 2026-06-17).
+///
+/// `exclude` drops one ref from consideration — used to skip the element just clicked once it
+/// has already changed the screen, so the hint stops pushing the label-blind model to re-click
+/// the same target (e.g. re-toggling an already-open menu) instead of recognizing completion.
+pub fn most_relevant_ref(screen: &str, goal: &str, exclude: Option<&str>) -> Option<(String, String)> {
+    let goal_toks = content_tokens(goal);
+    if goal_toks.is_empty() {
+        return None;
+    }
+    // (matched_count, coverage, ref, label) for each element with a non-empty label.
+    let mut scored: Vec<(usize, f32, String, String)> = Vec::new();
+    for line in screen.lines() {
+        let Some(rpos) = line.find("ref_") else { continue };
+        let ref_id: String = line[rpos..]
+            .chars()
+            .take_while(|c| *c == 'r' || *c == 'e' || *c == 'f' || *c == '_' || c.is_ascii_digit())
+            .collect();
+        // Label is the first double-quoted span on the line.
+        let Some(q1) = line.find('"') else { continue };
+        let Some(q2rel) = line[q1 + 1..].find('"') else { continue };
+        let label = &line[q1 + 1..q1 + 1 + q2rel];
+        if exclude == Some(ref_id.as_str()) {
+            continue;
+        }
+        let label_toks = content_tokens(label);
+        if label_toks.is_empty() {
+            continue;
+        }
+        let matched = label_toks.iter().filter(|t| goal_toks.contains(t)).count();
+        if matched == 0 {
+            continue;
+        }
+        let coverage = matched as f32 / label_toks.len() as f32;
+        scored.push((matched, coverage, ref_id, label.to_string()));
+    }
+    if scored.is_empty() {
+        return None;
+    }
+    // Sort by (matched desc, coverage desc); require a STRICT winner over the runner-up.
+    scored.sort_by(|a, b| {
+        b.0.cmp(&a.0).then(b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal))
+    });
+    if scored.len() > 1 {
+        let (m0, c0, ..) = &scored[0];
+        let (m1, c1, ..) = &scored[1];
+        if m0 == m1 && (c0 - c1).abs() < f32::EPSILON {
+            return None; // tie — don't mislead the model
+        }
+    }
+    let (_, _, ref_id, label) = scored.into_iter().next().unwrap();
+    Some((ref_id, label))
+}
+
 /// Map a step's observable result to a supervisor outcome. Pure — unit-testable.
 /// Observed at the TOP of the next loop iteration, where the prior action's on-screen
 /// effect is finally readable (the effect of an action at step N isn't visible until the
@@ -309,6 +387,10 @@ pub async fn agent_loop(
     // action_executed == true; reset when a different action executes.
     let mut last_exec_action = String::new();
     let mut consecutive_exec_count: usize = 0;
+
+    // The ref of the most recent click that executed — lets the grounding hint exclude an
+    // already-actioned element once it has changed the screen (anti re-click of one target).
+    let mut last_clicked_ref: Option<String> = None;
 
     let goal = state.lock().await.goal.clone();
     let system_prompt = config::system_prompt();
@@ -472,8 +554,24 @@ pub async fn agent_loop(
             if formatted.is_empty() { String::new() } else { format!("{formatted}\n\n") }
         };
 
+        // Deterministic grounding hint: the small model is label-blind (picks by position,
+        // not by matching goal words to element labels), so the harness resolves the best
+        // element and names it. Advisory — the model still chooses the action (click/type/…).
+        // Once the last-clicked element has already changed the screen, exclude it so the hint
+        // stops pushing a re-click of the same target (e.g. re-toggling an open menu).
+        let prev_changed = !prev_screen.is_empty()
+            && blake3::hash(screen.as_bytes()) != blake3::hash(prev_screen.as_bytes());
+        let exclude_ref = if prev_changed { last_clicked_ref.as_deref() } else { None };
+        let grounding_section = match most_relevant_ref(&screen, &goal, exclude_ref) {
+            Some((ref_id, label)) => {
+                chronos::log(&format!("grounding_hint: {ref_id} (\"{label}\")"));
+                format!("The on-screen element most relevant to your goal is {ref_id} (\"{label}\").\n")
+            }
+            None => String::new(),
+        };
+
         let prompt = format!(
-            "{system_prompt}\n\n{episodic_section}{visual_section}{skill_section}{tool_section}{context}\n\n{observation_section}Screen:\n{screen}\n\nGoal: {goal}\n\nWhat is your next action?"
+            "{system_prompt}\n\n{episodic_section}{visual_section}{skill_section}{tool_section}{context}\n\n{observation_section}Screen:\n{screen}\n\nGoal: {goal}\n\n{grounding_section}What is your next action?"
         );
 
         let adapter_clone = adapter.clone();
@@ -572,6 +670,14 @@ pub async fn agent_loop(
                 // An action "executed" if it wasn't denied by the user or blocked by the gate.
                 let action_executed = !output.starts_with("Denied by user:")
                     && !output.starts_with("Blocked:");
+
+                // Remember the clicked ref so next turn's grounding hint can exclude it once
+                // its effect is on screen (stops the label-blind model re-clicking one target).
+                if action_executed {
+                    if let ToolCall::Click { selector } = &tool_call {
+                        last_clicked_ref = Some(selector.clone());
+                    }
+                }
 
                 memory.push(Step {
                     index: enforcer.step(),
@@ -896,6 +1002,41 @@ mod observation_tests {
     fn step_outcome_executed_without_screen_change_is_nochange() {
         use crate::supervisor::StepOutcome;
         assert_eq!(classify_step_outcome(true, false), StepOutcome::NoChange);
+    }
+
+    // Real --focused screen rows; "Directory Menu" shares the generic word "menu" with the
+    // goal, so naive overlap ties — coverage must break it toward "Applications".
+    const SCREEN: &str = "[focused: Desktop]\n     \
+        ref_1  toggle button   \"Applications\"  (0,0,102,26)\n     \
+        ref_4  toggle button   \"2026-06-17\"  (1161,0,68,26)\n     \
+        ref_5  toggle button   \"Show Desktop\"  (488,752,48,48)\n     \
+        ref_6  toggle button   \"Directory Menu\"  (744,752,48,48)";
+
+    #[test]
+    fn grounding_beats_menu_collision() {
+        let (r, l) = most_relevant_ref(SCREEN, "Click the Applications menu in the top panel", None).unwrap();
+        assert_eq!(r, "ref_1");
+        assert_eq!(l, "Applications");
+    }
+
+    #[test]
+    fn grounding_matches_paraphrase_on_shared_tokens() {
+        let screen = "[focused: Desktop]\n  ref_2  button  \"Firefox Web Browser\"  (1,1,1,1)\n  \
+                      ref_5  button  \"Show Desktop\"  (2,2,2,2)";
+        let (r, _) = most_relevant_ref(screen, "Open the web browser", None).unwrap();
+        assert_eq!(r, "ref_2");
+    }
+
+    #[test]
+    fn grounding_returns_none_when_no_label_matches() {
+        assert!(most_relevant_ref(SCREEN, "scroll down to the bottom", None).is_none());
+    }
+
+    #[test]
+    fn grounding_skips_empty_labels() {
+        let screen = "[focused: x]\n  ref_1  button  \"\"  (0,0,1,1)\n  ref_2  button  \"Settings\"  (0,0,1,1)";
+        let (r, _) = most_relevant_ref(screen, "open settings", None).unwrap();
+        assert_eq!(r, "ref_2");
     }
 }
 
