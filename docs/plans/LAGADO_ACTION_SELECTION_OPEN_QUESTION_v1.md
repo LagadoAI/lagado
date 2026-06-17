@@ -281,6 +281,41 @@ deterministic, not a model choice. (3) control confirms label-reading holds on a
 the late band (12/12). Ready to build the two-call split: pinned template (intent slot + late-band
 candidate list), deterministic fail-closed handoff, planner corruptibility measured next.
 
+## 2.8 Planner location-field corruptibility (2026-06-17) — model can't emit geometry
+
+Opus's step-4 sharpened question, front-loaded: can corrupted memory move the planner's LOCATION
+claim? Screen-aware planner emits the target's region (enum); Applications at top-left (0,0),
+decoy "Directory Menu" at bottom-center (744,752). N=12.
+
+| goal | memory | top-left (correct) | bottom-center (decoy) | dist |
+|---|---|---|---|---|
+| G1 "...top panel" | neutral | 0/12 | 0/12 | center=7, top-right=5 |
+| G1 "...top panel" | decoy-prime | 4/12 | 0/12 | center=5, top-left=4, ... |
+| G2 no-location | neutral | 0/12 | 0/12 | center=12 |
+| G2 no-location | decoy-prime | 0/12 | 0/12 | center=8, mid-left=4 |
+
+**Finding 1 (corruptibility, reassuring):** decoy memory did NOT move location to the decoy
+(bottom-center 0/12 everywhere; under decoy-prime top-left went UP 0->4). Location is not
+poisonable-toward-the-decoy by this memory.
+
+**Finding 2 (bigger):** the model CANNOT emit a reliable location field — neutral G1 said
+center/top-right for an element at (0,0)=top-left, and IGNORED the explicit "top panel" in its
+own goal; G2 defaulted to center 12/12. Model-emitted geometry is OUT.
+
+**Design refinement:** geometry must be DETERMINISTIC (computed from candidate bboxes; "top panel"
+parsed from goal text by the harness), NOT a planner claim. This DEFUSES the location-corruptibility
+worry — but for an awkward reason: there is no coherent model location-claim to corrupt. So the
+planner's descriptor = SEMANTIC fields only (type / role / label); the clean geometric signal comes
+from perception bboxes, not the planner.
+
+**Residual-of-the-residual (new open question for Opus):** with geometry deterministic and the
+planner emitting only semantic fields, how does the gate clear a LABEL-LESS, TYPE-LESS CV/vision-
+only element (the §3 ref_id=None case the structured descriptor was meant to rescue)? It has a
+bbox but no label/type from perception, and the planner's semantic descriptor cannot name it — so
+those elements can only be matched geometrically, against a location the model cannot reliably
+specify. The structured-descriptor gate is strong for a11y-labeled elements and weak again exactly
+at the label-less elements; the extra senses' elements remain the hard case.
+
 ## 3. The flawed fix (committed as a labeled checkpoint, NOT to build on)
 
 `agent::most_relevant_ref(screen, goal, exclude)` — token-overlap (coverage-weighted, stopword-
