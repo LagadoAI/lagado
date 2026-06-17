@@ -47,10 +47,49 @@ isolates the problem cleanly:
   Thunar; goal never achieved; 48/48 screen cells changed.
 
 **Conclusion: the grammar is a safety RAIL, empirically necessary but not sufficient — it
-makes the model pick a VALID index, not the RIGHT one.** §6(b) is now data, not theory. The
-candidate list carries valid tokens but NO selection signal. Levers to weigh (skeptic pass):
-(1) rank the list so the position bias works FOR us; (2) shrink to relevance-filtered top-k;
-(3) label-adjacent emphasis; (4) §6(e) slightly larger model — size floor or affordance?
+makes the model pick a VALID index, not the RIGHT one.** §6(b) is now data, not theory.
+
+## 2.2 Offline candidate-ordering experiments (2026-06-17) — THE DECISIVE RESULT
+
+Direct `/completion` probes against the live 8B (LFM2-8B-A1B, temp 0.2, grammar-constrained,
+real system prompt, N=12/condition, goal "Click the Applications menu in the top panel").
+Every condition was 12/12 IDENTICAL — temp 0.2 + grammar ≈ deterministic, so this is a stable,
+exploitable property, not noise.
+
+| # | candidate list | "Applications" at | model picked | correct |
+|---|---|---|---|---|
+| A | 6 items (live repro, spatial order) | row 1 (el_0) | "Directory Menu" (last) | 0/12 |
+| B | 6 items | row 5 (el_4) | **Applications** | 12/12 |
+| C | 3 items | row 1 (el_0) | "Show Desktop" (row 2) | 0/12 |
+| D | 3 items | row 3 / last (el_2) | **Applications** | 12/12 |
+| E | 6 items, 1-INDEXED tokens | row 1 (el_1) | "Directory Menu" (last) | 0/12 |
+| F | 6 items, Apps row 1 but TOKEN el_1 (first grammar-alt el_0 = last row) | row 1 | "Directory Menu" (el_0, last) | 0/12 |
+| G | 7 items, SACRIFICIAL first row | row 2 (el_1) | "Directory Menu" (last) | 0/12 |
+| H | 6 items, BLANK-LINE separator after header | row 1 (el_0) | "Directory Menu" (last) | 0/12 |
+| I | 6 items, Apps LAST + "menu" decoy moved to front | row 6 / last (el_5) | **Applications** | 12/12 |
+
+**Findings (rule-in / rule-out):**
+1. **NOT label-blind, NOT a capability floor.** The model matches "Applications" 36/36 whenever
+   it's in the LATE portion (B, D, I), and does partial matching ("menu" → "Directory Menu").
+   §6(e) answered: a bigger model is NOT the bottleneck.
+2. **NOT list length / top-k.** The short 3-item list (C) STILL fails when the answer is early.
+   Shortening is not the lever — Opus's "World 1" is rejected.
+3. **NOT the token or grammar-alternative ordering.** 1-indexing (E) doesn't help; F decouples
+   the visual row from the token and the dead slot tracks the ROW, not the token/grammar order.
+4. **It's a LATE-LIST / primacy-skip bias.** The model under-attends to EARLY candidates and
+   label-matches among LATER ones. G is decisive: even a sacrificial first row doesn't rescue an
+   answer at row 2 of 7. C's tiny-list wrong-pick (el_1, not the "menu" decoy) is minor residue.
+5. **VERIFIED FIX (deterministic, cheap): place the goal-relevant candidate LAST / in the late
+   portion** → 12/12 (I), and it beats the "menu" decoy once the decoy is early. The model's OWN
+   label-reading does the selection; the deterministic layer only has to get the right candidate
+   into the attended (late) zone — it does NOT need to be a perfect 1-pick ranker (place the
+   relevance top-k in the LAST rows and let the model choose among them). Determinism on the
+   RAILS (ordering), strategy left to the model — exactly the doctrine.
+
+**Residual tension (still real):** the ranker that decides "late placement" is the lossy step
+(§5). But the bar is lower than feared — it must merely surface the right candidate into the
+late band, not rank it #1. Open: does the late-bias hold across goals/screens, longer lists, and
+multiple plausible candidates? (next experiment).
 
 ## 3. The flawed fix (committed as a labeled checkpoint, NOT to build on)
 
