@@ -364,6 +364,40 @@ isolated-binary which the model fails — the verify-mode lesson). Gating experi
 it: does the planner re-emit a satisfied sub-goal (the re-click one layer up), with vs without the
 action-outcome fact? Q1 today kills the live failure; Q2 makes multi-step report "done" vs "stall".
 
+## 2.11 Q2 re-emit gate (2026-06-17) — planner-terminal completion is REAL (label-free fact)
+
+Opus's Q2 gate: does the planner emit `complete` on a satisfied screen WITH a salient distractor
+present (the discriminating cell — "can it stop when something is clickable but shouldn't be"),
+and does the deterministic action-outcome fact rescue it? Prototype planner (`complete` | act),
+sub-goal "Open the Applications menu", N=12.
+
+| action-outcome fact | complete | failure mode |
+|---|---|---|
+| none | 8/12 | unreliable |
+| names "Applications" | 8/12 | + re-emits Applications 4/12 — the fact's TEXT primed it (§2.5) |
+| **label-free (structural)** | **12/12** | none — passes the distractor cell |
+| control: UNSATISFIED screen | did NOT complete (picked wrong next action — planner has the lean-prompt label-blindness too) | |
+
+**FORK RESOLVED → Option 3 (planner-terminal completion) is REAL — conditioned on a LABEL-FREE
+fact.** The action-outcome fact IS the safe Q1→Q2 channel Opus described, BUT only if it describes
+the STRUCTURAL state-change ("N new elements appeared, a menu opened") and NEVER names elements —
+any prepended label primes, even inside a "deterministic fact" (naming "Applications" dropped
+completion-quality and induced re-emit). The label-free structural fact is directly derivable from
+the FusedElement pre/post diff (Q1's machinery). With it, the planner emits `complete` 12/12 on a
+satisfied screen with the Directory-Menu attractor + menu items salient.
+
+**Carry-forward for the build:** (a) the planner has the same lean-prompt label-blindness (control
+picked the wrong next action) → it needs the SAME pinned-SYS-framing treatment as the executor for
+its act-selection; completion (complete vs act) is the part that works. (b) Q1's diff has TWO
+consumers — HALT (same-action+changed, built) and the label-free PROCEED fact (different-action+
+changed) fed to the planner; the fact generator must emit structural change only, no labels.
+
+**STATUS: the loop is closed in design, every load-bearing component MEASURED:** selection spine
+(memory-isolated + late-band + pinned prompt), deterministic fail-closed escape, Q1 action-effect
+(live-fixed the re-click), Q2 planner-terminal completion (label-free fact, gate-passed). Remaining
+is BUILD (two-call split + label-free fact generator + planner SYS-framing) + the parked Tier-2
+label-less promotion (v2 enhancement, correctly non-blocking).
+
 ## 3. The flawed fix (committed as a labeled checkpoint, NOT to build on)
 
 `agent::most_relevant_ref(screen, goal, exclude)` — token-overlap (coverage-weighted, stopword-
