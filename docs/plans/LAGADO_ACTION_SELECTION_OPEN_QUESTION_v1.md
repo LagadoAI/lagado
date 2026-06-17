@@ -1,7 +1,13 @@
-# Action Selection — the open architectural question (for the advisor, fresh context)
+# Action Selection — the full chronological record (CURRENT state + plan in §2.18)
 
-**Status 2026-06-17.** Written to survive a compaction. Resume = read this → ask the advisor
-the question in §6 → make a plan. Do NOT start coding the fix before the advisor pass.
+**Status 2026-06-17. READ §2.18 FIRST for the current state and build order** (latest work is at the
+BOTTOM; §2.x is chronological). This file began as "an open question for the advisor" (that original
+framing is now §3–§7, kept as HISTORY) and grew into the complete record of the action-selection work
+(§2.1–§2.18): every experiment, decision, and reframe, in order. Compaction-safe by design.
+Quick state: the a11y floor (memory-isolated executor + late-band ranking + deterministic fail-closed
++ Q1 action-effect + deterministic sequencer) is BUILT + LIVE; the §2.18 reframe (findings 1&2 are one
+problem → constrained-vocab selection + fail-closed) drove the discriminating-phrasing root-cause fix;
+build order = master-floor → router(intent→curated-capability) → ship reach-and-operate → DOM → vision.
 
 ## 1. Where we are (proven this session)
 
