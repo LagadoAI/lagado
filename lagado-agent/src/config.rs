@@ -8,7 +8,7 @@ use directories::ProjectDirs;
 
 const DEFAULT_MODEL_FILE: &str = "LFM2-8B-A1B-Q4_K_M.gguf";
 pub const CLASSIFIER_MODEL_FILE: &str = "LFM2.5-1.2B-Instruct-Q4_K_M.gguf";
-pub const CLASSIFIER_CONTEXT_SIZE: usize = 512;
+pub const CLASSIFIER_CONTEXT_SIZE: usize = 2048;
 const CLASSIFIER_PORT: u16 = 8081;
 
 pub const VLM_MODEL_FILE: &str = "LFM2-VL-450M-F16.gguf";

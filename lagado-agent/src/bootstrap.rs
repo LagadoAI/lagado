@@ -25,7 +25,7 @@ pub fn check_health_sync(base_url: &str, timeout_secs: u64) -> bool {
 }
 
 /// Start a lightweight llama-server on port 8081 for intent classification.
-/// Uses the 1.2B model, CPU-only (preserves GPU for the 8B), ctx=512.
+/// Uses the 1.2B model, CPU-only (preserves GPU for the 8B), ctx=`CLASSIFIER_CONTEXT_SIZE`.
 /// Returns None if the model file doesn't exist or if a server is already running.
 pub async fn ensure_classifier_server() -> Option<Child> {
     let model_path = config::classifier_model_path();
