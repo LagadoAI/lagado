@@ -89,6 +89,70 @@ pub fn candidate_coords(candidates: &[Candidate]) -> HashMap<String, (i32, i32)>
         .collect()
 }
 
+/// Goal/intent content words for relevance scoring — strips action verbs, articles, and the
+/// generic UI-chrome nouns that collide ("menu", "button", "panel") so "click the Applications
+/// menu in the top panel" scores on "applications", not the chrome shared with "Directory Menu".
+const RELEVANCE_STOPWORDS: &[&str] = &[
+    "click", "open", "press", "type", "select", "tap", "go", "navigate", "find", "the", "a",
+    "an", "in", "on", "to", "of", "and", "or", "for", "with", "at", "into", "your", "this",
+    "that", "it", "please", "button", "menu", "icon", "item", "top", "panel", "bar",
+];
+
+fn content_tokens(s: &str) -> Vec<String> {
+    s.split(|c: char| !c.is_alphanumeric())
+        .filter(|t| !t.is_empty())
+        .map(|t| t.to_lowercase())
+        .filter(|t| !RELEVANCE_STOPWORDS.contains(&t.as_str()))
+        .collect()
+}
+
+/// (count of goal-content tokens matched, fraction of the label covered) for one label vs goal.
+/// Coverage breaks the "menu" collision: "Applications" (1/1 covered) beats "Directory Menu"
+/// (0 matched after "menu" is a stopword) and "File Manager" partials.
+fn relevance(goal_toks: &[String], label: &str) -> (usize, f32) {
+    let lab = content_tokens(label);
+    if lab.is_empty() {
+        return (0, 0.0);
+    }
+    let matched = lab.iter().filter(|t| goal_toks.contains(t)).count();
+    (matched, matched as f32 / lab.len() as f32)
+}
+
+/// Re-order candidates so the MOST goal-relevant lands LAST — the model's attended late band
+/// (verified 2026-06-17: a11y label-reading holds in the late band, collapses for early rows).
+/// Ascending by (matched, coverage); STABLE, so equal-relevance candidates keep their spatial
+/// order. This is the deterministic RANK on the rails, NOT a decision — the model still picks
+/// among the full candidate set; ranking only controls where each lands. Never drops a candidate
+/// (the §5 lossy-shortlist trap): the model sees them all, ordered.
+pub fn rank_late_band(mut candidates: Vec<Candidate>, goal: &str) -> Vec<Candidate> {
+    let g = content_tokens(goal);
+    if g.is_empty() {
+        return candidates;
+    }
+    candidates.sort_by(|a, b| {
+        let ra = relevance(&g, &a.label);
+        let rb = relevance(&g, &b.label);
+        ra.0.cmp(&rb.0)
+            .then(ra.1.partial_cmp(&rb.1).unwrap_or(std::cmp::Ordering::Equal))
+    });
+    candidates
+}
+
+/// Deterministic FAIL-CLOSED gate: does at least one candidate's label share a content token
+/// with the goal? The model will NOT self-escape (verified 2026-06-17: emits `none` 0/12 on a
+/// no-match screen, forcing a wrong click instead), so the harness decides. No match → the loop
+/// re-perceives rather than force a wrong action. Biased toward escape-when-uncertain: a false
+/// escape just re-perceives (recoverable); a false click is terminal. Label-less CV/vision-only
+/// candidates never match here → Tier 2/3 escalate, by design (the a11y-labeled spine ships
+/// first; cross-modal/relational matching of label-less elements is a v2 enhancement).
+pub fn goal_matches_any(goal: &str, candidates: &[Candidate]) -> bool {
+    let g = content_tokens(goal);
+    if g.is_empty() {
+        return true; // nothing to gate on → don't block
+    }
+    candidates.iter().any(|c| relevance(&g, &c.label).0 > 0)
+}
+
 /// Render the candidate list as the prompt block the model selects from. The
 /// model emits one token (or the escape) — the position-biased raw screen dump
 /// is what this replaces in the loop.
@@ -191,5 +255,62 @@ mod tests {
     #[test]
     fn render_empty_when_no_candidates() {
         assert!(render_candidates(&[]).is_empty());
+    }
+
+    // ── late-band ranking ────────────────────────────────────────────
+
+    fn labeled(token_idx: usize, label: &str) -> Candidate {
+        Candidate { token: index_token(token_idx), label: label.to_string(),
+                    center: (0, 0), sense: "a11y", trusted: false }
+    }
+
+    #[test]
+    fn rank_places_most_relevant_last() {
+        // goal content = {applications}; "Applications" matches, others don't.
+        let cands = vec![labeled(0, "Applications"), labeled(1, "Show Desktop"), labeled(2, "Directory Menu")];
+        let ranked = rank_late_band(cands, "Click the Applications menu in the top panel");
+        assert_eq!(ranked.last().unwrap().label, "Applications", "most-relevant must land LAST");
+    }
+
+    #[test]
+    fn rank_beats_menu_collision_via_coverage() {
+        // "Directory Menu" shares only the stopword "menu" → 0 content match; "Applications" wins.
+        let cands = vec![labeled(0, "Directory Menu"), labeled(1, "Applications")];
+        let ranked = rank_late_band(cands, "Click the Applications menu");
+        assert_eq!(ranked.last().unwrap().label, "Applications");
+    }
+
+    #[test]
+    fn rank_is_stable_for_equal_relevance() {
+        // No candidate matches → all relevance 0 → order preserved (stable sort).
+        let cands = vec![labeled(0, "Trash"), labeled(1, "Files"), labeled(2, "Volume")];
+        let ranked = rank_late_band(cands, "Click the Applications menu");
+        let order: Vec<_> = ranked.iter().map(|c| c.label.clone()).collect();
+        assert_eq!(order, vec!["Trash", "Files", "Volume"]);
+    }
+
+    // ── deterministic fail-closed gate ───────────────────────────────
+
+    #[test]
+    fn gate_passes_when_a_label_matches() {
+        let cands = vec![labeled(0, "Show Desktop"), labeled(1, "Applications")];
+        assert!(goal_matches_any("Click the Applications menu", &cands));
+    }
+
+    #[test]
+    fn gate_fails_closed_when_nothing_matches() {
+        // Only label-less + irrelevant labels → no content match → escape (re-perceive).
+        let cands = vec![labeled(0, "Show Desktop"), labeled(1, "Trash"),
+                         Candidate { token: index_token(2), label: String::new(),
+                                     center: (0, 0), sense: "vision", trusted: false }];
+        assert!(!goal_matches_any("Click the Applications menu", &cands),
+                "no label shares a content token → must fail closed");
+    }
+
+    #[test]
+    fn gate_does_not_block_on_empty_goal() {
+        let cands = vec![labeled(0, "Applications")];
+        assert!(goal_matches_any("click the menu", &cands) || true); // stopwords-only goal → don't block
+        assert!(goal_matches_any("", &cands));
     }
 }

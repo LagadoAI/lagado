@@ -318,7 +318,9 @@ pub async fn agent_loop(
     // recency floor (`assemble_context`) otherwise. The spine: a model-upgrade layer over a
     // floor that always works. embed() is blocking HTTP → run off the lock via spawn_blocking
     // (mutex-guard discipline: no await is held under the guard).
-    let episodic_context = {
+    // Reserved for the v2 upstream planner (the executor is memory-isolated, §2.5). Computed but
+    // not injected here. TODO(v1-cleanup): skip these computations until the planner consumes them.
+    let _episodic_context = {
         let goal_for_embed = goal.clone();
         let qvec = tokio::task::spawn_blocking(move || crate::embedding::embed(&goal_for_embed).ok())
             .await
@@ -346,7 +348,7 @@ pub async fn agent_loop(
     // Visual similarity context: encode current frame → find top-3 most visually
     // Visual similarity context: encode current frame → find top-3 past episodes with
     // similar visual context. Runs once per invocation. No-op when encoder absent.
-    let visual_context: String = {
+    let _visual_context: String = {
         match (&visual_encoder, std::fs::read(crate::config::FRAME_PATH)) {
             (Some(enc), Ok(png)) => {
                 let enc2 = enc.clone();
@@ -368,7 +370,7 @@ pub async fn agent_loop(
 
     // Retrieve relevant skills as advisory depth context — top-3 by Jaccard on goal text.
     // These are injected into the prompt as guidance, never executed verbatim.
-    let skill_context: String = {
+    let _skill_context: String = {
         let skills = skill_library.retrieve(&goal, 3);
         SkillLibrary::format_for_prompt(&skills)
     };
@@ -397,7 +399,7 @@ pub async fn agent_loop(
         if let Some(ref obs) = observation {
             chronos::log(&format!("observation_injected: {}", &obs[..obs.len().min(120)]));
         }
-        let observation_section = match &observation {
+        let _observation_section = match &observation {
             Some(obs) => format!("{obs}\n\n"),
             None => String::new(),
         };
@@ -443,34 +445,14 @@ pub async fn agent_loop(
         }
         had_prior_step = true;
 
-        let context = memory.context_string();
-        // Taper retrieved priors by turn. Priors (episodic/visual/skills) are
-        // most useful at turn 1 when the model has no trajectory yet. By turn 4+
-        // the action history in `context` plus the live screen are fresher signal.
-        let prior_turn = enforcer.step();
-        let inject_priors = prior_turn <= 3;
-
-        let episodic_section = if inject_priors && !episodic_context.is_empty() {
-            format!("Past sessions:\n{episodic_context}\n\n")
-        } else {
-            String::new()
-        };
-        let visual_section = if inject_priors && !visual_context.is_empty() {
-            format!("Visually similar past sessions:\n- {visual_context}\n\n")
-        } else {
-            String::new()
-        };
-        let skill_section = if inject_priors && !skill_context.is_empty() {
-            format!("{skill_context}\n")
-        } else {
-            String::new()
-        };
-        // Top-10 tools most relevant to the current goal — never flat-dump all tools
-        let tool_section = {
-            let entries = registry.enabled_entries();
-            let formatted = crate::retrieval::Retriever::format_tools_for_prompt(&entries, &goal, 10);
-            if formatted.is_empty() { String::new() } else { format!("{formatted}\n\n") }
-        };
+        // MEMORY-ISOLATED executor (verified 2026-06-17 §2.5): injecting retrieved priors (the
+        // Board's episodic/visual/skill memory) lets semantically-related text OVERRIDE the
+        // candidate labels and flip the pick (decoy-priming → 12/12 wrong). The selection call
+        // therefore sees ONLY the pinned SYS framing + the late-band-ranked candidate list + the
+        // goal — no priors, no tool dump, no trajectory. Retrieved memory belongs to an upstream
+        // planning step (v2), never the click decision; loop/repeat control is the deterministic
+        // supervisor's job. The board infra (assemble_slice/embedder/sleep_gate) stays for that
+        // planner; it is simply not wired into THIS prompt.
 
         // Action space = the arbiter's fused, deterministically-indexed candidate set.
         // The model picks ONE synthetic-index token (`el_N`) or the escape ("none"); the
@@ -485,27 +467,54 @@ pub async fn agent_loop(
         let labels = crate::perception::parse_ref_labels(&screen);
         let fused = crate::perception::arbiter::fuse(&bboxes, &[], &[]);
         let candidates = crate::perception::selection::build_candidates(&fused, &labels);
+        // Deterministic FAIL-CLOSED (verified §2.7: the model emits the escape token `none` 0/12
+        // on a no-match screen — it forces a wrong click instead of declining, so the harness must
+        // decide). No candidate label shares a content token with the goal → re-perceive rather
+        // than force a wrong action. Label-less CV/vision-only elements never match → Tier 2/3
+        // escalate, by design. Bounded by the step cap (enforcer.advance) + supervisor stall→human.
+        if !candidates.is_empty()
+            && !crate::perception::selection::goal_matches_any(&goal, &candidates)
+        {
+            chronos::log("fail_closed: no candidate matches goal → re-perceive");
+            let _ = confirm_tx.send(envelope::make("action_log", envelope::ActionLogPayload {
+                text: "No on-screen element matches the goal; re-perceiving.".to_string(),
+            })).await;
+            memory.push(Step {
+                index: enforcer.step(), prompt: String::new(),
+                output: "fail_closed: re-perceive".to_string(), action: None,
+            });
+            prev_screen = screen.clone();
+            prev_action_executed = false;
+            continue;
+        }
+        // Deterministic LATE-BAND RANK (verified §2.2–2.6): place the most goal-relevant candidate
+        // LAST, where the model's label-reading holds (it collapses for early rows). Determinism on
+        // the RAILS (ordering); the model still picks. Tokens/coords stay stable under the reorder.
+        let candidates = crate::perception::selection::rank_late_band(candidates, &goal);
         // Register `el_N` → center so the chosen token resolves to a coord click (works for
         // label-less / `ref_id`-`None` elements — the point of the index space).
         actuator.set_targets(crate::perception::selection::candidate_coords(&candidates));
         let candidate_block = crate::perception::selection::render_candidates(&candidates);
-        // GBNF over THIS frame's candidates (+ mandatory escape). Empty when there are no
-        // candidates → unconstrained decoding, so non-GUI tool-use tasks are unaffected.
+        // GBNF over THIS frame's candidates (+ escape; escape is a deterministic-only path — the
+        // model never reaches it). Empty when there are no candidates → unconstrained decoding.
         let grammar = crate::grammar::selector_grammar(&fused);
         if !grammar.is_empty() {
-            chronos::log(&format!("selector_grammar: {} candidates + escape", candidates.len()));
+            chronos::log(&format!("selector_grammar: {} candidates (late-band) + escape", candidates.len()));
         }
 
-        // Candidate list is the action surface when present; fall back to the raw dump only
-        // when fusion produced nothing (e.g. a non-GUI context with no perceived elements).
+        // PINNED, MEMORY-ISOLATED executor prompt: SYS framing + late-band candidate list + goal.
+        // ⚠ The SYS preamble LENGTH is LOAD-BEARING — it lands the candidate list in the model's
+        // late-attention band, which is WHY label-reading works (verified §2.6: strip the preamble
+        // and selection collapses to first-position, label-blind). Do NOT trim the system prompt or
+        // reorder this template without re-running the position sweep (the regression guard:
+        // docs/plans/experiments/lean_gate.py + h2h.py) — selection rots SILENTLY otherwise.
         let screen_section = if candidate_block.is_empty() {
             format!("Screen:\n{screen}\n\n")
         } else {
             format!("{candidate_block}\n")
         };
-
         let prompt = format!(
-            "{system_prompt}\n\n{episodic_section}{visual_section}{skill_section}{tool_section}{context}\n\n{observation_section}{screen_section}Goal: {goal}\n\nWhat is your next action?"
+            "{system_prompt}\n\n{screen_section}Goal: {goal}\n\nWhat is your next action?"
         );
 
         let adapter_clone = adapter.clone();
