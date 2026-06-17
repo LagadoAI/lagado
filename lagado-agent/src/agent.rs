@@ -231,6 +231,39 @@ pub fn should_cutoff(current: &str, last: &str, count: usize, screen_unchanged: 
     current == last && count >= 2 && screen_unchanged
 }
 
+/// Decompose a goal into ordered sub-goals on EXPLICIT sequential markers only. Deterministic
+/// (the model cannot decompose — it emits a spurious `complete` even handed the plan, §2.14 — so
+/// the harness does ordering, never the model). CONSERVATIVE by design: it splits only on clear
+/// imperative-sequence connectives, never semantically. A goal with no marker is a single sub-goal.
+/// A compound-but-unmarked goal ("find the cheapest flight and book it") stays ONE sub-goal and
+/// relies on the executor + the supervisor's deviation/impasse handback — never a mangled plan
+/// (§2.15: un-parseable → clean handback, not garbage steps). Pure — unit-testable.
+pub fn decompose_goal(goal: &str) -> Vec<String> {
+    // Markers ordered so multi-word forms are tried before their substrings.
+    const MARKERS: &[&str] = &[", and then ", " and then ", ", then ", " then ", "; ", " after that "];
+    let mut parts: Vec<String> = vec![goal.trim().to_string()];
+    loop {
+        let mut next = Vec::new();
+        let mut split_any = false;
+        for p in &parts {
+            let lower = p.to_lowercase();
+            // earliest marker position across all markers
+            let cut = MARKERS.iter().filter_map(|m| lower.find(m).map(|i| (i, m.len()))).min_by_key(|(i, _)| *i);
+            match cut {
+                Some((i, len)) => {
+                    next.push(p[..i].trim().to_string());
+                    next.push(p[i + len..].trim().to_string());
+                    split_any = true;
+                }
+                None => next.push(p.clone()),
+            }
+        }
+        parts = next;
+        if !split_any { break; }
+    }
+    parts.into_iter().filter(|s| !s.is_empty()).collect()
+}
+
 /// Map a step's observable result to a supervisor outcome. Pure — unit-testable.
 /// Observed at the TOP of the next loop iteration, where the prior action's on-screen
 /// effect is finally readable (the effect of an action at step N isn't visible until the
@@ -312,6 +345,19 @@ pub async fn agent_loop(
 
     let goal = state.lock().await.goal.clone();
     let system_prompt = config::system_prompt();
+
+    // DETERMINISTIC SEQUENCER (§2.14–2.15): split the goal into ordered sub-goals up front (the
+    // model can't decompose — it spuriously completes; harness owns ordering). The executor runs
+    // ONE sub-goal at a time; `current_sub` is the deterministic progress pointer (trajectory
+    // state, NOT retrieved memory — the safe category). The pointer advances when a sub-goal's
+    // action takes effect (below); exhausting the plan is deterministic completion, not the
+    // model's fallthrough `complete`. v1: one primary action per sub-goal (multi-action sub-goals
+    // and semantically-compound goals fall to the executor + supervisor handback).
+    let sub_goals = decompose_goal(&goal);
+    let mut current_sub: usize = 0;
+    if sub_goals.len() > 1 {
+        chronos::log(&format!("sequencer: {} sub-goals: {:?}", sub_goals.len(), sub_goals));
+    }
 
     // Priors slice — the Board. Park-scored top-k (relevance × recency × importance) from
     // the ColBERT embedder when it's up AND the board has embedded rows; deterministic
@@ -442,8 +488,35 @@ pub async fn agent_loop(
                 // tactical machinery (recovery_manager, should_cutoff, structural detection).
                 _ => {}
             }
+
+            // SEQUENCER ADVANCE (§2.15): the prior action targeted sub_goals[current_sub]. If it
+            // took effect (the a11y screen changed — element-level, not raw pixels), that sub-goal's
+            // action accomplished a change → advance the pointer. Exhausting the plan = DETERMINISTIC
+            // completion (not the model's fallthrough `complete`). No-effect → pointer holds → the
+            // sub-goal is re-selected and should_cutoff/impasse catches a true stall. This subsumes
+            // the single-action completion case (one sub-goal → effect → advance past end → done).
+            // v1 advance signal = structural screen change; the per-action-class effect SIGNATURE +
+            // precondition (already-satisfied → advance without acting) are the §2.15 refinement.
+            if prev_action_executed && screen_changed {
+                current_sub += 1;
+                if current_sub >= sub_goals.len() {
+                    chronos::log("sequencer_complete: all sub-goals done");
+                    let _ = confirm_tx.send(envelope::make("action_log", envelope::ActionLogPayload {
+                        text: "Goal accomplished — all steps completed.".to_string(),
+                    })).await;
+                    let _ = confirm_tx.send(envelope::make("status", envelope::StatusPayload {
+                        state: "goal_done".to_string(),
+                        detail: "Goal accomplished — all steps completed.".to_string(),
+                    })).await;
+                    break;
+                }
+                chronos::log(&format!("sequencer_advance: → sub-goal {}/{}: {}",
+                    current_sub + 1, sub_goals.len(), sub_goals[current_sub]));
+            }
         }
         had_prior_step = true;
+        // Active sub-goal drives THIS step's selection (ranking / fail-closed / prompt).
+        let active_goal: &str = &sub_goals[current_sub];
 
         // MEMORY-ISOLATED executor (verified 2026-06-17 §2.5): injecting retrieved priors (the
         // Board's episodic/visual/skill memory) lets semantically-related text OVERRIDE the
@@ -473,9 +546,9 @@ pub async fn agent_loop(
         // than force a wrong action. Label-less CV/vision-only elements never match → Tier 2/3
         // escalate, by design. Bounded by the step cap (enforcer.advance) + supervisor stall→human.
         if !candidates.is_empty()
-            && !crate::perception::selection::goal_matches_any(&goal, &candidates)
+            && !crate::perception::selection::goal_matches_any(active_goal, &candidates)
         {
-            chronos::log("fail_closed: no candidate matches goal → re-perceive");
+            chronos::log("fail_closed: no candidate matches sub-goal → re-perceive");
             let _ = confirm_tx.send(envelope::make("action_log", envelope::ActionLogPayload {
                 text: "No on-screen element matches the goal; re-perceiving.".to_string(),
             })).await;
@@ -490,7 +563,7 @@ pub async fn agent_loop(
         // Deterministic LATE-BAND RANK (verified §2.2–2.6): place the most goal-relevant candidate
         // LAST, where the model's label-reading holds (it collapses for early rows). Determinism on
         // the RAILS (ordering); the model still picks. Tokens/coords stay stable under the reorder.
-        let candidates = crate::perception::selection::rank_late_band(candidates, &goal);
+        let candidates = crate::perception::selection::rank_late_band(candidates, active_goal);
         // Register `el_N` → center so the chosen token resolves to a coord click (works for
         // label-less / `ref_id`-`None` elements — the point of the index space).
         actuator.set_targets(crate::perception::selection::candidate_coords(&candidates));
@@ -514,7 +587,7 @@ pub async fn agent_loop(
             format!("{candidate_block}\n")
         };
         let prompt = format!(
-            "{system_prompt}\n\n{screen_section}Goal: {goal}\n\nWhat is your next action?"
+            "{system_prompt}\n\n{screen_section}Goal: {active_goal}\n\nWhat is your next action?"
         );
 
         let adapter_clone = adapter.clone();
@@ -572,32 +645,11 @@ pub async fn agent_loop(
                 let screen_unchanged = !prev_screen.is_empty()
                     && blake3::hash(screen.as_bytes()) == blake3::hash(prev_screen.as_bytes());
 
-                // Q1 ACTION-EFFECT DETECTION (deterministic, no goal-string judgment). The model
-                // is single-turn-fresh, so after an action takes effect it re-derives the SAME
-                // action from a screen it doesn't remember acting on (the menu re-click: clicked
-                // Applications, menu opened, then re-clicked it 5× and toggled it). If the current
-                // pick REPEATS the immediately-prior action AND that prior action CHANGED the
-                // screen (effect confirmed), the action already succeeded — repeating only
-                // toggles/undoes. Stop re-deriving. This is the COMPLEMENT of should_cutoff below
-                // (same-action-with-NO-effect = stuck; here same-action-WITH-effect = accomplished).
-                // NOT goal-satisfaction (that is Q2, the v2 planner's terminal case) — purely "this
-                // action already had its effect; don't repeat it."
-                let prior_had_effect = !prev_screen.is_empty() && !screen_unchanged;
-                if !last_exec_action.is_empty() && current_action_desc == last_exec_action && prior_had_effect {
-                    let msg = format!(
-                        "'{}' already took effect (the screen changed); not repeating it.",
-                        last_exec_action
-                    );
-                    chronos::log(&format!("action_effect_complete: {msg}"));
-                    let _ = confirm_tx.send(envelope::make("action_log", envelope::ActionLogPayload {
-                        text: msg.clone(),
-                    })).await;
-                    let _ = confirm_tx.send(envelope::make("status", envelope::StatusPayload {
-                        state: "goal_done".to_string(),
-                        detail: msg,
-                    })).await;
-                    break;
-                }
+                // (Q1 action-effect detection now lives at the loop TOP as the SEQUENCER ADVANCE:
+                // an action that took effect advances the sub-goal pointer, and the single-sub-goal
+                // case advances past the end → deterministic completion — so the re-click is
+                // prevented by the sub-goal changing/completing before the next selection, not by a
+                // halt here. should_cutoff below still catches the same-action-with-NO-effect stall.)
 
                 // Pre-execution cutoff: 3rd+ identical action with no visible screen effect.
                 // Uses prev_screen (set at end of prior turn) to detect whether the 2nd
@@ -993,6 +1045,43 @@ mod observation_tests {
         assert_eq!(classify_step_outcome(true, false), StepOutcome::NoChange);
     }
 
+    // ── decompose_goal ───────────────────────────────────────────────
+
+    #[test]
+    fn decompose_single_step_is_one_subgoal() {
+        assert_eq!(decompose_goal("Click the Applications menu"), vec!["Click the Applications menu"]);
+    }
+
+    #[test]
+    fn decompose_splits_on_then() {
+        assert_eq!(
+            decompose_goal("Open the Applications menu then launch the Terminal Emulator"),
+            vec!["Open the Applications menu", "launch the Terminal Emulator"]
+        );
+    }
+
+    #[test]
+    fn decompose_splits_multiple_and_then() {
+        assert_eq!(
+            decompose_goal("open A, then open B, then open C"),
+            vec!["open A", "open B", "open C"]
+        );
+    }
+
+    #[test]
+    fn decompose_does_not_split_bare_and() {
+        // "and" without "then" is NOT a sequential marker — stays one sub-goal (never mangle a
+        // semantically-compound goal into garbage steps; rely on executor + handback instead).
+        assert_eq!(
+            decompose_goal("find the cheapest flight and book it"),
+            vec!["find the cheapest flight and book it"]
+        );
+    }
+
+    #[test]
+    fn decompose_trims_and_drops_empty() {
+        assert_eq!(decompose_goal("  open A ;  open B  "), vec!["open A", "open B"]);
+    }
 }
 
 // ── Distillation tests ────────────────────────────────────────────

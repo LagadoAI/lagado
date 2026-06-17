@@ -550,6 +550,31 @@ dead plan.
 Carry: "replaced a corruptible reactive planner with an uncorruptible BLIND one; the escalation
 ladder is what makes blind safe — it hands back when plan and world diverge."
 
+## 2.16 SEQUENCER BUILT + 2-step walk PASSES (2026-06-17) — multi-step is live
+
+Built the deterministic sequencer (§2.15 spec) and ran the exact 2-step goal that failed at §2.13.
+- `decompose_goal` (pure, 5 tests): splits on explicit sequential markers (then / and then / ; /
+  after that) only; bare "and" / semantic-compound stays one sub-goal (no mangled plan).
+- `agent_loop`: `sub_goals` + `current_sub` pointer (deterministic trajectory state). Per step,
+  selection (rank/fail-closed/prompt) uses `sub_goals[current_sub]`. At the loop top, when the
+  prior action took effect (a11y screen changed), the pointer ADVANCES; exhausting the plan →
+  deterministic completion. The old Q1 halt is subsumed (single sub-goal → effect → advance past
+  end → done).
+- **VM walk "Open the Applications menu then launch the Terminal Emulator":** step1 click el_0=
+  Applications (51,13) → menu opens → advance; step2 click el_4=Terminal Emulator (86,67, exactly
+  the menu item's center) → terminal launches (31/48 cells) → "Goal accomplished — all steps
+  completed." 2 clicks, 15.8s, final focus = "Terminal - laputa@lagado-vm: ~". The task that
+  wandered+prematurely-completed at §2.13 now runs clean. 219 lib tests.
+
+**V1 LOOP COMPLETE (single + multi-step), every component measured/built/live:** deterministic
+decomposition → memory-free executor (memory-isolated + late-band + fail-closed + grammar) per
+sub-goal → deterministic pointer-advance on action-effect → deterministic completion. NO LLM
+planner, NO Board memory in the action path. KNOWN V1 scope limits (documented, not hidden):
+(a) one primary action per sub-goal (multi-action sub-goals fall to executor + handback);
+(b) advance signal is structural screen-change, not yet the per-action-class effect SIGNATURE +
+precondition-skip (§2.15 refinement); (c) semantically-compound goals (no sequential marker) stay
+one sub-goal → executor + supervisor handback; (d) Tier-2 label-less elements escalate (v2).
+
 ## 3. The flawed fix (committed as a labeled checkpoint, NOT to build on)
 
 `agent::most_relevant_ref(screen, goal, exclude)` — token-overlap (coverage-weighted, stopword-
