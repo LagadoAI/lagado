@@ -30,6 +30,28 @@ Goal: "Click the Applications menu in the top panel." `Applications` was `ref_1`
   achieved. BUT it then re-clicked ref_1 five times (toggling the menu) and never emitted
   `done`. The static-goal hint kept pointing at ref_1 even after the menu was open.
 
+## 2.1 v2 walk — grammar rail WIRED + run live (2026-06-17, commit b355886)
+
+The spec §2 design is now built and ran end-to-end against the VM (same goal). Result
+isolates the problem cleanly:
+
+- **Rail works (new, real):** every action was a valid `click(selector="el_N")` — ZERO
+  parse failures, ZERO hallucinated/off-screen targets. `el_N → coord` resolution worked
+  (arbiter fuse → build_candidates → set_targets → cache → xdotool). The supervisor caught
+  the stall at 14 steps and escalated to human cleanly. GBNF validated against live
+  llama-server (accepted; emitted `click(selector="el_0")` on a clean 3-item probe).
+- **Label-blindness PERSISTS (confirmed, as predicted):** "Applications" is at (0,0) → it
+  sorts to `el_0`. The model's FIRST pick was `el_4`; it NEVER picked `el_0`. Pick
+  distribution `el_5`×7, `el_4`×4, `el_22`, `el_12`, `el_11` — mid-list position clustering
+  (NOT even the first-item bias that helped on the short probe). Wandered into opening
+  Thunar; goal never achieved; 48/48 screen cells changed.
+
+**Conclusion: the grammar is a safety RAIL, empirically necessary but not sufficient — it
+makes the model pick a VALID index, not the RIGHT one.** §6(b) is now data, not theory. The
+candidate list carries valid tokens but NO selection signal. Levers to weigh (skeptic pass):
+(1) rank the list so the position bias works FOR us; (2) shrink to relevance-filtered top-k;
+(3) label-adjacent emphasis; (4) §6(e) slightly larger model — size floor or affordance?
+
 ## 3. The flawed fix (committed as a labeled checkpoint, NOT to build on)
 
 `agent::most_relevant_ref(screen, goal, exclude)` — token-overlap (coverage-weighted, stopword-
