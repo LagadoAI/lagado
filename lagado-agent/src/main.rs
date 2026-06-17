@@ -31,6 +31,7 @@ mod self_model;
 mod skill_library;
 mod sleep_gate;
 mod supervisor;
+mod sysinfo;
 mod terminal;
 mod tools;
 mod types;
