@@ -230,6 +230,127 @@ pub fn feasibility(predicted_mb: f32, free_mb: f32) -> Feasibility {
     }
 }
 
+// ── Engine planner (ModelInfo × hardware × user × calibration → plan) ───────────
+
+use crate::gguf::ModelInfo;
+
+/// Conservative context to probe on a COLD start (no calibration yet). Not an assumption
+/// about the model (we read its real max = `context_length`); it's a safe starting point
+/// we can't exceed without prediction. The first launch measures, then calibrated plans
+/// grow it. DEFER policy, overridable.
+const COLD_START_CTX: u32 = 4096;
+
+/// User overrides from settings — each `None` means "let the governor decide".
+#[derive(Debug, Clone, Default)]
+pub struct EnginePrefs {
+    pub ctx: Option<u32>,
+    pub n_gpu_layers: Option<u32>,
+    pub cpu_moe: Option<bool>,
+}
+
+/// A recommended (or override-validated) engine config, with the reasoning for the UI.
+#[derive(Debug, Clone)]
+pub struct EnginePlan {
+    pub ctx: u32,
+    pub n_gpu_layers: u32, // ≤ real block_count; 0 = CPU
+    pub cpu_moe: bool,
+    pub predicted_vram_mb: Option<f32>, // None when uncalibrated
+    pub feasibility: Option<Feasibility>,
+    pub rationale: String,
+}
+
+/// Produce an engine plan from DISCOVERED model facts × probed hardware × user prefs ×
+/// measured calibration. Every number is read, measured, or user-chosen — never a
+/// model/hardware assumption (invariant #9). Cold start (no calibration) is conservative
+/// and honest; it becomes predictive once the runtime records calibration points.
+pub fn plan_engine(
+    model: &ModelInfo,
+    gpu: Option<&GpuInfo>,
+    prefs: &EnginePrefs,
+    cal: &[CalPoint],
+) -> EnginePlan {
+    let model_max_ctx = model.context_length.unwrap_or(COLD_START_CTX as u64) as u32;
+    let block_count = model.block_count.unwrap_or(0) as u32;
+
+    // CPU-only.
+    let Some(gpu) = gpu else {
+        let ctx = prefs.ctx.unwrap_or(COLD_START_CTX).min(model_max_ctx);
+        return EnginePlan {
+            ctx,
+            n_gpu_layers: 0,
+            cpu_moe: false,
+            predicted_vram_mb: None,
+            feasibility: None,
+            rationale: format!("No GPU detected → CPU inference. ctx {ctx} (model max {model_max_ctx})."),
+        };
+    };
+    let free = gpu.vram_free_mb as f32;
+    let weights_mb = model.file_bytes as f32 / (1024.0 * 1024.0);
+
+    // Layers: honor an override, else all REAL layers (not -ngl 99). 0 block_count
+    // (metadata missing) → fall back to the "all" sentinel so llama.cpp offloads all.
+    let ngl = prefs
+        .n_gpu_layers
+        .unwrap_or(if block_count > 0 { block_count } else { 999 })
+        .min(if block_count > 0 { block_count } else { 999 });
+    let cpu_moe = prefs.cpu_moe.unwrap_or(false);
+
+    // Context: honor an override (capped at the real model max), else recommend.
+    let calibrated = predict_vram_mb(model.file_bytes, block_count.max(1), ngl, model_max_ctx, cal).is_some();
+
+    let ctx = match prefs.ctx {
+        Some(c) => c.min(model_max_ctx),
+        None if calibrated => {
+            // Largest ctx whose predicted footprint stays within the VRAM headroom.
+            largest_fitting_ctx(model, gpu, ngl, cal).unwrap_or(COLD_START_CTX).min(model_max_ctx)
+        }
+        None => COLD_START_CTX.min(model_max_ctx), // cold: conservative, will grow after calibration
+    };
+
+    let predicted = predict_vram_mb(model.file_bytes, block_count.max(1), ngl, ctx, cal);
+    let feas = predicted.map(|p| feasibility(p, free));
+
+    let mut rationale = if calibrated {
+        format!(
+            "ctx {ctx}/{model_max_ctx}, {ngl}/{block_count} layers on GPU; predicted {:.0} MiB of {:.0} free",
+            predicted.unwrap_or(0.0), free
+        )
+    } else {
+        format!(
+            "ctx {ctx}/{model_max_ctx} (cold start — conservative until first-launch calibration), {ngl}/{block_count} layers, weights ≈ {weights_mb:.0} MiB of {free:.0} free"
+        )
+    };
+    if model.is_moe() {
+        rationale.push_str(&format!(
+            "; MoE ({} experts) → --cpu-moe available if VRAM is tight ({})",
+            model.expert_count,
+            if cpu_moe { "ON" } else { "off" }
+        ));
+    }
+
+    EnginePlan { ctx, n_gpu_layers: ngl, cpu_moe, predicted_vram_mb: predicted, feasibility: feas, rationale }
+}
+
+/// Binary-search the largest ctx whose predicted footprint stays within the headroom.
+fn largest_fitting_ctx(model: &ModelInfo, gpu: &GpuInfo, ngl: u32, cal: &[CalPoint]) -> Option<u32> {
+    let max_ctx = model.context_length? as u32;
+    let block_count = model.block_count.unwrap_or(0).max(1) as u32;
+    let budget = gpu.vram_free_mb as f32 * VRAM_HEADROOM_FRACTION;
+    let (mut lo, mut hi) = (256u32, max_ctx);
+    let mut best = None;
+    while lo <= hi {
+        let mid = lo + (hi - lo) / 2;
+        let p = predict_vram_mb(model.file_bytes, block_count, ngl, mid, cal)?;
+        if p <= budget {
+            best = Some(mid);
+            lo = mid + 256;
+        } else {
+            hi = mid.saturating_sub(256);
+        }
+    }
+    best
+}
+
 // ── GPU detection ─────────────────────────────────────────────────────────────
 
 /// Detect the NVIDIA GPU with the most free VRAM via `nvidia-smi`.
@@ -398,6 +519,70 @@ mod tests {
         assert_eq!(feasibility(4000.0, 5787.0), Feasibility::Green); // 0.69
         assert_eq!(feasibility(5074.0, 5787.0), Feasibility::Amber); // 0.88 — over headroom, still fits
         assert_eq!(feasibility(6000.0, 5787.0), Feasibility::Red);   // > free
+    }
+
+    // ── planner ──
+    fn model_8b() -> ModelInfo {
+        ModelInfo {
+            arch: "lfm2moe".into(),
+            context_length: Some(128000),
+            block_count: Some(24),
+            embedding_length: Some(2048),
+            head_count: Some(32),
+            head_count_kv: None,
+            expert_count: 32,
+            param_count: None,
+            file_bytes: F8B,
+        }
+    }
+    fn gpu_6gb() -> GpuInfo {
+        GpuInfo { vendor: GpuVendor::Nvidia, vram_total_mb: 6144, vram_free_mb: 5787 }
+    }
+    fn cal_8b() -> Vec<CalPoint> {
+        vec![
+            CalPoint { ctx: 4096,  n_gpu_layers: 24, measured_vram_mb: 5074.0 },
+            CalPoint { ctx: 16384, n_gpu_layers: 24, measured_vram_mb: 5800.0 },
+        ]
+    }
+
+    #[test]
+    fn plan_cpu_only_when_no_gpu() {
+        let p = plan_engine(&model_8b(), None, &EnginePrefs::default(), &[]);
+        assert_eq!(p.n_gpu_layers, 0);
+        assert!(p.ctx <= 128000);
+    }
+
+    #[test]
+    fn plan_cold_start_uses_real_layer_count_not_99() {
+        let p = plan_engine(&model_8b(), Some(&gpu_6gb()), &EnginePrefs::default(), &[]);
+        assert_eq!(p.n_gpu_layers, 24); // the REAL block_count, not the -ngl 99 hack
+        assert_eq!(p.ctx, 4096); // conservative cold-start
+        assert!(p.predicted_vram_mb.is_none()); // honest: no prediction without calibration
+        assert!(p.rationale.contains("cold start"));
+    }
+
+    #[test]
+    fn plan_calibrated_fits_within_headroom() {
+        let p = plan_engine(&model_8b(), Some(&gpu_6gb()), &EnginePrefs::default(), &cal_8b());
+        assert!(p.predicted_vram_mb.is_some());
+        // On a 6 GB card a ~5 GB model leaves little KV room — the planner picks a ctx
+        // that stays GREEN rather than over-committing. (Reveals the card is tight.)
+        assert_eq!(p.feasibility, Some(Feasibility::Green));
+        assert!(p.ctx >= 256 && p.ctx <= 128000);
+    }
+
+    #[test]
+    fn plan_user_override_is_honored_and_flagged() {
+        let prefs = EnginePrefs { ctx: Some(16384), ..Default::default() };
+        let p = plan_engine(&model_8b(), Some(&gpu_6gb()), &prefs, &cal_8b());
+        assert_eq!(p.ctx, 16384); // user's choice respected (advise, don't block)
+        assert_eq!(p.feasibility, Some(Feasibility::Red)); // ...but flagged as won't-fit
+    }
+
+    #[test]
+    fn plan_moe_offers_cpu_moe_in_rationale() {
+        let p = plan_engine(&model_8b(), Some(&gpu_6gb()), &EnginePrefs::default(), &cal_8b());
+        assert!(p.rationale.contains("MoE") && p.rationale.contains("cpu-moe"));
     }
 
     #[test]
