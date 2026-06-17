@@ -211,6 +211,40 @@ repetition? (b) the premature-`done` artifact (own signal, parked). (c) confirm 
 isolated select is robust across the position conditions (C1/C3 already suggest yes). Do NOT wire
 a spine until the lean-isolated select is confirmed and the planning/selection split is designed.
 
+## 2.6 Lean-selector GATE + head-to-head (2026-06-17) — selection is PROMPT-FRAMING-dependent
+
+Opus's gate before wiring the executor spine: position-sweep the EXACT lean memory-free selector
+prompt; confirm lean + late-band hold TOGETHER. N=12, live 8B, grammar-constrained, NO memory.
+
+Same 4 arrangements, zero memory, ONLY the prompt framing differs:
+| arrangement | FULL agent-SYS prompt (no mem) | STRIPPED lean selector prompt (no mem) |
+|---|---|---|
+| P1 target first (el_0) | decoy/last el_5 12/12 | "Show Desktop" el_4 9/12 |
+| P2 target row5 (el_4) [C1] | **target 12/12** | **first item el_0 12/12** |
+| P3 target row4 (el_3) [C3] | **target 12/12** | first item el_0 10/12 |
+| P4 target last (el_5) [I] | **target 12/12** | mid el_3 7/12 |
+
+**SELECTION BEHAVIOR IS DETERMINED BY PROMPT FRAMING, NOT A STABLE MODEL CAPABILITY.** Full SYS
+prompt → label-reading + late-band (P2/P3/P4 = 12/12). Stripped lean prompt → first-position,
+LABEL-BLIND picking. The C1/C3 "reads labels" finding was emergent from the long SYS preamble
+(it pushes the candidate list into the model's strong late-attention zone); strip the preamble
+and selection collapses.
+
+**Gate verdict (nuanced):**
+- ✗ A bespoke STRIPPED lean selector prompt is LABEL-BLIND — do NOT build that.
+- ✓ The working memory-isolated executor = the EXISTING full SYS prompt with the Board slice
+  DELETED (not a stripped prompt). Under it, memory-free + late-band hold together (12/12). The
+  ranker must still place the relevant candidate in the late band (P1 target-first fails 0/12
+  even under full SYS).
+- ⚠️ Label-reading is PROMPT-FRAGILE: any SYS-prompt edit can silently kill selection. Requires a
+  PINNED executor prompt + a REGRESSION GUARD (this position sweep as a CI check), or it rots
+  invisibly — the late-placement trap one more time, now at the prompt-framing level.
+
+**Net:** the two-call split still stands, but "memory-isolated executor" means *delete the Board
+section, keep the SYS framing*, not *write a lean selector*. Carry forward (Opus, unchanged):
+isolating the executor RELOCATES G4 to the planner — measure the planner's single-line
+corruptibility before trusting it. New item: pin + regression-guard the executor prompt.
+
 ## 3. The flawed fix (committed as a labeled checkpoint, NOT to build on)
 
 `agent::most_relevant_ref(screen, goal, exclude)` — token-overlap (coverage-weighted, stopword-
