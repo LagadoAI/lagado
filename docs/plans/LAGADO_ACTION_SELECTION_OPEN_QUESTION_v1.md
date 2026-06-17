@@ -73,24 +73,50 @@ ranked shortlist the weak model still can't choose within).
 
 ## 6. THE QUESTION FOR THE ADVISOR
 
+**UPDATE 2026-06-17 (after reading spec §2 + arbiter.rs + grammar.rs).** Spec §2
+("Selector grammar over the FUSED set") is a LOCKED design we bypassed, not a gap — it already
+answers (a) and (c) on paper, and partly reframes the whole question:
+- Grammar constrains over a **synthetic per-frame index** the arbiter assigns to EVERY
+  `FusedElement` (the deterministic `(y,x,w,h)` sort = stable id space) — NOT over `ref_id`
+  (which is `Option`, `None` for CV/DOM/vision-only → grammar-over-ref_id silently collapses
+  fusion back to a11y-only). Index → bbox-center → coord click (also dodges the `tine` selector
+  gap; raw coord clicks already work).
+- Mandatory `none-of-these → re-perceive` escape production = BOTH the agency fix (decline /
+  complete / re-perceive) AND the perception-escalation trigger (§3).
+- Vision/VLM patches are ENRICHMENT (embeddings on boxes), not a selection vocabulary.
+- State of parts: `arbiter.rs::fuse(a11y,cv,patches)→Vec<FusedElement>` is FULLY BUILT + 16
+  tests, just not called live. `grammar.rs::selector_grammar()` is a STUB returning `""` (no
+  constraint). So "wire arbiter + build grammar" = connect existing parts, not new design.
+
+**So the grammar is a SAFETY RAIL, not a selection-quality mechanism.** Constraining to valid
+indices stops hallucinated/off-screen targets (G4 security win) but does NOT make the pick
+correct: the walk proved the 8B picks by POSITION, so a grammar over 6 valid indices just makes
+it pick the wrong *valid* index. THAT is the surviving open problem.
+
 Given: a deliberately small, **label-blind** local model (picks by position, can't match goal→
 label); multiple **lossy** perception senses (a11y/tine, CV boxes w/o labels, vision patches),
-fused by a **lossy** IoU arbiter that isn't even wired yet; a growing **tool** space (UI +
-native + MCP); and the sovereignty constraint (no big model, single-turn-fresh, determinism on
-rails not strategy) —
+fused by the (built-but-unwired, lossy) IoU arbiter; a growing **tool** space (UI + native +
+MCP); and the sovereignty constraint (no big model, single-turn-fresh, determinism on rails not
+strategy). The grammar-over-fused-index + escape spine is taken as given (spec §2). The real
+questions:
 
-**How should the agent select the next action (tool + target) reliably?** Specifically:
-(a) Is "deterministic ranks a shortlist, model picks (grammar-constrained) + escape" the right
-    spine, or is there a better decomposition?
-(b) How do we keep the shortlist from being lossy in the failure direction (right candidate
-    dropped) when each ranking signal is individually weak — vote/union across signals?
-    confidence-gated escalation (re-perceive a richer sense tier on low shortlist confidence)?
-(c) Where does the IoU arbiter belong relative to ranking — fuse-then-rank, or rank-per-sense-
-    then-merge? Does fusion need to happen before the model sees candidates at all?
-(d) How does completion ("done") get recognized reliably when the model is weak at it and the
-    deterministic layer shouldn't decide goal-satisfaction either?
-(e) Does any of this change if we accept a SLIGHTLY larger local model, or must it hold at 8B-
-    A1B (1B active)?
+(b) **Selection quality within the shortlist.** What makes the model's pick CORRECT when it
+    can't read labels and every ranking signal is individually weak (token overlap dies on
+    no-label candidates; ColBERT cosine doesn't separate short labels — both verified)? Options
+    to weigh: vote/union across signals so the right candidate is never dropped; confidence-
+    gated escalation (re-perceive a richer sense tier when shortlist confidence is low); putting
+    the *label next to the index* in the prompt so the rail also carries selection signal; or
+    accepting that position-blindness needs a different model affordance entirely.
+(d) **Completion / "done."** How is goal-satisfaction recognized reliably when the model is weak
+    at it (re-clicked the open menu 5×) and neither the grammar nor the deterministic layer
+    should decide goal-satisfaction? Does the escape production + a deterministic "screen
+    stopped changing / loop detected" signal suffice, or is done-detection its own organ?
+(e) **Model size.** Does any of this change if we accept a SLIGHTLY larger local model, or must
+    it hold at 8B-A1B (1B active)? Is label-blindness a size problem or a prompt/affordance
+    problem?
+(a')/(c') (now mostly settled by spec §2 — confirm or refute): grammar-over-fused-index + escape
+    is the right spine; fuse-then-rank (arbiter produces the candidate set the ranker scores and
+    the grammar enumerates). Push back if there's a better decomposition.
 
 ## 7. Key file pointers for the fix
 
