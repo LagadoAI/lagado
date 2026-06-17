@@ -1,189 +1,187 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Badge } from "../components/Badge";
+import { Button } from "../components/Button";
 
 interface Props {
   onNext: () => void;
 }
 
-const LIQUID_MODELS = [
-  {
-    filename: "LFM2.5-350M-Q4_K_M.gguf",
-    label: "LFM2.5 — 350M",
-    role: "Intent classifier / fast router",
-    description: "Ultra-fast. Used as the clean-context intent classifier. Not recommended as the primary brain.",
-    size: "~220 MB",
-    ram: "~1 GB",
-    speed: "Instant",
-    tier: "router",
-    recommended: false,
-  },
-  {
-    filename: "LFM2.5-1.2B-Instruct-Q4_K_M.gguf",
-    label: "LFM2.5 — 1.2B",
-    role: "Light assistant",
-    description: "Low-resource devices. Fast responses with limited reasoning depth.",
-    size: "~800 MB",
-    ram: "~2 GB",
-    speed: "Very Fast",
-    tier: "light",
-    recommended: false,
-  },
-  {
-    filename: "LFM2.5-8B-A1B-Q4_K_M.gguf",
-    label: "LFM2.5 — 8B MoE",
-    role: "Primary reasoning brain",
-    description: "8B parameters, only 1B active (MoE). The main Lagado brain — reasoning, planning, and agent execution.",
-    size: "~5 GB",
-    ram: "~6 GB",
-    speed: "Fast",
-    tier: "main",
-    recommended: true,
-  },
-  {
-    filename: "LFM2.5-VL-450M-F16.gguf",
-    label: "LFM2.5 — VL 450M",
-    role: "Vision-language",
-    description: "Visual understanding via SigLIP2 projector. Used alongside the 8B for screen comprehension.",
-    size: "~850 MB",
-    ram: "~2 GB",
-    speed: "Fast",
-    tier: "vision",
-    recommended: false,
-  },
-];
+interface ModelDetail {
+  file: string;
+  arch?: string;
+  context_length?: number | null;
+  block_count?: number | null;
+  expert_count?: number;
+  is_moe?: boolean;
+  size_mb?: number;
+  fit?: string;
+  error?: string;
+}
+
+const roleOf = (f: string, m: ModelDetail): string => {
+  if (m.is_moe || /8b/i.test(f)) return "Primary agent brain";
+  if (/colbert/i.test(f)) return "Retrieval embeddings";
+  if (/(^|[-_])vl|vision|mmproj/i.test(f)) return "Vision encoder";
+  if (/1\.2b|instruct/i.test(f)) return "Fast assistant / classifier";
+  return "Model";
+};
+
+// Infra models (embeddings, vision) run automatically — they aren't the "brain" you pick.
+const isSelectable = (f: string) => !/colbert|mmproj|(^|[-_])vl-|vision/i.test(f);
+
+const fitInfo = (fit?: string): { label: string; cls: string } => {
+  switch (fit) {
+    case "fits":
+      return { label: "fits your GPU", cls: "text-green-400" };
+    case "tight":
+      return { label: "tight on VRAM", cls: "text-yellow-400" };
+    case "partial/cpu":
+      return { label: "partial / CPU", cls: "text-lagado-red" };
+    default:
+      return { label: "CPU", cls: "text-lagado-text-dim" };
+  }
+};
+
+const fmtSize = (mb?: number) =>
+  mb == null ? "—" : mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${mb} MB`;
+const fmtCtx = (c?: number | null) =>
+  c == null ? "—" : c >= 1000 ? `${Math.round(c / 1000)}k` : `${c}`;
 
 export default function FirstLaunchModelSelection({ onNext }: Props) {
-  const [selected, setSelected] = useState("LFM2.5-8B-A1B-Q4_K_M.gguf");
-  const [available, setAvailable] = useState<string[]>([]);
+  const [models, setModels] = useState<ModelDetail[]>([]);
+  const [selected, setSelected] = useState<string>("");
+  const [recommended, setRecommended] = useState<string>("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    invoke<string[]>("list_models").then(setAvailable).catch(() => {});
+    invoke<{ models: ModelDetail[] }>("get_models_detailed")
+      .then((r) => {
+        setModels(r.models);
+        const sel = r.models.filter((m) => !m.error && isSelectable(m.file));
+        const rec =
+          sel.find((m) => m.fit === "fits") ?? sel.find((m) => m.fit === "tight") ?? sel[0];
+        if (rec) {
+          setRecommended(rec.file);
+          setSelected(rec.file);
+        }
+      })
+      .catch(() => setError("Couldn't read models."));
   }, []);
-
-  const visibleModels = LIQUID_MODELS.filter(
-    (m) => available.length === 0 || available.includes(m.filename)
-  );
 
   const handleContinue = async () => {
     setSaving(true);
-    setError("");
     try {
       await invoke("set_active_model", { filename: selected });
-      onNext();
-    } catch (e) {
-      setError("Could not save model selection. You can change it later in Settings.");
-      onNext(); // proceed anyway
-    } finally {
-      setSaving(false);
+    } catch {
+      /* proceed anyway; changeable in Settings */
     }
+    onNext();
+    setSaving(false);
   };
 
-  return (
-    <div className="min-h-screen bg-lagado-bg flex items-center justify-center px-4">
-      <div className="max-w-4xl w-full">
+  const selectable = models.filter((m) => !m.error && isSelectable(m.file));
+  const infra = models.filter((m) => !m.error && !isSelectable(m.file));
 
+  return (
+    <div className="min-h-screen bg-lagado-bg flex items-center justify-center px-4 py-10">
+      <div className="max-w-4xl w-full">
         <div className="mb-8">
-          <h1 className="text-h1 text-lagado-text-bright font-bold mb-2">
-            Choose Your Brain
-          </h1>
+          <h1 className="text-h1 text-lagado-text-bright font-bold mb-2">Choose Your Brain</h1>
           <p className="text-body text-lagado-text-dim">
-            Lagado runs on <span className="text-lagado-text font-semibold">Liquid AI</span> —
-            stateless foundation models built for tool use, not conversation.
-            You can change this later in Settings.
+            Lagado runs local, stateless models built for tool use. Sizes and context below
+            are read from your actual model files. You can change this anytime in Settings.
           </p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
-          {visibleModels.map((model) => {
-            const isSelected = selected === model.filename;
-            const isUnavailable = available.length > 0 && !available.includes(model.filename);
+        {selectable.length === 0 && !error && (
+          <p className="text-body-sm text-lagado-text-dim mb-6">
+            No models found in <span className="font-mono">~/.laputa-secure/models/</span>.
+          </p>
+        )}
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+          {selectable.map((m) => {
+            const isSelected = selected === m.file;
+            const fit = fitInfo(m.fit);
             return (
               <div
-                key={model.filename}
-                onClick={() => !isUnavailable && setSelected(model.filename)}
-                className={`
-                  p-5 border rounded-sm transition-all
-                  ${isUnavailable ? "opacity-40 cursor-not-allowed" : "cursor-pointer"}
-                  ${isSelected
-                    ? "border-lagado-red bg-lagado-red bg-opacity-5"
+                key={m.file}
+                onClick={() => setSelected(m.file)}
+                className={`p-5 border rounded-md cursor-pointer transition-all ${
+                  isSelected
+                    ? "border-lagado-red bg-lagado-red/5"
                     : "border-lagado-border bg-lagado-surface hover:border-lagado-border-light"
-                  }
-                `}
+                }`}
               >
                 <div className="flex items-start justify-between mb-2">
                   <div>
-                    {model.recommended && (
+                    {m.file === recommended && (
                       <div className="mb-2">
                         <Badge variant="success">RECOMMENDED</Badge>
                       </div>
                     )}
-                    <h3 className="text-h3 text-lagado-text-bright font-bold">
-                      {model.label}
+                    <h3 className="text-h3 text-lagado-text-bright font-bold break-all">
+                      {m.file.replace(/\.gguf$/i, "")}
                     </h3>
                     <p className="text-caption text-lagado-red font-medium mt-0.5">
-                      {model.role}
+                      {roleOf(m.file, m)}
                     </p>
                   </div>
                   <input
                     type="radio"
                     name="model"
                     checked={isSelected}
-                    disabled={isUnavailable}
-                    onChange={() => setSelected(model.filename)}
+                    onChange={() => setSelected(m.file)}
                     className="w-4 h-4 accent-lagado-red mt-1 flex-shrink-0"
                   />
                 </div>
 
-                <p className="text-body-sm text-lagado-text-dim mb-4">
-                  {model.description}
-                </p>
-
-                <div className="grid grid-cols-3 gap-2 text-caption">
+                <div className="grid grid-cols-3 gap-2 text-caption mt-4">
                   <div>
                     <span className="text-lagado-text-dim block">Size</span>
-                    <span className="font-mono text-lagado-text">{model.size}</span>
+                    <span className="font-mono text-lagado-text">{fmtSize(m.size_mb)}</span>
                   </div>
                   <div>
-                    <span className="text-lagado-text-dim block">RAM</span>
-                    <span className="font-mono text-lagado-text">{model.ram}</span>
+                    <span className="text-lagado-text-dim block">Context</span>
+                    <span className="font-mono text-lagado-text">{fmtCtx(m.context_length)}</span>
                   </div>
                   <div>
-                    <span className="text-lagado-text-dim block">Speed</span>
-                    <span className="font-mono text-lagado-text">{model.speed}</span>
+                    <span className="text-lagado-text-dim block">Type</span>
+                    <span className="font-mono text-lagado-text">
+                      {m.is_moe ? `MoE ×${m.expert_count}` : "dense"}
+                    </span>
                   </div>
                 </div>
-
-                {isUnavailable && (
-                  <p className="text-caption text-lagado-text-dim mt-3 italic">
-                    Not found in models directory
-                  </p>
-                )}
+                <p className={`text-caption font-mono mt-3 ${fit.cls}`}>● {fit.label}</p>
               </div>
             );
           })}
         </div>
 
-        {error && (
-          <p className="text-body-sm text-lagado-red mb-4">{error}</p>
+        {infra.length > 0 && (
+          <p className="text-caption text-lagado-text-dim mb-6">
+            Also installed (used automatically):{" "}
+            {infra.map((m) => `${m.file.replace(/\.gguf$/i, "")} (${roleOf(m.file, m)})`).join(", ")}
+          </p>
         )}
 
+        {error && <p className="text-body-sm text-lagado-red mb-4">{error}</p>}
+
         <div className="flex gap-3">
-          <button
+          <Button
+            variant="primary"
+            size="lg"
             onClick={handleContinue}
-            disabled={saving}
-            className="flex-1 py-3 bg-lagado-red text-white text-body-sm font-semibold rounded-md hover:bg-opacity-90 disabled:opacity-50 transition-colors"
+            disabled={saving || !selected}
+            className="flex-1"
           >
-            {saving ? "Saving..." : "Continue"}
-          </button>
-          <button
-            onClick={onNext}
-            className="px-6 py-3 border border-lagado-border text-lagado-text-dim text-body-sm rounded-md hover:border-lagado-red hover:text-lagado-text transition-colors"
-          >
-            Custom Model
-          </button>
+            {saving ? "Saving…" : "Continue"}
+          </Button>
+          <Button variant="secondary" size="lg" className="px-8" onClick={onNext}>
+            Skip
+          </Button>
         </div>
 
         <p className="text-caption text-lagado-text-dim mt-4 text-center">

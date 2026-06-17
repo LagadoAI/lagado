@@ -211,6 +211,63 @@ fn get_engine_status() -> serde_json::Value {
     }
 }
 
+/// Real machine specs for onboarding — PROBED, never hardcoded (invariant #9).
+#[tauri::command]
+fn get_system_info() -> serde_json::Value {
+    let s = lagado_agent::sysinfo::probe();
+    let tier = match s.vram_total_mb {
+        Some(v) if v >= 12 * 1024 => "full",
+        Some(v) if v >= 6 * 1024 => "balanced",
+        Some(_) => "light",
+        None if s.ram_total_gb >= 16.0 => "balanced-cpu",
+        None => "light-cpu",
+    };
+    serde_json::json!({
+        "cpu_model": s.cpu_model,
+        "physical_cores": s.physical_cores,
+        "logical_threads": s.logical_threads,
+        "ram_total_gb": s.ram_total_gb,
+        "gpu_name": s.gpu_name,
+        "vram_total_mb": s.vram_total_mb,
+        "vram_free_mb": s.vram_free_mb,
+        "storage_free_gb": s.storage_free_gb,
+        "storage_total_gb": s.storage_total_gb,
+        "os": s.os,
+        "tier": tier,
+    })
+}
+
+/// Real model catalog for onboarding — each model's actual GGUF metadata + a rough fit
+/// against this machine's free VRAM. No hardcoded sizes/specs.
+#[tauri::command]
+fn get_models_detailed() -> serde_json::Value {
+    let dir = lagado_agent::config::data_dir().join("models");
+    let gpu = lagado_agent::governor::detect_gpu();
+    let free_mb = gpu.as_ref().map(|g| g.vram_free_mb as f32);
+    let models: Vec<serde_json::Value> = lagado_agent::config::available_models()
+        .into_iter()
+        .map(|f| match lagado_agent::gguf::read_metadata(&dir.join(&f)) {
+            Ok(m) => {
+                let size_mb = m.file_bytes / (1024 * 1024);
+                let fit = match free_mb {
+                    Some(fm) => {
+                        let w = size_mb as f32;
+                        if w * 1.15 <= fm { "fits" } else if w <= fm { "tight" } else { "partial/cpu" }
+                    }
+                    None => "cpu",
+                };
+                serde_json::json!({
+                    "file": f, "arch": m.arch, "context_length": m.context_length,
+                    "block_count": m.block_count, "expert_count": m.expert_count,
+                    "is_moe": m.is_moe(), "size_mb": size_mb, "fit": fit,
+                })
+            }
+            Err(e) => serde_json::json!({ "file": f, "error": e.to_string() }),
+        })
+        .collect();
+    serde_json::json!({ "models": models })
+}
+
 #[tauri::command]
 fn get_chronos_recent(n: usize) -> Vec<serde_json::Value> {
     match lagado_agent::chronos::ChronosDb::open() {
@@ -744,7 +801,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             send_goal, send_chat, send_command, send_approval,
             initialize_timeline, get_active_model, set_active_model, list_models,
-            get_engine_status,
+            get_engine_status, get_system_info, get_models_detailed,
             get_chronos_recent, terminal_spawn, terminal_run, terminal_get_cwd,
             vault_list_files, get_server_status, capture_frame,
             vm_boot, vm_stop, vm_status,
