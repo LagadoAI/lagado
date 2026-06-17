@@ -603,6 +603,84 @@ sub-goal. NEXT honest measurement: a reliability pass — N goals × M runs on t
 actual success/path-correctness rate, before claiming reliability is "done." The sequencer +
 deviation handling are sound; the residual is selection variance under live phrasings.
 
+## 2.18 STRESS TEST + intent gap + THE REFRAME (2026-06-17, Opus) — findings 1 & 2 are ONE problem
+
+**Stress test (OSWorld-style, execution-verified, 8 tasks × 6 runs, live VM; `docs/plans/stress_results.csv`):**
+- terminal 2-step: **12/12 (100%, deterministic)**. file-manager / browser 2-step: **0/12**.
+  implicit ("launch a terminal", no path): 0 clicks, clean handback (deviation→escalate working).
+- **filemanager 0/12 root cause (per-step chronos audit, `fm_audit.out`):** step-1 clicked
+  **"Directory Menu"** instead of **"Applications"** for sub-goal "open the **Applications menu**" —
+  the lexical "**menu**" token pulled the decoy "Directory **Menu**". Then step 2 correctly
+  fail-closed (wrong menu, no File Manager) → handback. The machinery worked; the SELECTION was wrong.
+
+**Intent gap (the product question — users say "check my email", not "launch Terminal Emulator"):**
+- token-overlap (current floor): 0/5. embedding (ColBERT): ~1/5, noisy ("check my email" ranks
+  "Show Desktop" 0.965 > "Mail Reader" 0.962 — the 0.03-band again).
+- **model WORLD-KNOWLEDGE as a single clean classification: 4/5 deterministic** (email→Mail Reader,
+  lunch→Web Browser, files→File Manager, math→Calculator; miss: news→Settings).
+
+**THE REFRAME (Opus — load-bearing):** findings 1 and 2 are **ONE problem, not two.** The
+filemanager step-1 miss (Directory Menu for "…Applications menu") and the router miss
+(read-news→Settings) are the **same failure**: the model maps intent-words to the wrong target by
+SALIENCE/LEXICAL PULL, not correct semantics. The router's "4/5 deterministic" is the SAME
+salience-pull on an EASIER bench (5 well-separated apps, no decoy present) — **"deterministic 8/8" =
+CONSISTENT (temp-0+grammar), NOT reliable.** So the router is NOT a new layer above the selection
+problem; it is the same selection problem one altitude up (intent words ≠ label words + the same
+salience-pull). → **Solve it ONCE as a primitive: constrained-vocabulary selection with deterministic
+fail-closed**, applied at two altitudes (sub-goal-token→element; intent→capability).
+
+**ROOT CAUSE of the 0/12 (sharper):** the deterministic sequencer hands the executor a sub-goal
+STRING whose words collide with a decoy's label ("…**menu**" ↔ "Directory **Menu**"). The label-pull
+(proven real/strong) does the rest. **The fix is at SUB-GOAL PHRASING, deterministically, before the
+executor sees it:** lead with the DISCRIMINATING token ("Applications"), strip/de-weight the colliding
+category noun ("menu"). Grammar-rail principle applied to sub-goal vocabulary: don't UTTER the word
+that promotes the decoy. NOT a new ranker; NOT verification.
+
+**RETIRED (do not build — all costumes):** stronger late-band signal (gets attended, not correctly-
+picked); demote-the-distractor ranker (token can't tell, embedding can't separate — the §5 lossy trap);
+per-pick verification (= verify-mode, dead per §2.4).
+
+**The router, correctly scoped:** intent → a FIXED, CURATED CAPABILITY vocabulary (not raw screen
+labels) → capability maps to a launch procedure deterministically. The miss is caught NOT by gating
+model CONFIDENCE (unreliable) but by **constraining the output to the curated set + cross-checking**
+(capability not in set, or its launch procedure doesn't produce the right surface → fail-closed →
+handback). Reliable because the output space is constrained+verified, same shape as the executor's
+label cross-check.
+
+**BUILD ORDER (Opus — one mastered surface at a time; dynamic sense-switching is the ENDPOINT, not the
+next build):**
+1. **Sub-goal-phrasing probe (NEXT, ~free, the actual root cause):** re-run file-manager step-1 with
+   target "Applications" (discriminating only) vs "Applications menu" (category included). If clean
+   token works and category pulls the decoy → selection gap is phrasing-leak, fixed deterministically
+   at the sequencer. (Bet: phrasing — the decoy was a *lexical* match to the included category word.)
+2. **Router = constrained intent→capability + fail-closed against curated set.** Unlocks natural
+   intent (the actual product). Miss → handback, not wrong-launch.
+3. **Ship a11y-floor + router end-to-end:** REACH-AND-OPERATE; judging handed to the human; sovereignty
+   line drawn at "the agent reaches and operates, it does NOT judge." Complete, honest, shippable V1.
+4. **THEN DOM** as the second mastered surface — **switch edges are CAPABILITY-DRIVEN & DETERMINISTIC,
+   not model-driven** (the capability's launch procedure DECLARES its surface: web→DOM mode; return on
+   DOM fail-closed/complete with structural result). Brandon's browser-extension DOM mode is exactly
+   this — built after DOM-mode selection is independently mastered.
+5. **THEN vision** — Tier-2 (label-less elements) / Tier-3 (last-resort) ONLY, delta-cache gated, and
+   **only after a visual-embedding DISCRIMINATION probe** (the vision analogue of the 0.03-band test):
+   efficiency (adiabatic grid + blake3 delta cache — all BUILT but unwired) is NOT the question;
+   whether visual-patch embeddings SEPARATE the actual elements is. Cross-modal intent→element-via-
+   vision stays UNBUILT until that probe passes (likely the compression trap in a new modality).
+
+**Sovereignty ceiling (drawn explicitly):** "find the best lunch" = reach (open maps search — do it) +
+JUDGE which is best (1B-active local model CANNOT — salience-pulled, context-dominated). V1 honest
+scope: agent reaches+operates, hands the RESULT to the human to judge ("with you, then for you").
+Governed cloud tier for the judging-half is v2+, opt-in, scoped to judging ONLY, NEVER the
+perception/action path (which stays local — the whole privacy story). Don't build the cloud tier; draw
+the line at "reaches, doesn't judge" and make the judgment-handback a designed behavior.
+
+**Vision-blob status (Brandon's question "what happened to the adiabatic-grid/blake3/visual-BLOB plan"):**
+every piece is BUILT + tested — per-element visual-embedding attach in the IoU arbiter
+(`FusedElement.patch_embd`, mean-pooled overlapping spatial patches), the tiled patch encoder
+(`vision::encode_png_patches`), the blake3 per-cell delta detector (`perception/delta.rs`) — but NONE
+is assembled into the live loop (`agent_loop` fuses a11y only: `fuse(&bboxes, &[], &[])`). On the shelf,
+wired-but-unfed, awaiting the discrimination probe + the layering order above.
+
 ## 3. The flawed fix (committed as a labeled checkpoint, NOT to build on)
 
 `agent::most_relevant_ref(screen, goal, exclude)` — token-overlap (coverage-weighted, stopword-

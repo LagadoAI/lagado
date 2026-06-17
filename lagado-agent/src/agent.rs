@@ -581,6 +581,10 @@ pub async fn agent_loop(
         let labels = crate::perception::parse_ref_labels(&screen);
         let fused = crate::perception::arbiter::fuse(&bboxes, &[], &[]);
         let candidates = crate::perception::selection::build_candidates(&fused, &labels);
+        // AUDIT: log the exact labels the agent perceives this step (not just the count) so we can
+        // see what the selector/fail-closed actually had to match against.
+        chronos::log(&format!("candidates[{}] for \"{active_goal}\": {}", candidates.len(),
+            candidates.iter().map(|c| if c.label.is_empty() { "<unlabeled>".to_string() } else { format!("\"{}\"", c.label) }).collect::<Vec<_>>().join(" ")));
         // Deterministic FAIL-CLOSED (verified §2.7: the model emits the escape token `none` 0/12
         // on a no-match screen — it forces a wrong click instead of declining, so the harness must
         // decide). No candidate label shares a content token with the goal → re-perceive rather
