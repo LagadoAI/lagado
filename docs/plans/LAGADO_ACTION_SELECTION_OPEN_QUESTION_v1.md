@@ -728,8 +728,25 @@ clicked-right-element [already established at probe level]; post = app-actually-
   changed, screen-region delta). It CONTAINS the settle as **poll-until-fire-or-timeout → escalate**
   — NOT a fixed sleep tuned to Firefox's paint time (a hardcoded per-app latency bet = the fixed-
   parameter brittleness killed repeatedly this session; derive it, don't constant it).
+- **★ SPEC HOLE the build will hit (Opus) — name it now: "observes a world-change" hides a
+  "DECIDES WHICH world-change counts" sub-component.** Window-appeared / title-changed / region-
+  delta are MECHANISMS; the missing piece is the MAPPING — for goal G, which signature = satisfaction?
+  ("open browser"→new top-level window; "click Applications"→menu region/tree delta, NO window;
+  "type X"→target field value changed, nothing launched). That mapping is a NEW decision-maker on
+  the SAME fault line as the whole session: who asserts the terminal state. Three options, pick
+  DELIBERATELY: (a) **model emits the expected effect at plan time** — flexible but hands completion
+  authority BACK to the model through the side door (the exact authority the divergence rail removed
+  — DON'T); (b) **deterministic action-type→signature map** (click-launcher→window, type→field-delta,
+  click-menu→region/tree-delta), fail-closed on UNMAPPED types (unknown action → can't confirm →
+  escalate, don't guess) — **default-correct for the doctrine**; (c) **generic "something changed"** —
+  cheapest but can't tell the RIGHT change from A change (tooltip/clock/focus-ring = false positive,
+  the old failure in a new dress). **Spec rule: the effect-signature REQUIRES a goal/action →
+  expected-signature mapping; mechanism TBD, but it MUST NOT be the model asserting its own
+  completion condition.** Lean (b).
 - **DESIGN CONSTRAINT:** the signature must distinguish **"goal already satisfied on entry"** from
   **"nothing happened"** — compare goal-vs-CURRENT-state, not only before-click vs after-click.
+- **Where the build will FIGHT you (spend care here):** the satisfied-on-entry check and the
+  per-goal signature MAPPING are the hard parts; the polling and the timeout are the easy parts.
   (The re-click-the-open-menu failure was a screen already in the goal state on arrival; a
   before/after-only signature reads that as a no-effect click and escalates a success.)
 - **WHY IT'S STRUCTURAL, NOT POLISH:** completion-detection is the LAST place the model still has
