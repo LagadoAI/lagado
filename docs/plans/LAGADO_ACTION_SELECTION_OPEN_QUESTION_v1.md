@@ -173,6 +173,44 @@ so a SMALL recall-into-band top-k presented in a LAYOUT-STABLE / length-bounded 
 the prepended context so the attended zone doesn't move) — i.e. the lever may be prompt-layout
 stability, not select-vs-verify. Open for the skeptic thread.
 
+## 2.5 Fixed-trailer + semantic-memory test (2026-06-17) — THE ROOT CAUSE
+
+Opus's fixed-trailer / variable-memory discrimination (decision block byte-identical at the
+prompt's end; memory varied above). Two layouts (goal-last / candidates-last) × mem 0/15/30,
+then a semantic-content sweep. N=12, live 8B, grammar-constrained.
+
+**Step 1 — neutral filler, fixed trailer:** the decoy-FLIP is GONE. When the model picks an
+element it picks the TARGET (never the decoy), across mem=0/15/30 and both layouts. Residual
+failure = premature `done(reason=...)` (worst at mem=15) — a COMPLETION artifact, not selection.
+So prepended *length* with neutral content does NOT corrupt selection.
+
+**Step 2 — semantic memory sweep (fixed trailer, target=el_5 last, decoy=el_4), ×30 lines:**
+| prepended memory | target el_5 | decoy el_4 |
+|---|---|---|
+| neutral filler (control) | 12/12 | 0/12 |
+| DECOY-priming ("you often use the Directory Menu…") | **0/12** | **12/12** |
+| GOAL-priming ("the Applications menu launches…") | 12/12 | 0/12 |
+
+**ROOT CAUSE: semantically-related prepended memory CONTROLS selection, fully overriding the
+candidate labels.** Prime the decoy in memory → picks the decoy 12/12, ignoring the correct
+"Applications" in the list. The LP-memabove flip (§2.3) was THIS (its memory mentioned
+"documents/spreadsheets"), not prepended length. §7e resolved: NOT a clean layout fix, NOT a
+flat capability floor — the 8B blends the goal with everything prepended and selects on the
+blended semantics; the candidate list is weak signal against competing prose above it.
+
+**Architectural implication (falls straight out of the data):** the executor's element-selection
+call MUST be MEMORY-ISOLATED — `goal + candidate list` ONLY, no Board dump. Memory/priors belong
+to an UPSTREAM planning/intent step, not the click decision. Neutral + goal-priming rows are
+12/12; the lean select prompt is the robust config — injecting competing memory is what breaks
+it, and we control whether to do that. This is ALSO the G4 prompt-injection surface arriving from
+the benign direction (relevant-but-off retrieved text steering actions) → reinforces: untrusted
+perceived/retrieved text must NOT flow freely into the action-selection prompt.
+
+**Open / next:** (a) threshold — does a SINGLE relevant-but-off memory line bias, or only heavy
+repetition? (b) the premature-`done` artifact (own signal, parked). (c) confirm lean memory-
+isolated select is robust across the position conditions (C1/C3 already suggest yes). Do NOT wire
+a spine until the lean-isolated select is confirmed and the planning/selection split is designed.
+
 ## 3. The flawed fix (committed as a labeled checkpoint, NOT to build on)
 
 `agent::most_relevant_ref(screen, goal, exclude)` — token-overlap (coverage-weighted, stopword-
