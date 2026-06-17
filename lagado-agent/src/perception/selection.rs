@@ -153,6 +153,15 @@ pub fn rank_late_band(mut candidates: Vec<Candidate>, goal: &str) -> Vec<Candida
         ra.0.cmp(&rb.0)
             .then(ra.1.partial_cmp(&rb.1).unwrap_or(std::cmp::Ordering::Equal))
     });
+    // RE-TOKEN by render position (verified 2026-06-17): the model attends to the HIGHEST token
+    // number / last item, NOT the last-RENDERED row. Sorting reorders the display but if tokens
+    // stay spatial, the late-band target keeps a mid-range token (e.g. el_9) and the model picks
+    // whatever carries the max token instead (e.g. el_18) → wrong pick (0/12). Re-numbering tokens
+    // to match render order makes the most-relevant target carry el_{n-1} → reliably picked (12/12).
+    // candidate_coords / the actuator key off these tokens, so they stay consistent.
+    for (i, c) in candidates.iter_mut().enumerate() {
+        c.token = index_token(i);
+    }
     candidates
 }
 
@@ -322,6 +331,10 @@ mod tests {
         let cands = vec![labeled(0, "Applications"), labeled(1, "Show Desktop"), labeled(2, "Directory Menu")];
         let ranked = rank_late_band(cands, "Click the Applications menu in the top panel");
         assert_eq!(ranked.last().unwrap().label, "Applications", "most-relevant must land LAST");
+        // …and carry the LAST token (re-tokened by render position) so the model reliably picks it.
+        assert_eq!(ranked.last().unwrap().token, index_token(ranked.len() - 1));
+        // tokens are sequential by render position after ranking
+        for (i, c) in ranked.iter().enumerate() { assert_eq!(c.token, index_token(i)); }
     }
 
     #[test]
