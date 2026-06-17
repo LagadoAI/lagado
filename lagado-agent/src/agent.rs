@@ -710,6 +710,43 @@ pub async fn agent_loop(
                     }
                 }
 
+                // SELECTION-INTENT DIVERGENCE rail (§2.18+): if the deterministic matcher has a
+                // UNIQUE best-matching candidate for this sub-goal and the model clicked a DIFFERENT
+                // element, fail closed BEFORE acting — a divergent click is exactly how the step-1
+                // decoy ("Directory Menu") and the step-2 wrong-app ("Run Program…" → Application
+                // Finder, falsely "complete") slipped through. Validates the pick (determinism on the
+                // RAILS), does NOT decide it (no unique match → model's pick stands). This also makes
+                // the completion signal HONEST: an advance now means the intended target was clicked.
+                if let ToolCall::Click { ref selector } = tool_call {
+                    if let Some(intended) = crate::perception::selection::best_match_token(&candidates, active_goal) {
+                        if *selector != intended {
+                            subgoal_stuck += 1;
+                            chronos::log(&format!(
+                                "selection_divergence: model picked {selector}, intended {intended} ({subgoal_stuck}/{SUBGOAL_STUCK_LIMIT})"
+                            ));
+                            if subgoal_stuck >= SUBGOAL_STUCK_LIMIT {
+                                let msg = format!(
+                                    "I keep selecting the wrong on-screen element for this step (\"{active_goal}\") — handing back to you."
+                                );
+                                chronos::log("selection_divergence_escalate");
+                                let _ = confirm_tx.send(envelope::make("action_log", envelope::ActionLogPayload { text: msg.clone() })).await;
+                                let _ = confirm_tx.send(envelope::make("status", envelope::StatusPayload {
+                                    state: "goal_done".to_string(), detail: msg,
+                                })).await;
+                                break;
+                            }
+                            let _ = confirm_tx.send(envelope::make("action_log", envelope::ActionLogPayload {
+                                text: "Selected the wrong element for the current step; re-perceiving.".to_string(),
+                            })).await;
+                            memory.push(Step { index: enforcer.step(), prompt: String::new(),
+                                output: "selection_divergence: re-perceive".to_string(), action: None });
+                            prev_screen = screen.clone();
+                            prev_action_executed = false;
+                            continue;
+                        }
+                    }
+                }
+
                 let current_action_desc = gate::describe(&tool_call);
                 let screen_unchanged = !prev_screen.is_empty()
                     && blake3::hash(screen.as_bytes()) == blake3::hash(prev_screen.as_bytes());

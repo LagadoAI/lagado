@@ -156,6 +156,40 @@ pub fn rank_late_band(mut candidates: Vec<Candidate>, goal: &str) -> Vec<Candida
     candidates
 }
 
+/// The token of the candidate that UNIQUELY best-matches the goal by content tokens — the
+/// deterministic "intended target." `None` if there is no match OR no strict winner (a tie means
+/// the deterministic layer can't claim an intended target, so the model's pick stands). Used as a
+/// SELECTION-INTENT DIVERGENCE rail (§2.18+): when this returns Some(t) and the model selects a
+/// DIFFERENT element, that divergence is fail-closed BEFORE acting — a divergent click is exactly
+/// how the step-1 decoy ("Directory Menu") and the step-2 wrong-app ("Run Program…") slipped
+/// through. This VALIDATES the model's pick (determinism on the RAILS); it does NOT decide it (when
+/// there's no unique match the model chooses freely — e.g. label-less elements).
+pub fn best_match_token(candidates: &[Candidate], goal: &str) -> Option<String> {
+    let g = content_tokens(goal);
+    if g.is_empty() {
+        return None;
+    }
+    let mut scored: Vec<(&Candidate, (usize, f32))> = candidates
+        .iter()
+        .map(|c| (c, relevance(&g, &c.label)))
+        .filter(|(_, (m, _))| *m > 0)
+        .collect();
+    if scored.is_empty() {
+        return None;
+    }
+    scored.sort_by(|a, b| {
+        b.1 .0.cmp(&a.1 .0).then(b.1 .1.partial_cmp(&a.1 .1).unwrap_or(std::cmp::Ordering::Equal))
+    });
+    if scored.len() > 1 {
+        let (m0, c0) = scored[0].1;
+        let (m1, c1) = scored[1].1;
+        if m0 == m1 && (c0 - c1).abs() < f32::EPSILON {
+            return None; // tie — no unique intended target
+        }
+    }
+    Some(scored[0].0.token.clone())
+}
+
 /// Deterministic FAIL-CLOSED gate: does at least one candidate's label share a content token
 /// with the goal? The model will NOT self-escape (verified 2026-06-17: emits `none` 0/12 on a
 /// no-match screen, forcing a wrong click instead), so the harness decides. No match → the loop
@@ -323,6 +357,26 @@ mod tests {
                                      center: (0, 0), sense: "vision", trusted: false }];
         assert!(!goal_matches_any("Click the Applications menu", &cands),
                 "no label shares a content token → must fail closed");
+    }
+
+    #[test]
+    fn best_match_token_unique_winner() {
+        // "Web Browser" uniquely matches "open the Web Browser"; "Run Program" etc. don't.
+        let cands = vec![labeled(5, "Run Program..."), labeled(9, "Web Browser"), labeled(1, "Settings")];
+        assert_eq!(best_match_token(&cands, "open the Web Browser"), Some("el_9".to_string()));
+    }
+
+    #[test]
+    fn best_match_token_none_on_no_match() {
+        let cands = vec![labeled(0, "Show Desktop"), labeled(1, "Trash")];
+        assert_eq!(best_match_token(&cands, "open the Web Browser"), None);
+    }
+
+    #[test]
+    fn best_match_token_none_on_tie() {
+        // two equally-strong matches → no unique intended target → model's pick stands.
+        let cands = vec![labeled(0, "Web Browser"), labeled(1, "Web Browser")];
+        assert_eq!(best_match_token(&cands, "open the Web Browser"), None);
     }
 
     #[test]
