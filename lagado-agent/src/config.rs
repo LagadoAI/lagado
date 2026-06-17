@@ -16,6 +16,13 @@ pub const VLM_MMPROJ_FILE: &str = "mmproj-LFM2-VL-450M-F16.gguf";
 pub const VLM_CONTEXT_SIZE: usize = 2048;
 const VLM_PORT: u16 = 8082;
 
+/// Board relevance embedder (LFM2-ColBERT-350M, mean-pooled). Runs on the retired
+/// VLM port (8082) — vision is in-process FFI now, so the port is free.
+pub const EMBED_MODEL_FILE: &str = "LFM2-ColBERT-350M-Q4_K_M.gguf";
+/// Fallback embedder context when the GGUF max can't be read (DEFER default, invariant
+/// #9). The real value is DISCOVERED from the model file at spawn; this is only the floor.
+pub const EMBED_CONTEXT_FALLBACK: usize = 512;
+
 // Sampling parameters per model generation.
 // LFM2 (gen2, main 8B): min_p controls nucleus, no top_k.
 // LFM2.5 (gen2.5, classifier 1.2B): top_k nucleus, no min_p.
@@ -114,6 +121,14 @@ pub fn embed_port() -> u16 {
 
 pub fn embed_base_url() -> String {
     format!("http://{}:{}", llama_host(), embed_port())
+}
+
+/// Path to the ColBERT embedder model. Override: LAGADO_EMBED_MODEL_PATH.
+pub fn embed_model_path() -> PathBuf {
+    if let Some(p) = dev_override("LAGADO_EMBED_MODEL_PATH") {
+        return PathBuf::from(p);
+    }
+    data_dir().join("models").join(EMBED_MODEL_FILE)
 }
 
 /// Shared frame path for QMP screendump output (used by capture_frame and VlmPerceptor).
@@ -237,6 +252,25 @@ pub fn classifier_memory_max_bytes() -> u64 {
         }
     }
     2 * 1024 * 1024 * 1024 // fallback: 2 GiB
+}
+
+/// Maximum memory (bytes) the embedder server process may use.
+/// Override: LAGADO_EMBED_MEMORY_MAX_GIB (integer GiB).
+/// Otherwise derived from the embedder model file size × 1.5, same logic as above.
+pub fn embed_memory_max_bytes() -> u64 {
+    if let Some(gib) = std::env::var("LAGADO_EMBED_MEMORY_MAX_GIB")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+    {
+        return gib * 1024 * 1024 * 1024;
+    }
+    if let Ok(meta) = std::fs::metadata(embed_model_path()) {
+        let file_bytes = meta.len();
+        if file_bytes > 0 {
+            return file_bytes + file_bytes / 2;
+        }
+    }
+    1024 * 1024 * 1024 // fallback: 1 GiB (ColBERT-350M is ~228 MB)
 }
 
 /// User tool configuration — trust overrides and marketplace MCP servers.

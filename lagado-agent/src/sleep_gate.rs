@@ -16,6 +16,7 @@ const CONSOLIDATION_THRESHOLD: f32 = 0.5; // hot entries below this are ready fo
 const BATCH_SIZE: usize = 8;              // max entries per LLM summary call
 const MAX_WARM_ENTRIES: usize = 10_000;   // entropy pruning kicks in above this
 const CYCLE_SECS: u64 = 300;             // 5 minutes
+const BACKFILL_BATCH: usize = 32;        // max Board text-embeddings computed per cycle
 
 pub struct SleepGate {
     memory:  Arc<Mutex<MemoryTiers>>,
@@ -96,6 +97,43 @@ async fn run_cycle(
                     batch.len()
                 ));
             }
+        }
+    }
+
+    // Step 5: backfill Board relevance embeddings. The ColBERT embedder (:8082) may be
+    // down — embed() then errors and we retry next cycle (deterministic recency floor
+    // holds meanwhile). HTTP runs OUTSIDE the lock; only the cheap store touches it.
+    // entries_missing_text_embedding returns PLAINTEXT (cold rows are decrypted there).
+    let missing: Vec<(String, String)> = {
+        let mem = memory.lock().await;
+        let mut m = mem.entries_missing_text_embedding();
+        m.truncate(BACKFILL_BATCH);
+        m
+    };
+    if !missing.is_empty() {
+        let embedded: Vec<(String, Vec<f32>)> = tokio::task::spawn_blocking(move || {
+            let mut out = Vec::new();
+            for (id, text) in missing {
+                match crate::embedding::embed(&text) {
+                    Ok(v) if !v.is_empty() => out.push((id, v)),
+                    Ok(_) => {}
+                    Err(_) => break, // embedder unreachable — stop, retry next cycle
+                }
+            }
+            out
+        })
+        .await
+        .unwrap_or_default();
+
+        if !embedded.is_empty() {
+            let mut mem = memory.lock().await;
+            let mut stored = 0usize;
+            for (id, emb) in &embedded {
+                if mem.store_text_embedding(id, emb).is_ok() { stored += 1; }
+            }
+            drop(mem);
+            tracing::info!("sleep_gate: backfilled {stored} Board text embeddings");
+            crate::chronos::log(&format!("sleep_gate: backfilled {stored} Board text embeddings"));
         }
     }
 

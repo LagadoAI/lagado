@@ -14,6 +14,10 @@ use crate::skill_library::{Skill, SkillLibrary};
 use tokio::sync::Mutex as TokioMutex;
 use blake3;
 
+/// How many Board priors to surface per goal. A retrieval-tuning constant (cf. RAG K=15),
+/// not a model/hardware value — invariant #9 does not apply.
+const BOARD_TOP_K: usize = 8;
+
 // ── State shared between WebSocket and agent ──────────────────────
 pub struct AgentState {
     pub goal: String,
@@ -309,10 +313,34 @@ pub async fn agent_loop(
     let goal = state.lock().await.goal.clone();
     let system_prompt = config::system_prompt();
 
-    // Pull cross-session episodic context from MemoryTiers (lock → extract → drop)
+    // Priors slice — the Board. Park-scored top-k (relevance × recency × importance) from
+    // the ColBERT embedder when it's up AND the board has embedded rows; deterministic
+    // recency floor (`assemble_context`) otherwise. The spine: a model-upgrade layer over a
+    // floor that always works. embed() is blocking HTTP → run off the lock via spawn_blocking
+    // (mutex-guard discipline: no await is held under the guard).
     let episodic_context = {
+        let goal_for_embed = goal.clone();
+        let qvec = tokio::task::spawn_blocking(move || crate::embedding::embed(&goal_for_embed).ok())
+            .await
+            .ok()
+            .flatten();
         let tiers = memory_tiers.lock().await;
-        tiers.assemble_context(2048)
+        match qvec {
+            Some(q) if !q.is_empty() => {
+                let slice = tiers.assemble_slice(&q, BOARD_TOP_K, &crate::board::ParkWeights::default());
+                if slice.is_empty() {
+                    chronos::log("board: empty slice — recency floor");
+                    tiers.assemble_context(2048)
+                } else {
+                    chronos::log(&format!("board: {} priors via Park slice", slice.len()));
+                    slice.iter().map(|e| format!("- {}", e.text)).collect::<Vec<_>>().join("\n")
+                }
+            }
+            _ => {
+                chronos::log("board: embedder down — recency floor");
+                tiers.assemble_context(2048)
+            }
+        }
     };
 
     // Visual similarity context: encode current frame → find top-3 most visually

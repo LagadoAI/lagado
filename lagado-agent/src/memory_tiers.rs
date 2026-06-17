@@ -243,19 +243,40 @@ impl MemoryTiers {
         Ok(())
     }
 
-    /// (id, text) of persisted entries lacking a text embedding — for backfill.
-    /// NOTE: cold `text` is ciphertext; embeddings must be computed from PLAINTEXT at
-    /// write time. Backfill from this is valid only where text is plaintext (e.g. evals).
+    /// (id, PLAINTEXT) of persisted entries lacking a text embedding — for Board backfill.
+    /// Cold `text` is ciphertext (hex-encoded AES-GCM); it is DECRYPTED here so the caller
+    /// always embeds plaintext. Cold rows whose decryption fails are skipped (a bad key or
+    /// corrupt blob must never silently embed ciphertext and poison relevance). Warm rows
+    /// are already plaintext and pass through unchanged.
     pub fn entries_missing_text_embedding(&self) -> Vec<(String, String)> {
         let mut stmt = match self.db.prepare(
-            "SELECT id, text FROM memory_entries WHERE text_embedding IS NULL",
+            "SELECT id, text, tier FROM memory_entries WHERE text_embedding IS NULL",
         ) {
             Ok(s) => s,
             Err(_) => return Vec::new(),
         };
-        stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
-            .map(|rows| rows.filter_map(|x| x.ok()).collect())
-            .unwrap_or_default()
+        let rows: Vec<(String, String, String)> = stmt
+            .query_map([], |r| Ok((
+                r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?,
+            )))
+            .map(|it| it.filter_map(|x| x.ok()).collect())
+            .unwrap_or_default();
+
+        let passphrase = crate::auth::active_key();
+        rows.into_iter()
+            .filter_map(|(id, raw_text, tier_s)| {
+                if Tier::from_str(&tier_s)? == Tier::Cold {
+                    // Cold is ciphertext: decrypt, or skip (never embed ciphertext).
+                    let bytes = hex::decode(&raw_text).ok()?;
+                    let plain = crate::security::crypto::decrypt(&bytes, &passphrase)
+                        .ok()
+                        .and_then(|b| String::from_utf8(b).ok())?;
+                    Some((id, plain))
+                } else {
+                    Some((id, raw_text))
+                }
+            })
+            .collect()
     }
 
     /// Score every persisted entry that has a text embedding by cosine vs `query`.

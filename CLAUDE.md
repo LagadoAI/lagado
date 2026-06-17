@@ -23,6 +23,7 @@ Single Tauri binary (`lagado-ui/src-tauri/`) wraps:
 - Rust agent core (`lagado-agent/` as a library)
 - Vendored `llama-server` subprocess (HTTP inference on :8080, NOT FFI) — main 8B model
 - Classifier subprocess on :8081 (LFM2.5-1.2B-Instruct, intent classification, CPU-only)
+- Embedder subprocess on :8082 (LFM2-ColBERT-350M, `--embeddings --pooling mean`, CPU-only) — the Board's relevance signal; spawned in `main.rs`, watched by `server_guard`, fed by `sleep_gate` backfill, consumed by `agent_loop` via `assemble_slice` (recency floor when down)
 - Visual encoder: in-process `libmtmd.so` FFI (LFM2-VL-450M + mmproj, vision → embedding vectors, no subprocess)
 - QEMU desktop VM (agent's sandboxed working surface)
 

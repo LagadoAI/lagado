@@ -5,7 +5,7 @@ use tokio::sync::{mpsc, Mutex};
 use tauri::{State, Emitter};
 use lagado_agent::{
     agent::AgentState,
-    bootstrap::{ensure_llama_server, ensure_classifier_server, KillOnDrop},
+    bootstrap::{ensure_llama_server, ensure_classifier_server, ensure_embedder_server, KillOnDrop},
     config,
     hydra,
     inference::{InferenceAdapter, llama_cpp::LlamaCppAdapter},
@@ -25,6 +25,7 @@ struct AppState {
     actuator: Arc<dyn Actuator + Send + Sync>,
     _llama_child: Arc<Mutex<Option<KillOnDrop>>>,
     _classifier_child: Arc<Mutex<Option<KillOnDrop>>>,
+    _embedder_child: Arc<Mutex<Option<KillOnDrop>>>,
     visual_encoder: Option<Arc<VisualEncoder>>,
     vm: Arc<Mutex<Option<VmHandle>>>,
     vm_ssh_port: VmSshPort,
@@ -652,6 +653,9 @@ fn main() {
     let classifier_child: Arc<Mutex<Option<KillOnDrop>>> = Arc::new(Mutex::new(None));
     let classifier_for_setup = classifier_child.clone();
     let classifier_for_guard = classifier_child.clone();
+    let embedder_child: Arc<Mutex<Option<KillOnDrop>>> = Arc::new(Mutex::new(None));
+    let embedder_for_setup = embedder_child.clone();
+    let embedder_for_guard = embedder_child.clone();
 
     let vm_ssh_port: VmSshPort = std::sync::Arc::new(std::sync::RwLock::new(None));
 
@@ -711,6 +715,7 @@ fn main() {
         actuator,
         _llama_child: llama_child,
         _classifier_child: classifier_child,
+        _embedder_child: embedder_child,
         visual_encoder,
         vm: Arc::new(Mutex::new(None)),
         vm_ssh_port: vm_ssh_port.clone(),
@@ -739,6 +744,11 @@ fn main() {
                 let child = ensure_classifier_server().await;
                 *classifier_for_setup.lock().await = child.map(KillOnDrop);
             });
+            // Start ColBERT embedder server (CPU-only, port 8082) — Board relevance signal
+            tauri::async_runtime::spawn(async move {
+                let child = ensure_embedder_server().await;
+                *embedder_for_setup.lock().await = child.map(KillOnDrop);
+            });
             // Health monitor: polls /health every 10s, restarts crashed servers.
             // Holds Arc clones of both child slots — KillOnDrop still fires on exit
             // because Tauri tears down its async runtime before .run() returns,
@@ -748,6 +758,7 @@ fn main() {
                 ServerGuard::new(
                     llama_for_guard,
                     classifier_for_guard,
+                    embedder_for_guard,
                     move |event| {
                         let (kind, server) = match event {
                             ServerEvent::Crashed { server }       => ("server_crashed", server),

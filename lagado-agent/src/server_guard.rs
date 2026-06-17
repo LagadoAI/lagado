@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use crate::bootstrap::{KillOnDrop, check_health_sync, ensure_llama_server, ensure_classifier_server};
+use crate::bootstrap::{KillOnDrop, check_health_sync, ensure_llama_server, ensure_classifier_server, ensure_embedder_server};
 use crate::config;
 
 const POLL_SECS: u64 = 10;
@@ -66,6 +66,7 @@ impl ServerHealth {
 pub struct ServerGuard {
     llama_child: Arc<Mutex<Option<KillOnDrop>>>,
     classifier_child: Arc<Mutex<Option<KillOnDrop>>>,
+    embedder_child: Arc<Mutex<Option<KillOnDrop>>>,
     on_event: Box<dyn Fn(ServerEvent) + Send + Sync + 'static>,
 }
 
@@ -73,9 +74,10 @@ impl ServerGuard {
     pub fn new(
         llama_child: Arc<Mutex<Option<KillOnDrop>>>,
         classifier_child: Arc<Mutex<Option<KillOnDrop>>>,
+        embedder_child: Arc<Mutex<Option<KillOnDrop>>>,
         on_event: impl Fn(ServerEvent) + Send + Sync + 'static,
     ) -> Self {
-        Self { llama_child, classifier_child, on_event: Box::new(on_event) }
+        Self { llama_child, classifier_child, embedder_child, on_event: Box::new(on_event) }
     }
 
     pub async fn run(self) {
@@ -85,9 +87,12 @@ impl ServerGuard {
         let manages_llama = config::llama_server_bin().exists() && config::model_path().exists();
         let manages_classifier = config::llama_server_bin().exists()
             && config::classifier_model_path().exists();
+        let manages_embedder = config::llama_server_bin().exists()
+            && config::embed_model_path().exists();
 
         let mut llama_health = ServerHealth::new(manages_llama);
         let mut classifier_health = ServerHealth::new(manages_classifier);
+        let mut embedder_health = ServerHealth::new(manages_embedder);
 
         loop {
             tokio::time::sleep(tokio::time::Duration::from_secs(POLL_SECS)).await;
@@ -131,6 +136,50 @@ impl ServerGuard {
                                 "llama-server restart failed — will retry after {} more failures",
                                 FAILURE_THRESHOLD
                             );
+                        }
+                    }
+                }
+            }
+
+            // ── Embedder server (8082, Board relevance) ─────────────────────
+            if manages_embedder {
+                let embed_url = config::embed_base_url();
+                let embed_up = tokio::task::spawn_blocking(move || {
+                    check_health_sync(&embed_url, HEALTH_TIMEOUT_SECS)
+                })
+                .await
+                .unwrap_or(false);
+
+                match embedder_health.tick(embed_up) {
+                    HealthAction::Nothing => {
+                        if !embed_up && embedder_health.failures > 0 {
+                            tracing::warn!(
+                                "embedder health check failed ({}/{})",
+                                embedder_health.failures, FAILURE_THRESHOLD
+                            );
+                        }
+                    }
+                    HealthAction::Restart => {
+                        (self.on_event)(ServerEvent::Crashed { server: "embedder" });
+                        tracing::warn!("embedder declared crashed — restarting");
+                        {
+                            let mut guard = self.embedder_child.lock().await;
+                            let _ = guard.take();
+                        }
+                        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                        match ensure_embedder_server().await {
+                            Some(child) => {
+                                *self.embedder_child.lock().await = Some(KillOnDrop(child));
+                                (self.on_event)(ServerEvent::Restarted { server: "embedder" });
+                                tracing::info!("Embedder server restarted successfully");
+                            }
+                            None => {
+                                (self.on_event)(ServerEvent::RestartFailed { server: "embedder" });
+                                tracing::error!(
+                                    "Embedder restart failed — will retry after {} more failures",
+                                    FAILURE_THRESHOLD
+                                );
+                            }
                         }
                     }
                 }

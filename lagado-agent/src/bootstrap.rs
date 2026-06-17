@@ -161,6 +161,90 @@ pub async fn ensure_vlm_server() -> Option<Child> {
     }
 }
 
+/// Start the Board's relevance embedder (LFM2-ColBERT-350M, mean-pooled) on port 8082.
+/// CPU-only (-ngl 0) — it's tiny (~228 MB) and runs off the hot path (sleep-gate backfill
+/// + once per goal at loop start), so it must not compete with the 8B for VRAM. Context is
+/// DISCOVERED from the GGUF (invariant #9), falling back to a conservative floor.
+/// Returns None if the model file is absent or a server is already up on the port.
+pub async fn ensure_embedder_server() -> Option<Child> {
+    let model_path = config::embed_model_path();
+    if !model_path.exists() {
+        tracing::info!("No embedder model at {:?} — Board relevance disabled (recency floor only)", model_path);
+        return None;
+    }
+
+    let already_up = tokio::task::spawn_blocking(|| {
+        check_health_sync(&config::embed_base_url(), 2)
+    })
+    .await
+    .unwrap_or(false);
+
+    if already_up {
+        tracing::info!("Embedder server already running — reusing.");
+        return None;
+    }
+
+    // DISCOVER the model's trained context from its GGUF metadata; fall back to the floor.
+    let ctx = {
+        let p = model_path.clone();
+        tokio::task::spawn_blocking(move || crate::gguf::read_metadata(&p).ok())
+            .await
+            .ok()
+            .flatten()
+            .and_then(|m| m.context_length)
+            .map(|c| c as usize)
+            .unwrap_or(config::EMBED_CONTEXT_FALLBACK)
+    };
+
+    let mut cmd = Command::new(config::llama_server_bin());
+    cmd.args([
+        "-m", &model_path.to_string_lossy(),
+        "-c", &ctx.to_string(),
+        "-ngl", "0",
+        "-t", "2",
+        "--parallel", "1",
+        "--embeddings",
+        "--pooling", "mean",
+        "--host", &config::llama_host(),
+        "--port", &config::embed_port().to_string(),
+    ]);
+    cmd.stdout(Stdio::null()).stderr(Stdio::null());
+
+    match cmd.spawn() {
+        Ok(child) => {
+            if let Err(e) = crate::security::sandbox::apply_limits(
+                child.id(), "embedder",
+                config::embed_memory_max_bytes(),
+                256,
+            ) {
+                tracing::warn!("sandbox: embedder: {e}");
+            }
+            let ready = tokio::task::spawn_blocking(|| {
+                let url = config::embed_base_url();
+                for _ in 0..30 {
+                    if check_health_sync(&url, 2) { return true; }
+                    std::thread::sleep(std::time::Duration::from_secs(1));
+                }
+                false
+            })
+            .await
+            .unwrap_or(false);
+
+            if ready {
+                tracing::info!("Embedder server ready on port {} (ctx {ctx})", config::embed_port());
+                Some(child)
+            } else {
+                tracing::warn!("Embedder server did not become ready within 30s — Board on recency floor");
+                None
+            }
+        }
+        Err(e) => {
+            tracing::warn!("Failed to spawn embedder server: {e} — Board on recency floor");
+            None
+        }
+    }
+}
+
 pub async fn ensure_llama_server() -> Option<Child> {
     let model_bytes = std::fs::metadata(config::model_path())
         .map(|m| m.len())
