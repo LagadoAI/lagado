@@ -91,6 +91,47 @@ exploitable property, not noise.
 late band, not rank it #1. Open: does the late-bias hold across goals/screens, longer lists, and
 multiple plausible candidates? (next experiment).
 
+## 2.3 Discrimination + layout probe (2026-06-17) — good-world BUT fragile
+
+Counterbalanced decoy-in-band test (Opus's discrimination cut) + layout probe. N=12, live 8B,
+grammar-constrained. target="Applications" (exact goal substring), decoy="Directory Menu"
+(shares "menu"); fillers share no goal words.
+
+**Discrimination — does LABEL beat POSITION within the late band?**
+| cond | arrangement | picked | verdict |
+|---|---|---|---|
+| C1 | target row5, decoy row6 (last) — unconfounded | Applications 12/12 | LABEL wins |
+| C2 | decoy row5, target row6 (last) — confounded ctrl | Applications 12/12 | (control) |
+| C3 | target row4, filler row5, decoy row6 (last) — hard | Applications 12/12 | LABEL wins |
+→ **GOOD WORLD: within the attended band the model selects by label, beating the last-position
+decoy even when the decoy holds the prime last slot (C3). Ranker needs RECALL into the band,
+not exact #1 ordering. Union-of-weak-rankers is viable.**
+
+**Layout probe — is the safe zone stable, or does it move with prepended context?**
+| cond | setup | picked |
+|---|---|---|
+| LP-base | Applications first (el_0), decoy last; list above goal | decoy (el_5) |
+| LP-goalrep | + goal repeated immediately before action token | decoy (el_5) — no change |
+| LP-below | list placed BELOW the goal (closest to decision point) | decoy (el_5) — no change |
+| **LP-memabove** | **identical list to C2** (decoy row5, target last) **+ 30-line memory block above** | **decoy (el_4) 12/12** |
+→ **CONTROLLED FLIP: C2 (no memory) picked target-last 12/12; LP-memabove (same list, +30 lines
+above) picked the DECOY 12/12. One variable — prepended context — flipped a winning config.**
+
+**Synthesis:** good world is REAL but CONTEXT-SENSITIVE. The prompt is reassembled every step with
+variable-length memory above the candidate list (§2), so a fixed "place the answer last / recall
+into band" rule passes a clean probe and SILENTLY ROTS in production. Repeating the goal or moving
+the list next to the decision point does NOT fix the early-position blind spot. **Late-placement
+is therefore NOT safe to wire.**
+
+**Implication → flip SELECT to VERIFY (Opus):** judge one candidate at a time `{act, skip}`,
+deterministic ranker proposes order, accept first `act`, escape if all top-k skipped. No list →
+no row to mis-attend; candidate sits at end of context (strongest attention); should be immune to
+BOTH the intra-list position artifact AND the memory-above flip. NEXT EXPERIMENT: prototype
+verify-mode offline; stress it under the same memory-above condition; check acquiescence (says
+`act` too eagerly) + ranker recall. Done-detection must be its OWN signal (the same bias that
+grabs the last candidate is why the agent re-clicked an open menu — selection and completion
+cannot be one call).
+
 ## 3. The flawed fix (committed as a labeled checkpoint, NOT to build on)
 
 `agent::most_relevant_ref(screen, goal, exclude)` — token-overlap (coverage-weighted, stopword-
