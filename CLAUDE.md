@@ -202,6 +202,7 @@ Agent avatar = `lagado-mark.png` (maze-tesseract logo). Thinking state = `HyperL
 6. **No AI attribution** in commits, code, PRs, or any artifact. Author: `Lagado Labs <lagadolabs@gmail.com>`.
 7. **DEK discipline**: never persist raw DEK. `active_key()` is the only crypto entry point.
 8. **SSH readiness**: never set `vm_ssh_port` before SSH auth probe (`ssh -o BatchMode=yes ... whoami`) returns exit 0 and stdout contains "laputa". Bare TCP connect is insufficient.
+9. **No hardcoded model/hardware values** (2026-06-17): never hardcode a model- or hardware-specific value (context window, layer count, n_gpu_layers, ctx size, model size, parallelism, CPU/GPU placement). **DISCOVER** it (GGUF metadata via the model-reader / hardware probe) or **DEFER** it (governor/user setting), always with a *discovered* default. The model is swappable (H-1) — assuming its context/layers/size is a latent bug. The only literals allowed are principled constants unrelated to model/hardware (ports, the 30-day Ebbinghaus curve). See `docs/plans/LAGADO_MODEL_AWARE_GOVERNOR_SPEC_v1.md`.
 
 ## Build / run
 
