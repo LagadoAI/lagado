@@ -1,4 +1,5 @@
-use crate::perception::{Actuator, PerceptionCache, parse_ref_coords};
+use crate::perception::{Actuator, PerceptionCache};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 pub struct SshActuator {
@@ -72,6 +73,17 @@ impl Actuator for SshActuator {
             format!("Pressed {key}")
         } else {
             out
+        }
+    }
+
+    /// Merge `el_N → center` targets into the shared coord cache so the selection
+    /// grammar's tokens resolve to clicks alongside the `ref_N` entries that
+    /// `read_screen` populates. Independent of `ref_id`, so vision-only elements work.
+    fn set_targets(&self, targets: HashMap<String, (i32, i32)>) {
+        if let Ok(mut c) = self.cache.lock() {
+            for (token, center) in targets {
+                c.coords.insert(token, center);
+            }
         }
     }
 }

@@ -18,6 +18,12 @@ pub trait Actuator: Send + Sync {
     fn click(&self, selector: &str) -> String;
     fn type_text(&self, selector: &str, text: &str) -> String;
     fn key(&self, key: &str) -> String;
+
+    /// Register synthetic-index targets (`el_N` → center coords) for the current
+    /// frame so the selection grammar's tokens resolve to coordinate clicks. Works
+    /// for label-less / `ref_id`-`None` elements too. Default no-op; coord-cache
+    /// actuators (e.g. `SshActuator`) override it to merge into their shared cache.
+    fn set_targets(&self, _targets: HashMap<String, (i32, i32)>) {}
 }
 
 /// Canned perceptor for tests / headless CI / pre-platform-impl development.
