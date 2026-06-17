@@ -464,6 +464,44 @@ simply does not exist in this design.
 **Next (build):** the memory-free planner call upstream of the executor; the label-free fact
 generator from the FusedElement pre/post diff; wire Q2 `complete`. Then re-run the 2-step walk.
 
+## 2.14 Decomposition probe (2026-06-17) — LLM planner CAN'T decompose → deterministic sequencer
+
+Tested whether a memory-free LLM planner can decompose a compound goal ("Open the Applications
+menu, then open the Directory Menu" — two SIMILAR sub-goals), including Opus's killer: the
+label-free fact can't say WHICH menu opened. N=12.
+
+| cell | state given | emitted | correct |
+|---|---|---|---|
+| A desktop start | none | complete 7/12, step2 5/12 | ✗ never emits step1 |
+| B menu open | label-free fact | complete 12/12 | ✗ step2 remains |
+| C menu open | EXPLICIT progress ("remaining: open Directory Menu") | complete 12/12 | ✗ IGNORED the progress |
+| D menu open | none | complete 11/12 | ✗ |
+
+**The memory-free LLM planner cannot decompose a compound goal, and progress-state does NOT rescue
+it (cell C: handed the plan explicitly, it completed anyway).** `complete` is a FALLTHROUGH
+attractor, not a reasoned terminal (Opus's Q2 warning, confirmed lethal for compound goals). The
+gap is not "needs progress state" — this model cannot plan/decompose AT ALL, even handed the plan.
+
+**This vindicates the doctrine ("retrieval ≠ planning; a separate DETERMINISTIC sequencer does
+ordering"). V1-perfect multi-step mechanism — LLM only where proven:**
+- Harness splits the goal into ordered sub-goals DETERMINISTICALLY ("X then Y" → [X, Y]). No LLM.
+- Harness holds the plan + a STEP POINTER = deterministic trajectory state (the safe category).
+- Memory-free executor runs ONE sub-goal at a time (the proven single-step competence).
+- Q1 action-effect ADVANCES the pointer (current sub-goal's action took effect → advance); all
+  sub-goals done → `complete` (deterministic, not the model's fallthrough token).
+The LLM never plans, decomposes, or decides completion — all three (which it FAILS) are
+deterministic harness logic. Memory stays out of the action path. Handles explicitly-sequenced
+compound goals; implicit multi-UI-step goals (one phrase = many clicks) are a KNOWN V1 scope limit,
+documented not hidden.
+
+**Revised component status:** executor spine ✓ (single-step, live). Q1 action-effect ✓ (now also
+the pointer-advance signal). Deterministic decomposition + step-pointer = NEW, to build. NO LLM
+planner (measured-out). NO Board memory in the action path (structural). Completion = deterministic
+(all-steps-done), not LLM `complete`.
+
+**Next (build):** deterministic goal→sub-goal sequencer + step-pointer in agent_loop; per-sub-goal
+executor; Q1 advances the pointer; re-run the 2-step walk.
+
 ## 3. The flawed fix (committed as a labeled checkpoint, NOT to build on)
 
 `agent::most_relevant_ref(screen, goal, exclude)` — token-overlap (coverage-weighted, stopword-
