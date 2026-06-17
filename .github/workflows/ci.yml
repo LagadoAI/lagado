@@ -3,7 +3,13 @@ name: CI
 on:
   push:
     branches: [ main ]
+    paths-ignore:        # docs / experiments / provisioning don't need cross-platform CI
+      - '**.md'
+      - 'docs/**'
+      - 'LAPUTA HOW TO/**'
+      - 'vm-provision/**'
   pull_request:
+  workflow_dispatch:     # run the full matrix on demand from the Actions tab
 
 jobs:
   agent:

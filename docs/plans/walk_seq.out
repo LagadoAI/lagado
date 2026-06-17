@@ -1,0 +1,34 @@
+══ FIRST WALK ══════════════════════════════════════════
+goal: Open the Applications menu then launch the Terminal Emulator
+
+[pre] 8B brain on :8080 — up
+[pre] classifier on :8081 — up
+[vm] booting…
+[vm] ssh up after 11.508149268s
+[vm] X up
+
+[walk] handing goal to hydra::run — watching…
+
+[agent] {"kind":"status","payload":{"detail":"Open the Applications menu then launch the Terminal Emulator","state":"goal_received"},"v":1}
+[agent] {"kind":"permission","payload":{"action":"click(selector=\"el_0\")","id":"8532e5d2-0d39-4643-af16-42446cb3ac4d","origin_agent":"main","origin_surface":"immersive","reason":"Write action requires confirmation","tool":"click","type":"typed"},"v":1}
+[walk]  ↳ HITL gate fired — auto-approving (#1)
+[agent] {"kind":"action_log","payload":{"text":"click(selector=\"el_0\") -> Clicked el_0 at (51,13)"},"v":1}
+[agent] {"kind":"permission","payload":{"action":"click(selector=\"el_4\")","id":"6efb534c-f877-40aa-b00d-8a53be915354","origin_agent":"main","origin_surface":"immersive","reason":"Write action requires confirmation","tool":"click","type":"typed"},"v":1}
+[walk]  ↳ HITL gate fired — auto-approving (#2)
+[agent] {"kind":"action_log","payload":{"text":"click(selector=\"el_4\") -> Clicked el_4 at (86,67)"},"v":1}
+[agent] {"kind":"action_log","payload":{"text":"Goal accomplished — all steps completed."},"v":1}
+[agent] {"kind":"status","payload":{"detail":"Goal accomplished — all steps completed.","state":"goal_done"},"v":1}
+
+[walk] pipeline returned cleanly in 15.815927888s
+[walk] HITL gate fired 2 time(s)
+[walk] screen delta across the whole walk: 31 of 48 cells changed (frames kept at /dev/shm/first_walk_before.png / /dev/shm/first_walk_after.png)
+
+── final screen (first 12 lines) ──
+    | [focused: Terminal - laputa@lagado-vm: ~]
+    |      ref_1  toggle button   "Applications"  (0,0,102,26)
+    |      ref_2  toggle button   "Terminal - laputa@lagado-vm: ~"  (110,0,200,26)
+    |      ref_3  toggle button   "2026-06-17"  (1161,0,68,26)
+    |      ref_4  toggle button   "Show Desktop"  (488,752,48,48)
+    |      ref_5  toggle button   "Directory Menu"  (744,752,48,48)
+
+[first_walk] done — total 20.256651645s

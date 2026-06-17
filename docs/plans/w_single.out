@@ -1,0 +1,37 @@
+══ FIRST WALK ══════════════════════════════════════════
+goal: Click the Applications menu in the top panel
+
+[pre] 8B brain on :8080 — up
+[pre] classifier on :8081 — up
+[vm] booting…
+[vm] ssh up after 11.529833734s
+[vm] X up
+
+[walk] handing goal to hydra::run — watching…
+
+[agent] {"kind":"status","payload":{"detail":"Click the Applications menu in the top panel","state":"goal_received"},"v":1}
+[agent] {"kind":"permission","payload":{"action":"click(selector=\"el_0\")","id":"2bf0f738-e6b4-4bfb-aa55-32731c165837","origin_agent":"main","origin_surface":"immersive","reason":"Write action requires confirmation","tool":"click","type":"tap"},"v":1}
+[walk]  ↳ HITL gate fired — auto-approving (#1)
+[agent] {"kind":"action_log","payload":{"text":"click(selector=\"el_0\") -> Clicked el_0 at (51,13)"},"v":1}
+[agent] {"kind":"action_log","payload":{"text":"Goal accomplished — all steps completed."},"v":1}
+[agent] {"kind":"status","payload":{"detail":"Goal accomplished — all steps completed.","state":"goal_done"},"v":1}
+
+[walk] pipeline returned cleanly in 14.858647522s
+[walk] HITL gate fired 1 time(s)
+[walk] screen delta across the whole walk: 6 of 48 cells changed (frames kept at /dev/shm/first_walk_before.png / /dev/shm/first_walk_after.png)
+
+── final screen (first 12 lines) ──
+    | [focused: (desktop)]
+    |      ref_1  toggle button   "Applications"  (0,0,102,26)
+    |      ref_2  toggle button   ""  (1101,0,26,26)
+    |      ref_3  toggle button   "2026-06-17"  (1161,0,68,26)
+    |      ref_4  toggle button   "laputa"  (1237,0,43,26)
+    |      ref_5  toggle button   "Show Desktop"  (488,752,48,48)
+    |      ref_6  toggle button   "Directory Menu"  (744,752,48,48)
+    |      ref_7  menu            ""  (0,27,173,308)
+    |      ref_8  menu item       "Run Program..."  (0,29,173,25)
+    |      ref_9  menu item       "Terminal Emulator"  (0,55,173,25)
+    |     ref_10  menu item       "File Manager"  (0,80,173,25)
+    |     ref_11  menu item       "Mail Reader"  (0,105,173,25)
+
+[first_walk] done — total 19.408835679s
