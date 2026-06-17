@@ -132,6 +132,47 @@ verify-mode offline; stress it under the same memory-above condition; check acqu
 grabs the last candidate is why the agent re-clicked an open menu — selection and completion
 cannot be one call).
 
+## 2.4 Verify-mode probe (2026-06-17) — NEGATIVE: binary act/skip is context-dominated
+
+Opus's select->verify flip, instrumented to its spec: dedicated lean verify prompt (NOT the
+action SYS prompt), every cell under memory-above (0/15/30 prepended lines), acquiescence as a
+gradient on the proven attractor "Directory Menu", false-act-on-top-1 logged. N=16, live 8B,
+grammar `root ::= "act" | "skip"`.
+
+**Acquiescence gradient (act-rate; want Applications=act, others=skip):**
+| candidate | mem=0 | mem=15 | mem=30 |
+|---|---|---|---|
+| Trash (clearly wrong) | 16/16 | 7/16 | 16/16 |
+| Directory Menu (ATTRACTOR) | 16/16 | 1/16 | 15/16 |
+| Show Desktop (neutral wrong) | 15/16 | 2/16 | 0/16 |
+| Applications (CORRECT) | 0/16 | 16/16 | 16/16 |
+
+The act/skip decision is dominated by **prepended-context length, not the label**. mem=0 is
+INVERTED (acts on all wrong, skips the correct answer); mem=30 acts on Trash 16/16 + attractor
+15/16. Only mem=15 looks sane — not guaranteeable in production.
+
+**Sequence sim (judge top-1, widen on skip, mem=30):**
+- GOOD ranker (Applications top-1): pick Applications 15/16, false-act-on-top-1 0/16 — but only
+  because the ranker pre-solved it.
+- BAD ranker (attractor top-1): pick "Directory Menu" 14/16, **false-act-on-top-1 = 14/16 (terminal)**.
+
+**Conclusion:** verify-mode does NOT escape the fragility — it relocates it from "which row" to
+"yes/no", where it is WORSE (no escape token; confident wrong commit), exactly as Opus predicted.
+The verifier is ACQUIESCENT and does not function as an independent check — it rubber-stamps the
+ranker's top-1 (redundant with a good ranker, terminal-wrong with a bad one). Opus's premise
+"recognition is intact wherever it attends" is NOT supported by isolated binary verify; the
+select-mode "good world" (C1/C3) may be a list-internal comparison effect, not a transferable
+per-candidate judgment. The memory-above gradient was decisive — a clean short prompt would have
+shown a lucky pass.
+
+**Where this leaves the architecture:** neither late-placement (context-fragile, §2.3) nor binary
+verify (context-dominated, here) is robust ALONE. Common root cause across BOTH: the binary/row
+outcome flips with **variable prepended-context length**. Candidate next direction (for Opus):
+the model's usable recognition appears to live in *list-internal comparison among few* (C1/C3),
+so a SMALL recall-into-band top-k presented in a LAYOUT-STABLE / length-bounded prompt (control
+the prepended context so the attended zone doesn't move) — i.e. the lever may be prompt-layout
+stability, not select-vs-verify. Open for the skeptic thread.
+
 ## 3. The flawed fix (committed as a labeled checkpoint, NOT to build on)
 
 `agent::most_relevant_ref(screen, goal, exclude)` — token-overlap (coverage-weighted, stopword-
