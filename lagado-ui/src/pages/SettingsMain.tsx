@@ -6,6 +6,7 @@ import { Select } from "../components/Select";
 import { Button } from "../components/Button";
 import SettingsBackup from "./SettingsBackup";
 import SettingsModels from "./SettingsModels";
+import SettingsEngine from "./SettingsEngine";
 import SettingsInference from "./SettingsInference";
 import SettingsKVCache from "./SettingsKVCache";
 import SettingsPermissions from "./SettingsPermissions";
@@ -18,6 +19,7 @@ import SettingsAdvanced from "./SettingsAdvanced";
 const TABS = [
   { id: "profile",     label: "Profile" },
   { id: "models",      label: "Models" },
+  { id: "engine",      label: "Engine" },
   { id: "inference",   label: "Inference" },
   { id: "kv-cache",    label: "KV Cache" },
   { id: "permissions", label: "Permissions" },
@@ -104,6 +106,7 @@ export default function SettingsMain() {
                 </div>
               )}
               {activeTab === "models"      && <SettingsModels />}
+              {activeTab === "engine"      && <SettingsEngine />}
               {activeTab === "inference"   && <SettingsInference />}
               {activeTab === "kv-cache"    && <SettingsKVCache />}
               {activeTab === "permissions" && <SettingsPermissions />}

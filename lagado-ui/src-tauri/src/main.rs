@@ -166,6 +166,51 @@ fn list_models() -> Vec<String> {
     lagado_agent::config::available_models()
 }
 
+/// Engine status: what the governor DISCOVERED about the model + probed hardware +
+/// the derived plan. Every number is read/measured/computed — none assumed (invariant #9).
+#[tauri::command]
+fn get_engine_status() -> serde_json::Value {
+    let model_path = lagado_agent::config::model_path();
+    let gpu = lagado_agent::governor::detect_gpu();
+    let cores = lagado_agent::governor::cpu_cores();
+
+    match lagado_agent::gguf::read_metadata(&model_path) {
+        Ok(m) => {
+            let prefs = lagado_agent::governor::EnginePrefs::default();
+            let cal: Vec<lagado_agent::governor::CalPoint> = vec![]; // cold start until runtime measures
+            let plan = lagado_agent::governor::plan_engine(&m, gpu.as_ref(), &prefs, &cal);
+            serde_json::json!({
+                "ok": true,
+                "model": {
+                    "file": model_path.file_name().and_then(|s| s.to_str()).unwrap_or(""),
+                    "arch": m.arch,
+                    "context_length": m.context_length,
+                    "block_count": m.block_count,
+                    "embedding_length": m.embedding_length,
+                    "expert_count": m.expert_count,
+                    "is_moe": m.is_moe(),
+                    "file_mb": m.file_bytes / (1024 * 1024),
+                },
+                "hardware": {
+                    "gpu": gpu.as_ref().map(|g| format!("{:?}", g.vendor)),
+                    "vram_total_mb": gpu.as_ref().map(|g| g.vram_total_mb),
+                    "vram_free_mb": gpu.as_ref().map(|g| g.vram_free_mb),
+                    "cpu_cores": cores,
+                },
+                "plan": {
+                    "ctx": plan.ctx,
+                    "n_gpu_layers": plan.n_gpu_layers,
+                    "cpu_moe": plan.cpu_moe,
+                    "predicted_vram_mb": plan.predicted_vram_mb,
+                    "feasibility": plan.feasibility.map(|f| format!("{:?}", f)),
+                    "rationale": plan.rationale,
+                },
+            })
+        }
+        Err(e) => serde_json::json!({ "ok": false, "error": e }),
+    }
+}
+
 #[tauri::command]
 fn get_chronos_recent(n: usize) -> Vec<serde_json::Value> {
     match lagado_agent::chronos::ChronosDb::open() {
@@ -699,6 +744,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             send_goal, send_chat, send_command, send_approval,
             initialize_timeline, get_active_model, set_active_model, list_models,
+            get_engine_status,
             get_chronos_recent, terminal_spawn, terminal_run, terminal_get_cwd,
             vault_list_files, get_server_status, capture_frame,
             vm_boot, vm_stop, vm_status,

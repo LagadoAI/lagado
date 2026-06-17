@@ -353,6 +353,17 @@ fn largest_fitting_ctx(model: &ModelInfo, gpu: &GpuInfo, ngl: u32, cal: &[CalPoi
 
 // ── GPU detection ─────────────────────────────────────────────────────────────
 
+/// Probe the best available discrete GPU (NVIDIA preferred, then AMD). Public so the UI
+/// and other consumers can show real hardware without re-implementing detection.
+pub fn detect_gpu() -> Option<GpuInfo> {
+    detect_nvidia_gpu().or_else(detect_amd_gpu)
+}
+
+/// Logical CPU cores (public probe).
+pub fn cpu_cores() -> usize {
+    num_cores()
+}
+
 /// Detect the NVIDIA GPU with the most free VRAM via `nvidia-smi`.
 /// On multi-GPU systems, picks the card with the most free VRAM.
 fn detect_nvidia_gpu() -> Option<GpuInfo> {
