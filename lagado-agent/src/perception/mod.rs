@@ -118,6 +118,24 @@ pub fn parse_ref_bboxes(screen: &str) -> HashMap<String, (i32, i32, i32, i32)> {
     map
 }
 
+/// Parse `ref_N … "label" …` lines from perceive.py output into `ref_id → label`.
+/// The label is the first double-quoted field on the row. Used to join human-readable
+/// labels back onto `FusedElement`s for the candidate list (the fused set carries
+/// `ref_id` + bbox but not the label text).
+pub fn parse_ref_labels(screen: &str) -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    let re = match Regex::new(r#"(ref_\w+).*?"([^"]*)""#) {
+        Ok(r) => r,
+        Err(_) => return map,
+    };
+    for line in screen.lines() {
+        if let Some(caps) = re.captures(line) {
+            map.insert(caps[1].to_string(), caps[2].to_string());
+        }
+    }
+    map
+}
+
 #[cfg(target_os = "linux")]
 pub mod linux;
 
@@ -129,6 +147,7 @@ pub mod capture;
 pub mod cv_proposer;
 pub mod delta;
 pub mod frame;
+pub mod selection;
 pub mod vlm_adapter;
 
 /// Wraps any Perceptor with a VLM layer that appends visual context to AT-SPI2 output.
@@ -232,6 +251,30 @@ mod tests {
         let bboxes = parse_ref_bboxes(screen);
         assert_eq!(coords.get("ref_42"), Some(&(50, 30)));   // center: 5+45=50, 10+20=30
         assert_eq!(bboxes.get("ref_42"), Some(&(5, 10, 90, 40)));
+    }
+
+    // ── parse_ref_labels ──────────────────────────────────────────────
+
+    #[test]
+    fn parse_ref_labels_takes_first_quoted_field() {
+        let screen = "      ref_1  toggle button   \"Applications\"  (0,0,102,26)";
+        let labels = parse_ref_labels(screen);
+        assert_eq!(labels.get("ref_1").map(|s| s.as_str()), Some("Applications"));
+    }
+
+    #[test]
+    fn parse_ref_labels_handles_empty_label() {
+        let screen = "      ref_2  toggle button   \"\"  (1101,0,26,26)";
+        let labels = parse_ref_labels(screen);
+        assert_eq!(labels.get("ref_2").map(|s| s.as_str()), Some(""));
+    }
+
+    #[test]
+    fn parse_ref_labels_multiple_rows() {
+        let screen = "  ref_1  toggle button  \"Applications\"  (0,0,102,26)\n  ref_4  toggle button  \"2026-06-17\"  (1161,0,68,26)";
+        let labels = parse_ref_labels(screen);
+        assert_eq!(labels.get("ref_1").map(|s| s.as_str()), Some("Applications"));
+        assert_eq!(labels.get("ref_4").map(|s| s.as_str()), Some("2026-06-17"));
     }
 
     #[test]
