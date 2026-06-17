@@ -13,7 +13,14 @@ pub fn embed(text: &str) -> Result<Vec<f32>, String> {
 
 /// Embed against an explicit base URL (test harnesses / non-default ports).
 pub fn embed_at(base_url: &str, text: &str) -> Result<Vec<f32>, String> {
-    let resp = ureq::post(&format!("{}/v1/embeddings", base_url))
+    // Bounded timeout: this runs at goal start and in the sleep-gate backfill. A
+    // spawned-but-wedged embedder must surface as an error (→ recency floor / retry next
+    // cycle), never hang the caller. Connection-refused already returns immediately.
+    let agent = ureq::AgentBuilder::new()
+        .timeout(std::time::Duration::from_secs(15))
+        .build();
+    let resp = agent
+        .post(&format!("{}/v1/embeddings", base_url))
         .set("Content-Type", "application/json")
         .send_json(json!({ "input": text }))
         .map_err(|e| format!("embed request failed: {}", e))?;
