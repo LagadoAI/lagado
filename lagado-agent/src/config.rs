@@ -106,6 +106,16 @@ pub fn vlm_base_url() -> String {
     format!("http://{}:{}", llama_host(), vlm_port())
 }
 
+/// Text-embedding server (LFM2-ColBERT-350M, mean-pooled) — the Board's relevance
+/// signal. Reuses the retired VLM port (8082) by default.
+pub fn embed_port() -> u16 {
+    std::env::var("LAGADO_EMBED_PORT").ok().and_then(|s| s.parse().ok()).unwrap_or(VLM_PORT)
+}
+
+pub fn embed_base_url() -> String {
+    format!("http://{}:{}", llama_host(), embed_port())
+}
+
 /// Shared frame path for QMP screendump output (used by capture_frame and VlmPerceptor).
 pub const FRAME_PATH: &str = "/dev/shm/lagado_frame.png";
 

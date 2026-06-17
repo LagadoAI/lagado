@@ -1,11 +1,13 @@
 mod action_graph;
 mod agent;
 mod auth;
+mod board;
 mod bootstrap;
 mod bracket_parser;
 mod chronos;
 mod config;
 mod distill;
+mod embedding;
 mod envelope;
 mod forge;
 mod gate;

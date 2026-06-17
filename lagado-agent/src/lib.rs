@@ -7,6 +7,7 @@ pub mod bracket_parser;
 pub mod chronos;
 pub mod config;
 pub mod distill;
+pub mod embedding;
 pub mod envelope;
 pub mod forge;
 pub mod gate;

@@ -88,6 +88,14 @@ impl MemoryTiers {
             [],
         );
 
+        // Board relevance: a SEPARATE text-embedding column. The `embedding` column
+        // holds VISUAL vectors (episode frames); the Board needs TEXT vectors (ColBERT)
+        // — different spaces, so they cannot share a column. Migration no-ops if present.
+        let _ = db.execute(
+            "ALTER TABLE memory_entries ADD COLUMN text_embedding BLOB",
+            [],
+        );
+
         Ok(MemoryTiers {
             hot: Vec::new(),
             db,
@@ -221,6 +229,137 @@ impl MemoryTiers {
             rusqlite::params![bytes, episode_id],
         ).map_err(|e| format!("store_visual_embedding: {e}"))?;
         Ok(())
+    }
+
+    /// Store a TEXT embedding (ColBERT, the Board relevance vector) for an entry, as
+    /// raw f32 LE bytes in the `text_embedding` column. Distinct from
+    /// `store_visual_embedding` (the `embedding` column = visual vectors).
+    pub fn store_text_embedding(&mut self, id: &str, embedding: &[f32]) -> Result<(), String> {
+        let bytes: Vec<u8> = embedding.iter().flat_map(|f| f.to_le_bytes()).collect();
+        self.db.execute(
+            "UPDATE memory_entries SET text_embedding = ?1 WHERE id = ?2",
+            rusqlite::params![bytes, id],
+        ).map_err(|e| format!("store_text_embedding: {e}"))?;
+        Ok(())
+    }
+
+    /// (id, text) of persisted entries lacking a text embedding — for backfill.
+    /// NOTE: cold `text` is ciphertext; embeddings must be computed from PLAINTEXT at
+    /// write time. Backfill from this is valid only where text is plaintext (e.g. evals).
+    pub fn entries_missing_text_embedding(&self) -> Vec<(String, String)> {
+        let mut stmt = match self.db.prepare(
+            "SELECT id, text FROM memory_entries WHERE text_embedding IS NULL",
+        ) {
+            Ok(s) => s,
+            Err(_) => return Vec::new(),
+        };
+        stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+            .map(|rows| rows.filter_map(|x| x.ok()).collect())
+            .unwrap_or_default()
+    }
+
+    /// Score every persisted entry that has a text embedding by cosine vs `query`.
+    /// Cold text is decrypted (raw fallback) like `find_similar_by_embedding`.
+    /// Shared candidate builder for `rank_by_relevance` and `assemble_slice`.
+    fn scored_candidates(&self, query: &[f32]) -> Vec<(MemoryEntry, f32)> {
+        if query.is_empty() {
+            return Vec::new();
+        }
+        let mut stmt = match self.db.prepare(
+            "SELECT id, text, tier, temperature, created_at, accessed_at, access_count, text_embedding
+             FROM memory_entries WHERE text_embedding IS NOT NULL",
+        ) {
+            Ok(s) => s,
+            Err(_) => return Vec::new(),
+        };
+        let passphrase = crate::auth::active_key();
+        let rows: Vec<(String, String, String, f32, i64, i64, u32, Vec<u8>)> = stmt
+            .query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?,
+                    r.get::<_, f32>(3)?, r.get::<_, i64>(4)?, r.get::<_, i64>(5)?,
+                    r.get::<_, u32>(6)?, r.get::<_, Vec<u8>>(7)?,
+                ))
+            })
+            .map(|it| it.filter_map(|x| x.ok()).collect())
+            .unwrap_or_default();
+
+        rows.into_iter()
+            .filter_map(|(id, raw_text, tier_s, temp, created, accessed, count, blob)| {
+                if blob.is_empty() || blob.len() % 4 != 0 {
+                    return None;
+                }
+                let stored: Vec<f32> = blob
+                    .chunks_exact(4)
+                    .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+                    .collect();
+                if stored.len() != query.len() {
+                    return None;
+                }
+                let tier = Tier::from_str(&tier_s)?;
+                let cos = crate::vision::cosine_similarity(query, &stored);
+                let text = if tier == Tier::Cold {
+                    if let Ok(bytes) = hex::decode(&raw_text) {
+                        crate::security::crypto::decrypt(&bytes, &passphrase)
+                            .ok()
+                            .and_then(|b| String::from_utf8(b).ok())
+                            .unwrap_or(raw_text)
+                    } else {
+                        raw_text
+                    }
+                } else {
+                    raw_text
+                };
+                Some((
+                    MemoryEntry {
+                        id, text, tier, temperature: temp,
+                        created_at: created, accessed_at: accessed, access_count: count,
+                    },
+                    cos,
+                ))
+            })
+            .collect()
+    }
+
+    /// Rank persisted entries by PURE text-embedding cosine (the Board's β signal in
+    /// isolation). Used for G3 parity against the Python eval and as the relevance
+    /// input to `assemble_slice`. Top-k, descending.
+    pub fn rank_by_relevance(&self, query: &[f32], top_k: usize) -> Vec<(MemoryEntry, f32)> {
+        let mut scored = self.scored_candidates(query);
+        scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        scored.truncate(top_k);
+        scored
+    }
+
+    /// The Board: assemble the top-k slice by the full Park score
+    /// (α·recency + β·relevance + γ·importance), recomputed stateless per call.
+    /// Relevance is normalized across the candidate set inside `board::park_scores`.
+    pub fn assemble_slice(
+        &self,
+        query: &[f32],
+        top_k: usize,
+        weights: &crate::board::ParkWeights,
+    ) -> Vec<MemoryEntry> {
+        // Board freshness half-life — "fresh for this step", faster than the 30-day
+        // forgetting curve. Set by principle (G3 cannot tune α; recency is uniform there).
+        const BOARD_RECENCY_HALF_LIFE_SECS: f32 = 86_400.0; // 1 day
+        let cands = self.scored_candidates(query);
+        if cands.is_empty() {
+            return Vec::new();
+        }
+        let now = now_unix();
+        let signals: Vec<crate::board::ParkSignals> = cands
+            .iter()
+            .map(|(e, cos)| crate::board::ParkSignals {
+                recency: crate::board::recency_factor(now - e.accessed_at, BOARD_RECENCY_HALF_LIFE_SECS),
+                relevance: *cos,
+                importance: crate::board::importance_heuristic(e),
+            })
+            .collect();
+        crate::board::top_k_indices(&signals, weights, top_k)
+            .into_iter()
+            .map(|i| cands[i].0.clone())
+            .collect()
     }
 
     /// Return the text of the top-K cold episodes most visually similar to `query`.
@@ -603,5 +742,54 @@ mod tests {
         assert_eq!(mem.hot.len(), 0);
 
         let _ = fs::remove_file(db_file);
+    }
+
+    /// Parity: the Rust ColBERT cosine path (f32 BLOB round-trip) must reproduce the
+    /// Python G3 ranking (eval_g3_embed.py, F1=0.52). Needs the embedding server on
+    /// :8082 and the seeded ~/.laputa-secure/g3_eval.db.
+    /// Run: `cargo test -p lagado-agent -- --ignored g3_relevance_parity --nocapture`
+    #[test]
+    #[ignore]
+    fn g3_relevance_parity_with_python() {
+        let home = std::env::var("HOME").expect("HOME");
+        let db = std::path::PathBuf::from(home).join(".laputa-secure/g3_eval.db");
+        assert!(db.exists(), "seed the eval DB first: {db:?}");
+
+        let mut mem = MemoryTiers::open(&db).expect("open eval db");
+
+        // Backfill text embeddings from plaintext (idempotent — eval DB only).
+        let missing = mem.entries_missing_text_embedding();
+        eprintln!("backfilling {} text embeddings...", missing.len());
+        for (id, text) in &missing {
+            let emb = crate::embedding::embed(text).expect("embed (is :8082 up?)");
+            mem.store_text_embedding(id, &emb).expect("store");
+        }
+
+        for q in [
+            "open Firefox and navigate to google",
+            "what happened in the browser earlier",
+            "run a shell command",
+            "what was the last terminal command",
+            "move a file to another folder",
+            "find a file in the project",
+        ] {
+            let qv = crate::embedding::embed(q).expect("embed query");
+            let top = mem.rank_by_relevance(&qv, 15);
+            eprintln!("\nQ: '{q}'");
+            for (e, cos) in top.iter().take(5) {
+                let snip: String = e.text.chars().take(58).collect();
+                eprintln!("   cos={cos:.3}  [{}]  {snip}", e.tier.as_str());
+            }
+            // Regression guard: a broken BLOB round-trip would scramble the ranking.
+            if q == "open Firefox and navigate to google" {
+                assert!(top[0].0.text.to_lowercase().contains("firefox"),
+                    "top-1 must be a Firefox entry, got: {}", top[0].0.text);
+            }
+            if q == "move a file to another folder" {
+                let t = top[0].0.text.to_lowercase();
+                assert!(["file", "folder", "download", "document"].iter().any(|w| t.contains(w)),
+                    "top-1 must be a files entry, got: {}", top[0].0.text);
+            }
+        }
     }
 }
