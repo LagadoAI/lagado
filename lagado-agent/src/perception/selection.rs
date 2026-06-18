@@ -104,12 +104,29 @@ fn content_tokens(s: &str) -> Vec<String> {
 /// (count of goal-content tokens matched, fraction of the label covered) for one label vs goal.
 /// Coverage breaks the "menu" collision: "Applications" (1/1 covered) beats "Directory Menu"
 /// (0 matched after "menu" is a stopword) and "File Manager" partials.
+/// Does a label token match a goal token? Exact equality OR a prefix relationship between two
+/// sufficiently-long tokens ("application"↔"applications", "terminal"↔"terminals").
+///
+/// This is the LEXICAL UNION (§7b "vote across weak rankers, union so the answer is never hidden"):
+/// the substring channel rescues morphological variants the exact channel misses, and because it is
+/// a union (max), it can only ADD matches — it never hides a match the exact channel already found.
+/// NOTE: the ranker is purely lexical by design; the ColBERT embedding (≈[0.96,0.99] short-label
+/// compression) lives in the memory-isolated Board, deliberately OUT of this action path (inv #10),
+/// so there is no embedding channel to fuse here — strengthening lexical is the applicable lever.
+/// Prefix (not arbitrary substring) + a 4-char floor keeps it from matching noise ("web"↔"website").
+fn tokens_match(a: &str, b: &str) -> bool {
+    a == b || (a.len() >= 4 && b.len() >= 4 && (a.starts_with(b) || b.starts_with(a)))
+}
+
 fn relevance(goal_toks: &[String], label: &str) -> (usize, f32) {
     let lab = content_tokens(label);
     if lab.is_empty() {
         return (0, 0.0);
     }
-    let matched = lab.iter().filter(|t| goal_toks.contains(t)).count();
+    let matched = lab
+        .iter()
+        .filter(|t| goal_toks.iter().any(|g| tokens_match(g, t)))
+        .count();
     (matched, matched as f32 / lab.len() as f32)
 }
 
@@ -374,6 +391,45 @@ mod tests {
         let ranked = rank_late_band(cands, "Click the Applications menu");
         let order: Vec<_> = ranked.iter().map(|c| c.label.clone()).collect();
         assert_eq!(order, vec!["Trash", "Files", "Volume"]);
+    }
+
+    // ── lexical union (§7b): substring/prefix channel max'd with exact ──
+
+    #[test]
+    fn tokens_match_exact_and_prefix_only() {
+        assert!(tokens_match("applications", "applications"));     // exact
+        assert!(tokens_match("application", "applications"));      // prefix (morphological)
+        assert!(tokens_match("terminals", "terminal"));           // prefix, either direction
+        assert!(!tokens_match("web", "website"));                 // < 4 chars on one side → no
+        assert!(!tokens_match("directory", "applications"));      // unrelated → no
+        assert!(!tokens_match("term", "different"));              // not a prefix relationship
+    }
+
+    #[test]
+    fn lexical_union_rescues_morphological_variant() {
+        // goal says "application" (singular); the label is "Applications" (plural). Exact-only
+        // would miss it; the prefix channel rescues it into the late band.
+        let cands = vec![labeled(0, "Trash"), labeled(1, "Applications")];
+        let ranked = rank_late_band(cands, "open the application launcher");
+        assert_eq!(ranked.last().unwrap().label, "Applications");
+    }
+
+    #[test]
+    fn lexical_union_does_not_resurrect_the_menu_decoy() {
+        // REGRESSION GUARD: the §2.18 decoy. "Directory Menu" must STILL score 0 against
+        // "Applications menu" ("menu" is a stopword; "directory" ≠/⊀ "applications"), so the
+        // substring channel must not hand the decoy a false match.
+        let cands = vec![labeled(0, "Directory Menu"), labeled(1, "Applications")];
+        let ranked = rank_late_band(cands, "Click the Applications menu");
+        assert_eq!(ranked.last().unwrap().label, "Applications");
+        assert_eq!(best_match_token(&cands_clone(&ranked), "Click the Applications menu"),
+                   Some(ranked.last().unwrap().token.clone()),
+                   "the unique best match is still Applications, not the decoy");
+    }
+
+    fn cands_clone(c: &[Candidate]) -> Vec<Candidate> {
+        c.iter().map(|x| Candidate { token: x.token.clone(), label: x.label.clone(),
+            center: x.center, sense: x.sense, trusted: x.trusted }).collect()
     }
 
     // ── LATE_BAND_CAP (Phase 1b: bound the CV flood without the §5 lossy-shortlist trap) ──

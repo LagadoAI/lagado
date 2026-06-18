@@ -264,6 +264,27 @@ pub fn decompose_goal(goal: &str) -> Vec<String> {
     parts.into_iter().filter(|s| !s.is_empty()).collect()
 }
 
+/// Assemble the executor (action-selection) prompt. **MEMORY-ISOLATED BY CONSTRUCTION (invariant
+/// #10):** this takes ONLY the pinned system prompt, the ranked+capped candidate block (or the raw
+/// screen as fallback), and the discriminating goal phrase. It has NO parameter for episodic /
+/// visual / skill memory — §4.3 proved that prepended memory silently flips the pick. New senses
+/// (CV, OmniParser captions, DOM labels) feed `candidate_block` (their text is *element label* data,
+/// which the executor is meant to see), never a memory slot. The SYS preamble LENGTH is load-bearing
+/// (lands the candidate list in the late-attention band, §2.6) — do not reorder this template.
+pub fn build_executor_prompt(
+    system_prompt: &str,
+    candidate_block: &str,
+    screen: &str,
+    prompt_goal: &str,
+) -> String {
+    let screen_section = if candidate_block.is_empty() {
+        format!("Screen:\n{screen}\n\n")
+    } else {
+        format!("{candidate_block}\n")
+    };
+    format!("{system_prompt}\n\n{screen_section}Goal: {prompt_goal}\n\nWhat is your next action?")
+}
+
 /// Strip a leading list marker ("1.", "- ", "* ", "2) ", "• ") and surrounding whitespace from a
 /// planner output line.
 fn strip_list_marker(line: &str) -> String {
@@ -764,18 +785,14 @@ pub async fn agent_loop(
         // and selection collapses to first-position, label-blind). Do NOT trim the system prompt or
         // reorder this template without re-running the position sweep (the regression guard:
         // docs/plans/experiments/lean_gate.py + h2h.py) — selection rots SILENTLY otherwise.
-        let screen_section = if candidate_block.is_empty() {
-            format!("Screen:\n{screen}\n\n")
-        } else {
-            format!("{candidate_block}\n")
-        };
         // Goal-slot uses the DISCRIMINATING phrasing (§2.18): the verbose sub-goal leaks category
         // tokens ("…menu") that lexically pull a decoy ("Directory Menu"); the discriminating token
         // ("Applications") clicks correctly. Deterministic, at the handoff — not a ranker.
         let prompt_goal = crate::perception::selection::discriminating_phrase(active_goal);
-        let prompt = format!(
-            "{system_prompt}\n\n{screen_section}Goal: {prompt_goal}\n\nWhat is your next action?"
-        );
+        // MEMORY-ISOLATED BY CONSTRUCTION (inv #10): the builder takes ONLY sys + candidates + goal —
+        // it has no parameter through which episodic/visual/skill memory could reach the executor.
+        // Guarded by `executor_prompt_is_memory_isolated` so new senses can't silently leak (§4.3).
+        let prompt = build_executor_prompt(&system_prompt, &candidate_block, &screen, &prompt_goal);
 
         let adapter_clone = adapter.clone();
         let grammar_for_call = grammar.clone();
@@ -1202,6 +1219,29 @@ mod observation_tests {
         assert_eq!(strip_list_marker("2) press Enter"), "press Enter");
         assert_eq!(strip_list_marker("• type touch /tmp/x"), "type touch /tmp/x");
         assert_eq!(strip_list_marker("Open the menu"), "Open the menu"); // no marker → unchanged
+    }
+
+    #[test]
+    fn executor_prompt_is_memory_isolated() {
+        // A multi-sense candidate block (a11y label + label-less CV + an OmniParser-style caption),
+        // exactly the wiring that risks leaking a new sense's text into a memory slot.
+        let sys = "SYSTEM-PREAMBLE-PINNED";
+        let candidate_block = "el_0 \"Applications\"\nel_1 <no label>\nel_2 \"Submit button\"";
+        let goal = "Applications";
+        let prompt = build_executor_prompt(sys, candidate_block, "RAW-SCREEN-TEXT", goal);
+
+        // The prompt is EXACTLY sys + candidates + goal — any added section breaks this equality,
+        // which is the whole point: the builder cannot carry memory it was never given.
+        assert_eq!(
+            prompt,
+            format!("{sys}\n\n{candidate_block}\nGoal: {goal}\n\nWhat is your next action?")
+        );
+        // Raw screen is omitted whenever candidates exist.
+        assert!(!prompt.contains("RAW-SCREEN-TEXT"));
+        // None of the Board/memory context markers can appear (inv #10) — the builder has no path.
+        for leak in ["Relevant procedures from experience", "episodic", "similar past episode", "skill", "used 1 time"] {
+            assert!(!prompt.to_lowercase().contains(&leak.to_lowercase()), "memory leaked into executor prompt: {leak}");
+        }
     }
 
     #[test]
