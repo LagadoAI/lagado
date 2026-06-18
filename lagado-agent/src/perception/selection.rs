@@ -131,23 +131,47 @@ pub fn discriminating_phrase(goal: &str) -> String {
     if kept.is_empty() { goal.trim().to_string() } else { kept.join(" ") }
 }
 
+/// Maximum candidates rendered into the selection prompt + grammar.
+///
+/// Phase 1b measured 648 CV boxes fused onto a single 1280×800 desktop frame — far past
+/// the small lists the late-band fix was verified on. Uncapped, that floods the prompt and
+/// reintroduces the position bias the ranking exists to defeat. The cap keeps the most-relevant
+/// tail (see `rank_late_band`). It is MODEL-DEPENDENT (how many candidates the LLM's attention
+/// band holds) and therefore a TUNABLE, not a truth — start point pending the Phase 1c VM
+/// pick-rate gate; should become governor-supplied rather than frozen (invariant #9).
+pub const LATE_BAND_CAP: usize = 64;
+
 /// Re-order candidates so the MOST goal-relevant lands LAST — the model's attended late band
 /// (verified 2026-06-17: a11y label-reading holds in the late band, collapses for early rows).
-/// Ascending by (matched, coverage); STABLE, so equal-relevance candidates keep their spatial
-/// order. This is the deterministic RANK on the rails, NOT a decision — the model still picks
-/// among the full candidate set; ranking only controls where each lands. Never drops a candidate
-/// (the §5 lossy-shortlist trap): the model sees them all, ordered.
+/// Ascending by (matched, coverage, has_label); STABLE, so equal-rank candidates keep their
+/// spatial order. The `has_label` tertiary key sinks label-less CV/vision boxes BELOW labeled
+/// ones within a relevance tie, so the cap below drops inert unlabeled boxes first and the a11y
+/// label spine is preserved. This is the deterministic RANK on the rails, NOT a decision — the
+/// model still picks among the (capped) set; ranking only controls where each lands.
+///
+/// Capping respects the §5 lossy-shortlist lesson by construction: the only candidates the cap
+/// can drop are the least-relevant, label-less boxes the selection rails cannot pick in Phase 1
+/// anyway (an unlabeled box matches nothing in `goal_matches_any`/`best_match_token`). A labeled
+/// element is only ever dropped if labeled candidates alone exceed `LATE_BAND_CAP`.
 pub fn rank_late_band(mut candidates: Vec<Candidate>, goal: &str) -> Vec<Candidate> {
     let g = content_tokens(goal);
-    if g.is_empty() {
-        return candidates;
+    if !g.is_empty() {
+        candidates.sort_by(|a, b| {
+            let ra = relevance(&g, &a.label);
+            let rb = relevance(&g, &b.label);
+            ra.0.cmp(&rb.0)
+                .then(ra.1.partial_cmp(&rb.1).unwrap_or(std::cmp::Ordering::Equal))
+                // tertiary: labeled (true) ranks above label-less (false) within a tie, so the
+                // front-drain cap below sheds inert unlabeled boxes before any labeled element.
+                .then((!a.label.is_empty()).cmp(&!b.label.is_empty()))
+        });
     }
-    candidates.sort_by(|a, b| {
-        let ra = relevance(&g, &a.label);
-        let rb = relevance(&g, &b.label);
-        ra.0.cmp(&rb.0)
-            .then(ra.1.partial_cmp(&rb.1).unwrap_or(std::cmp::Ordering::Equal))
-    });
+    // CAP to the most-relevant tail. Ascending sort puts the highest relevance LAST, so we drain
+    // the FRONT (least relevant) — `truncate` would keep the head and silently drop the matching
+    // element. With no goal tokens (no sort) this bounds prompt size in spatial order.
+    if candidates.len() > LATE_BAND_CAP {
+        candidates.drain(0..candidates.len() - LATE_BAND_CAP);
+    }
     // RE-TOKEN by render position (verified 2026-06-17): the model attends to the HIGHEST token
     // number / last item, NOT the last-RENDERED row. Sorting reorders the display but if tokens
     // stay spatial, the late-band target keeps a mid-range token (e.g. el_9) and the model picks
@@ -350,6 +374,47 @@ mod tests {
         let ranked = rank_late_band(cands, "Click the Applications menu");
         let order: Vec<_> = ranked.iter().map(|c| c.label.clone()).collect();
         assert_eq!(order, vec!["Trash", "Files", "Volume"]);
+    }
+
+    // ── LATE_BAND_CAP (Phase 1b: bound the CV flood without the §5 lossy-shortlist trap) ──
+
+    fn unlabeled(token_idx: usize) -> Candidate {
+        Candidate { token: index_token(token_idx), label: String::new(),
+                    center: (0, 0), sense: "vision", trusted: false }
+    }
+
+    #[test]
+    fn cap_keeps_matching_element_in_tail() {
+        // A flood of label-less CV boxes + one labeled match. The cap must keep the
+        // match at the highest token (the attended late band), NOT drop it.
+        let mut cands: Vec<Candidate> = (0..LATE_BAND_CAP + 20).map(unlabeled).collect();
+        cands.push(labeled(999, "Applications"));
+        let ranked = rank_late_band(cands, "Click the Applications menu");
+        assert_eq!(ranked.len(), LATE_BAND_CAP, "list is capped to LATE_BAND_CAP");
+        assert_eq!(ranked.last().unwrap().label, "Applications", "the match must survive in the tail");
+        assert_eq!(ranked.last().unwrap().token, index_token(LATE_BAND_CAP - 1));
+        for (i, c) in ranked.iter().enumerate() { assert_eq!(c.token, index_token(i)); }
+    }
+
+    #[test]
+    fn cap_drops_label_less_before_labeled() {
+        // LATE_BAND_CAP labeled (non-matching) + extra unlabeled, goal matching none.
+        // The cap must shed the inert unlabeled boxes and preserve every labeled element
+        // (the a11y spine) — that is the §5 guarantee made concrete.
+        let mut cands: Vec<Candidate> = (0..LATE_BAND_CAP).map(|i| labeled(i, "Trash")).collect();
+        cands.extend((0..10).map(|i| unlabeled(LATE_BAND_CAP + i)));
+        let ranked = rank_late_band(cands, "Click the Applications menu");
+        assert_eq!(ranked.len(), LATE_BAND_CAP);
+        assert!(ranked.iter().all(|c| !c.label.is_empty()),
+            "every labeled element preserved; only label-less boxes dropped");
+    }
+
+    #[test]
+    fn cap_does_not_bind_under_limit() {
+        let cands = vec![labeled(0, "Applications"), unlabeled(1), unlabeled(2)];
+        let ranked = rank_late_band(cands, "Click the Applications menu");
+        assert_eq!(ranked.len(), 3, "a short list is never truncated");
+        assert_eq!(ranked.last().unwrap().label, "Applications");
     }
 
     // ── deterministic fail-closed gate ───────────────────────────────

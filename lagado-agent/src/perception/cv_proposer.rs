@@ -153,6 +153,35 @@ pub fn extract_cell_rgb(
     cell
 }
 
+/// Propose candidate boxes across an entire decoded RGB frame.
+///
+/// Tiles the frame into the same `GRID_COLS × GRID_ROWS` grid the delta detector
+/// uses — so connected-component labelling never merges the whole screen into one
+/// blob — and runs [`propose_boxes`] per cell, concatenating the boxes (already in
+/// screen coordinates). Pure: no I/O, no model. `full_rgb` must be exactly
+/// `frame_w * frame_h * 3` bytes; a malformed/empty frame yields no boxes rather
+/// than panicking (the loop degrades to a11y-only).
+pub fn propose_frame(full_rgb: &[u8], frame_w: u32, frame_h: u32) -> Vec<ScreenBox> {
+    use crate::perception::delta::{DeltaDetector, GRID_COLS, GRID_ROWS};
+    let mut boxes = Vec::new();
+    if frame_w == 0 || frame_h == 0
+        || full_rgb.len() != frame_w as usize * frame_h as usize * 3
+    {
+        return boxes;
+    }
+    for row in 0..GRID_ROWS {
+        for col in 0..GRID_COLS {
+            let (cx, cy, cw, ch) = DeltaDetector::cell_pixel_bounds(col, row, frame_w, frame_h);
+            if cw == 0 || ch == 0 {
+                continue;
+            }
+            let cell_rgb = extract_cell_rgb(full_rgb, frame_w, cx, cy, cw, ch);
+            boxes.extend(propose_boxes(&cell_rgb, cw, ch, (cx, cy)).boxes);
+        }
+    }
+    boxes
+}
+
 // ── Internal helpers ────────────────────────────────────────────────────────
 
 fn rgb_to_gray(rgb: &[u8], w: u32, h: u32) -> ImageBuffer<Luma<u8>, Vec<u8>> {
@@ -315,5 +344,47 @@ mod tests {
             result.boxes.is_empty(),
             "single-pixel components must be filtered by MIN_BOX_AREA_PX"
         );
+    }
+
+    // ── Full-frame driver (propose_frame) ─────────────────────────────────────
+
+    /// Build a full RGB frame (black) with one filled white rectangle.
+    fn frame_with_rect(fw: u32, fh: u32, rx: u32, ry: u32, rw: u32, rh: u32) -> Vec<u8> {
+        let mut v = vec![0u8; (fw * fh * 3) as usize];
+        for py in ry..(ry + rh).min(fh) {
+            for px in rx..(rx + rw).min(fw) {
+                let idx = (py * fw + px) as usize * 3;
+                v[idx] = 240; v[idx + 1] = 240; v[idx + 2] = 240;
+            }
+        }
+        v
+    }
+
+    #[test]
+    fn propose_frame_blank_yields_no_boxes() {
+        let frame = vec![100u8; (160 * 120 * 3) as usize]; // solid grey, no edges
+        assert!(propose_frame(&frame, 160, 120).is_empty());
+    }
+
+    #[test]
+    fn propose_frame_mismatched_length_is_graceful() {
+        // Wrong-sized buffer / zero dims degrade to no boxes, never panic.
+        assert!(propose_frame(&[1, 2, 3], 160, 120).is_empty());
+        assert!(propose_frame(&[], 0, 0).is_empty());
+    }
+
+    #[test]
+    fn propose_frame_finds_boxes_in_global_coords() {
+        // A clear rectangle well inside the frame must surface ≥1 box, and every
+        // box must land within the frame bounds (tiling preserves screen coords).
+        let (fw, fh) = (160u32, 120u32);
+        let frame = frame_with_rect(fw, fh, 50, 40, 40, 30);
+        let boxes = propose_frame(&frame, fw, fh);
+        assert!(!boxes.is_empty(), "a clear rectangle must produce at least one box");
+        for b in &boxes {
+            assert!(b.x >= 0 && b.y >= 0, "screen coords are non-negative");
+            assert!((b.x + b.w) as u32 <= fw && (b.y + b.h) as u32 <= fh,
+                "box {:?} must stay within the {fw}×{fh} frame", b);
+        }
     }
 }

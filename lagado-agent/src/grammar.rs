@@ -3,15 +3,16 @@
 //! When the model picks a screen element, constrain output to valid ref_ids.
 //! Phase 1: stub interface. Phase 2: dynamic GBNF from perception output.
 
-/// Generate a GBNF grammar over the FUSED element set: a single interaction
+/// Generate a GBNF grammar over the rendered candidate set: a single interaction
 /// bracket-call whose `selector` is constrained to one synthetic index token
 /// (`el_0`, `el_1`, …) or the mandatory escape (`none`).
 ///
-/// Key design (spec §2): the grammar is keyed on the per-frame INDEX, not on
-/// `FusedElement.ref_id`. `ref_id` is `None` for CV/DOM/vision-only elements, so a
-/// grammar over `ref_id` would silently drop exactly the elements fusion exists to
-/// recover. Indexing by position in the arbiter's deterministic `(y,x,w,h)` sort
-/// names every element. The actuator resolves `el_N` → bbox-center → coord click.
+/// Takes the COUNT of candidates actually rendered into the prompt (`el_0..el_{n-1}`),
+/// NOT the raw fused set — the candidate list is ranked and capped (`LATE_BAND_CAP`)
+/// before it reaches the model, so the grammar must offer exactly the tokens that exist.
+/// Keying on the per-frame INDEX (not `FusedElement.ref_id`, which is `None` for
+/// CV/DOM/vision-only elements) names every element; the actuator resolves
+/// `el_N` → bbox-center → coord click.
 ///
 /// Scope: the GUI-interaction subset (`click`/`type`/`key`/`wait`/`done`). Whether
 /// to also admit the 44 native/MCP `invoke` tools inside the constrained set is an
@@ -19,17 +20,17 @@
 /// deliberately NOT baked in here.
 ///
 /// `none` (the escape) is always offered: a fusion miss becomes a recoverable
-/// "none of these fit" signal, never a forced wrong click. Empty input → empty
+/// "none of these fit" signal, never a forced wrong click. `n == 0` → empty
 /// grammar (no constraint), so callers fall back to unconstrained decoding.
-pub fn selector_grammar(elements: &[crate::perception::arbiter::FusedElement]) -> String {
-    if elements.is_empty() {
+pub fn selector_grammar(n: usize) -> String {
+    if n == 0 {
         return String::new();
     }
     use std::fmt::Write;
     use crate::perception::selection::{index_token, ESCAPE_TOKEN};
 
-    // target alternation: every fused element's synthetic index + the escape.
-    let mut targets: Vec<String> = (0..elements.len())
+    // target alternation: every rendered candidate's synthetic index + the escape.
+    let mut targets: Vec<String> = (0..n)
         .map(|i| format!("\"{}\"", index_token(i)))
         .collect();
     targets.push(format!("\"{ESCAPE_TOKEN}\""));
@@ -70,20 +71,16 @@ mod tests {
 
     #[test]
     fn selector_grammar_empty_without_refs() {
-        assert!(selector_grammar(&[]).is_empty());
+        assert!(selector_grammar(0).is_empty());
     }
 
     #[test]
     fn selector_grammar_constrains_to_index_tokens_and_escape() {
-        use crate::perception::arbiter::{FusedElement, LabelSource, Sense};
-        let fused = vec![
-            FusedElement { ref_id: Some("ref_1".into()), bbox: (0, 0, 10, 10), sense: Sense::A11yOnly, patch_embd: None, label: None, label_source: LabelSource::None },
-            FusedElement { ref_id: None, bbox: (50, 50, 10, 10), sense: Sense::VisionOnly, patch_embd: None, label: None, label_source: LabelSource::None },
-        ];
-        let g = selector_grammar(&fused);
-        // every element's synthetic index is a valid target — including the vision-only one
+        // Two rendered candidates → tokens el_0 and el_1 (a CV/vision-only element is
+        // just another index; its inclusion is decided upstream in build_candidates).
+        let g = selector_grammar(2);
         assert!(g.contains("\"el_0\""), "el_0 must be selectable");
-        assert!(g.contains("\"el_1\""), "vision-only el_1 must be selectable (not dropped)");
+        assert!(g.contains("\"el_1\""), "el_1 must be selectable (not dropped)");
         // the mandatory escape
         assert!(g.contains("\"none\""), "escape token must always be offered");
         // the interaction verbs

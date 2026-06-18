@@ -575,15 +575,33 @@ pub async fn agent_loop(
         // determinism on the RAILS (which targets are valid), not on the STRATEGY (which
         // one to pick) — the model keeps full agency over tool + target + escape.
         //
-        // v1 fuses a11y only (cv/vision are []); the index space already names every element
-        // regardless of `ref_id`, so wiring live CV/vision later changes nothing in this loop.
+        // Detection = union (a11y ∪ CV): a box enters the candidate set if ANY sense
+        // sees it, so CV rescues canvas/custom widgets a11y is blind to. The index
+        // space names every element regardless of `ref_id`, so a CV-only box is just
+        // another `el_N`.
         let bboxes = crate::perception::parse_ref_bboxes(&screen);
         let labels = crate::perception::parse_ref_labels(&screen);
-        // Labels now flow THROUGH the arbiter (provenance: a11y > caption > OCR > None),
-        // which carries each element's resolved label on the FusedElement. cv/vision
-        // stay empty here until Phase 1b wires the live CV proposer.
-        let fused = crate::perception::arbiter::fuse(&bboxes, &labels, &[], &[]);
+        // Phase 1b — live CV sense. Read the QMP screendump, decode, propose boxes over
+        // the full frame. FAIL-OPEN to a11y-only on any frame error: a dead sense must
+        // degrade to the remaining senses, never crash the loop (cross-cutting invariant).
+        let cv_boxes: Vec<crate::perception::cv_proposer::ScreenBox> =
+            match std::fs::read(crate::config::FRAME_PATH) {
+                Ok(png) => match image::load_from_memory(&png) {
+                    Ok(img) => {
+                        let rgb = img.to_rgb8();
+                        let (w, h) = (rgb.width(), rgb.height());
+                        crate::perception::cv_proposer::propose_frame(rgb.as_raw(), w, h)
+                    }
+                    Err(e) => { chronos::log(&format!("cv: frame decode failed ({e}) — a11y-only")); vec![] }
+                },
+                Err(e) => { chronos::log(&format!("cv: no frame ({e}) — a11y-only")); vec![] }
+            };
+        // Labels flow THROUGH the arbiter (provenance: a11y > caption > OCR > None); CV
+        // boxes carry no text, so they enter unlabeled but selectable. Vision stays []
+        // until Phase 2.
+        let fused = crate::perception::arbiter::fuse(&bboxes, &labels, &cv_boxes, &[]);
         let candidates = crate::perception::selection::build_candidates(&fused);
+        chronos::log(&format!("perceive: {} a11y + {} cv → {} fused", bboxes.len(), cv_boxes.len(), fused.len()));
         // AUDIT: log the exact labels the agent perceives this step (not just the count) so we can
         // see what the selector/fail-closed actually had to match against.
         chronos::log(&format!("candidates[{}] for \"{active_goal}\": {}", candidates.len(),
@@ -636,9 +654,10 @@ pub async fn agent_loop(
         // label-less / `ref_id`-`None` elements — the point of the index space).
         actuator.set_targets(crate::perception::selection::candidate_coords(&candidates));
         let candidate_block = crate::perception::selection::render_candidates(&candidates);
-        // GBNF over THIS frame's candidates (+ escape; escape is a deterministic-only path — the
-        // model never reaches it). Empty when there are no candidates → unconstrained decoding.
-        let grammar = crate::grammar::selector_grammar(&fused);
+        // GBNF over THIS frame's RENDERED candidates (+ escape; escape is a deterministic-only
+        // path — the model never reaches it). Derived from the ranked+capped count, NOT `fused`,
+        // so the grammar offers exactly the tokens the prompt shows. Empty → unconstrained decoding.
+        let grammar = crate::grammar::selector_grammar(candidates.len());
         if !grammar.is_empty() {
             chronos::log(&format!("selector_grammar: {} candidates (late-band) + escape", candidates.len()));
         }
