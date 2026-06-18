@@ -41,6 +41,16 @@ fn dev_override(_key: &str) -> Option<String> {
     None
 }
 
+/// Whether the live CV perception sense (Phase 1b) runs. Default ON; set
+/// `LAGADO_CV_DISABLE=1` to fall back to a11y-only. Honored in ALL build profiles
+/// (unlike `dev_override`): it gates runtime behavior, not a code/path-loading surface,
+/// and doubles as an operational kill-switch if CV ever degrades perception in the field.
+/// It is also the measurement instrument for the Phase 1c pick-rate gate (same binary,
+/// same goals, CV on vs off).
+pub fn cv_enabled() -> bool {
+    !matches!(std::env::var("LAGADO_CV_DISABLE").as_deref(), Ok("1") | Ok("true"))
+}
+
 const LLAMA_HOST: &str = "127.0.0.1";
 const LLAMA_PORT: u16 = 8080;
 const WS_HOST: &str = "127.0.0.1";

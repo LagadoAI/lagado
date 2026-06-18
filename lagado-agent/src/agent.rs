@@ -584,17 +584,22 @@ pub async fn agent_loop(
         // Phase 1b — live CV sense. Read the QMP screendump, decode, propose boxes over
         // the full frame. FAIL-OPEN to a11y-only on any frame error: a dead sense must
         // degrade to the remaining senses, never crash the loop (cross-cutting invariant).
+        // Gated by LAGADO_CV_DISABLE (kill-switch + the Phase 1c pick-rate measurement knob).
         let cv_boxes: Vec<crate::perception::cv_proposer::ScreenBox> =
-            match std::fs::read(crate::config::FRAME_PATH) {
-                Ok(png) => match image::load_from_memory(&png) {
-                    Ok(img) => {
-                        let rgb = img.to_rgb8();
-                        let (w, h) = (rgb.width(), rgb.height());
-                        crate::perception::cv_proposer::propose_frame(rgb.as_raw(), w, h)
-                    }
-                    Err(e) => { chronos::log(&format!("cv: frame decode failed ({e}) — a11y-only")); vec![] }
-                },
-                Err(e) => { chronos::log(&format!("cv: no frame ({e}) — a11y-only")); vec![] }
+            if !crate::config::cv_enabled() {
+                vec![]
+            } else {
+                match std::fs::read(crate::config::FRAME_PATH) {
+                    Ok(png) => match image::load_from_memory(&png) {
+                        Ok(img) => {
+                            let rgb = img.to_rgb8();
+                            let (w, h) = (rgb.width(), rgb.height());
+                            crate::perception::cv_proposer::propose_frame(rgb.as_raw(), w, h)
+                        }
+                        Err(e) => { chronos::log(&format!("cv: frame decode failed ({e}) — a11y-only")); vec![] }
+                    },
+                    Err(e) => { chronos::log(&format!("cv: no frame ({e}) — a11y-only")); vec![] }
+                }
             };
         // Labels flow THROUGH the arbiter (provenance: a11y > caption > OCR > None); CV
         // boxes carry no text, so they enter unlabeled but selectable. Vision stays []
