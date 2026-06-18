@@ -264,6 +264,84 @@ pub fn decompose_goal(goal: &str) -> Vec<String> {
     parts.into_iter().filter(|s| !s.is_empty()).collect()
 }
 
+/// Strip a leading list marker ("1.", "- ", "* ", "2) ", "• ") and surrounding whitespace from a
+/// planner output line.
+fn strip_list_marker(line: &str) -> String {
+    line.trim()
+        .trim_start_matches(|c: char| c.is_ascii_digit() || matches!(c, '.' | ')' | '-' | '*' | '•' | ' '))
+        .trim()
+        .to_string()
+}
+
+/// Board-informed planner (Wall 1 — precondition planning). Expands an IMPLICIT single-phrase goal
+/// into an ordered list of on-screen sub-goals, making implicit PRECONDITIONS explicit (e.g. an app
+/// that lives inside a menu needs that menu opened first — the gap that made "Launch the Terminal
+/// Emulator" fail-closed on a bare desktop).
+///
+/// Informed by LEARNED skills (the Board / skill memory): this is **store-vs-INFLUENCE** in action —
+/// memory shapes the PLAN here, and is still kept OUT of the executor's click prompt (invariant #10,
+/// where prepended memory flips the pick). Planning needs world knowledge, so it is the one LLM step
+/// on the *strategy* side; the executor stays deterministic on the rails.
+///
+/// Conservative by construction — it can only ADD precondition steps, never corrupt the deterministic
+/// path:
+/// - An EXPLICIT multi-step goal ("X then Y") keeps the deterministic connective-marker split,
+///   untouched (zero regression on tasks that already work).
+/// - The model plan is adopted ONLY if it actually expanded a single goal into >1 step; otherwise,
+///   or on any model error, it falls back to the original goal.
+fn plan_goal(goal: &str, skills: &[Skill], adapter: &Arc<dyn InferenceAdapter>) -> Vec<String> {
+    let syntactic = decompose_goal(goal);
+    if syntactic.len() > 1 {
+        return syntactic; // explicit multi-step → trust the deterministic split
+    }
+    let skill_block = SkillLibrary::format_for_prompt(skills);
+    let prompt = format!(
+"Break the goal into the FEWEST on-screen click steps, one per line.
+Rules:
+- Each step is exactly: Click <the element to click>. Nothing else.
+- To launch or open an application: TWO steps — Click the Applications menu, then Click <the app>.
+- One click per step. Do NOT add steps like locate, find, wait, open the folder, verify, or double-click.
+- If the target is already a visible item, output ONE step.
+
+Example:
+Goal: Launch the Web Browser
+Steps:
+Click the Applications menu
+Click Web Browser
+{skill_block}
+Goal: {goal}
+Steps:"
+    );
+    // Lead verbs that are not a discrete click target — the planner sometimes emits narration
+    // ("Locate X", "Wait for Y") that has no on-screen element and would only fail-close.
+    const NON_ACTION_LEAD: &[&str] =
+        &["wait", "locate", "find", "ensure", "verify", "confirm", "observe", "check", "look", "see"];
+    match adapter.generate(&prompt, 128, 0.1) {
+        Ok(text) => {
+            let steps: Vec<String> = text
+                .lines()
+                .map(strip_list_marker)
+                .filter(|l| !l.is_empty())
+                .filter(|l| {
+                    let lead = l.split_whitespace().next().unwrap_or("").to_lowercase();
+                    !NON_ACTION_LEAD.contains(&lead.as_str())
+                })
+                .collect();
+            // Adopt only a genuine expansion; a 0/1-line reply adds nothing and risks drift.
+            if steps.len() > 1 {
+                chronos::log(&format!("planner: expanded \"{goal}\" → {steps:?}"));
+                steps
+            } else {
+                syntactic
+            }
+        }
+        Err(e) => {
+            chronos::log(&format!("planner: model error ({e}) — deterministic decomposition"));
+            syntactic
+        }
+    }
+}
+
 /// The focused-window label from a perception dump line `[focused: X]`, or "" if absent.
 fn screen_focus(screen: &str) -> String {
     for line in screen.lines() {
@@ -383,7 +461,20 @@ pub async fn agent_loop(
     // action takes effect (below); exhausting the plan is deterministic completion, not the
     // model's fallthrough `complete`. v1: one primary action per sub-goal (multi-action sub-goals
     // and semantically-compound goals fall to the executor + supervisor handback).
-    let sub_goals = decompose_goal(&goal);
+    // Board-informed planning (upstream of the memory-isolated executor). For an implicit goal this
+    // asks the brain to make preconditions explicit, shaped by learned skills; an explicit "X then Y"
+    // stays on the deterministic split. Runs on the blocking pool (sync HTTP generate).
+    let sub_goals = {
+        let g = goal.clone();
+        let ad = adapter.clone();
+        let sl = skill_library.clone();
+        tokio::task::spawn_blocking(move || {
+            let skills = sl.retrieve(&g, 3);
+            plan_goal(&g, &skills, &ad)
+        })
+        .await
+        .unwrap_or_else(|_| decompose_goal(&goal))
+    };
     let mut current_sub: usize = 0;
     // DEVIATION DETECTION (§2.15): consecutive re-perceptions where NOTHING on screen matches the
     // current sub-goal. The deterministic plan is BLIND and cannot re-plan, so when the world goes
@@ -1103,6 +1194,25 @@ fn parse_skill_json(text: &str, fallback_goal: &str) -> Option<Skill> {
 #[cfg(test)]
 mod observation_tests {
     use super::*;
+
+    #[test]
+    fn strip_list_marker_handles_common_bullets() {
+        assert_eq!(strip_list_marker("1. Open the Applications menu"), "Open the Applications menu");
+        assert_eq!(strip_list_marker("  - Click Terminal Emulator"), "Click Terminal Emulator");
+        assert_eq!(strip_list_marker("2) press Enter"), "press Enter");
+        assert_eq!(strip_list_marker("• type touch /tmp/x"), "type touch /tmp/x");
+        assert_eq!(strip_list_marker("Open the menu"), "Open the menu"); // no marker → unchanged
+    }
+
+    #[test]
+    fn planner_passes_explicit_multistep_through_deterministically() {
+        // An explicit "X then Y" goal must NOT reach the model planner — it keeps the deterministic
+        // connective split. decompose_goal is the proof point (plan_goal returns it verbatim when
+        // len > 1, before any adapter call), so a null adapter would never be invoked.
+        let parts = decompose_goal("Open the Applications menu then launch the Terminal Emulator");
+        assert_eq!(parts.len(), 2);
+        assert_eq!(parts[1], "launch the Terminal Emulator");
+    }
 
     #[test]
     fn no_observation_when_no_prior_action() {

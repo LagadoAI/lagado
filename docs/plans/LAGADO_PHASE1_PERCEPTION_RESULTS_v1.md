@@ -97,6 +97,36 @@ not safe to ship enabled by default.
   (`LabelSource::Caption`) is already in place.
 - **Phase 3 (DOM perceptor/actuator)** — NOT started (greenfield, own session).
 
+## The ceiling is planning, not perception — TWO walls (diagnosed 2026-06-17)
+
+Clean isolated runs (fresh VM, no state leak) show the perception/selection FLOOR is solid but the
+agent hits two distinct **planning** walls, in this order. Action-typing fixes the second; only the
+router fixes the first. They must not be conflated.
+
+**Wall 1 — precondition (hit FIRST, blocks everything below).** `Launch the Terminal Emulator` on a
+bare desktop fail-closes immediately (0 clicks): "Terminal Emulator" is inside the closed Applications
+menu, so no candidate matches → stall → handback. The agent cannot infer the intermediate step ("open
+the menu first"). This is what kills `implicit-terminal`, and (via state leak leaving the menu open →
+the toggle click closing it) `menu-then-terminal`. **Fix = intent→capability router** (open the
+container that holds the target). NOTE: a curated capability map is hand-built — a scale/maintenance
+commitment for a CPU-consumer product. **This is an architectural decision for the user, not a silent pick.**
+
+**Wall 2 — click-only execution loop (hit AFTER a target is reachable).** The sequencer feeds every
+sub-goal to the same click-selection path, and `fail_closed`/`goal_matches_any` test for a *clickable
+label* match. A `type the command: …` or `press Enter` sub-goal has no label → killed before the model
+can act. **The agent literally cannot type or press keys as deliberate steps.** Also `decompose_goal`
+only splits on connective markers (" then ", "; ", …), so "Launch X, type Y" conflates a click and a
+keystroke into one sub-goal. **Fix = action-typed decomposition + action-aware execution** (Click via
+the existing selection path; Type/Key as deterministic one-shot harness actions that bypass selection
+and the grammar; `fail_closed` guards Click steps only; a no-selector "type into focused" path).
+Verify against an EXPLICIT-step task that removes Wall 1:
+`"Open the Applications menu, then click Terminal Emulator, then type touch /tmp/probe, then press Enter"`.
+
+Implication: action-typing greens **zero** of the *current* failing tasks (all hit Wall 1 first), but
+it is a real, foundational capability gap — the router needs it too (after opening the menu and clicking
+the app, you still have to type). It is bounded and committable; the router is bigger and gated on the
+user's capability-map decision.
+
 ## Immediate next steps
 
 1. Clean re-run of the reordered typing tasks (the highest untested complexity).
