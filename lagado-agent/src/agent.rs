@@ -472,25 +472,32 @@ pub fn structural_change(prev_screen: &str, screen: &str) -> bool {
     labels(prev_screen) != labels(screen) || screen_focus(prev_screen) != screen_focus(screen)
 }
 
-/// Read the a11y screen, polling until it SETTLES — two consecutive reads with the same structural
-/// signature (label-set + focus) — or a bounded poll ceiling. An action's effect may still be
-/// painting (a window opening, a menu animating), and deciding on a mid-transition world is what
-/// re-fired `term-type` and re-perceived the menu mid-open. This establishes a SETTLED before/after
-/// state so the advance comparison is reliable and direction is read from the structure, not a
-/// hardcoded open-vs-close rule. Returns the latest read regardless (ceiling = proceed, don't hang).
-async fn read_settled_screen(perceptor: &dyn Perceptor) -> String {
-    const STABILITY_INTERVAL_MS: u64 = 200;
-    const MAX_POLLS: usize = 15; // ~3s ceiling; returns immediately once two reads agree
+/// Read the a11y screen, polling until the prior action's effect has both MANIFESTED (the screen
+/// changed from `baseline`, the pre-action state) AND STABILIZED (two consecutive reads agree), or a
+/// bounded poll ceiling elapses.
+///
+/// Waiting for stability ALONE is insufficient and was the `term-type-touch` race: the PRE-action
+/// state is also stable, so a slow-to-respond GUI lets a stability-only settle return the OLD state
+/// before the click's effect has begun → the advance gate sees no change → no advance → the sub-goal
+/// is re-prompted and the model fires a spurious second action. Requiring change-from-baseline makes
+/// the settle wait for the effect to actually appear before the advance gate reads it. An action with
+/// genuinely no structural effect polls to the ceiling and proceeds (then the no-effect path handles
+/// it). `baseline` empty disables the change requirement (stability-only, for non-advance callers).
+async fn read_settled_screen(perceptor: &dyn Perceptor, baseline: &str) -> String {
+    const STABILITY_INTERVAL_MS: u64 = 150;
+    const MAX_POLLS: usize = 20; // ~3s ceiling
     let mut prev = perceptor.read_screen();
     for _ in 0..MAX_POLLS {
         tokio::time::sleep(tokio::time::Duration::from_millis(STABILITY_INTERVAL_MS)).await;
         let curr = perceptor.read_screen();
-        if !structural_change(&prev, &curr) {
-            return curr; // two consecutive reads agree → settled world
+        let stabilized = !structural_change(&prev, &curr);
+        let manifested = baseline.is_empty() || structural_change(baseline, &curr);
+        if stabilized && manifested {
+            return curr; // effect has appeared AND the world is settled
         }
         prev = curr;
     }
-    prev // still churning at the ceiling — proceed with the latest rather than hang
+    prev // ceiling hit (no effect, or still churning) — proceed with the latest rather than hang
 }
 
 /// Structural effect class for a Click sub-goal's POSTCONDITION (§2.15). Derived DETERMINISTICALLY
@@ -747,7 +754,8 @@ pub async fn agent_loop(
         // Reuses the live `structural_change` primitive as the stability test (not the dead
         // verifier.rs SHA-256 path). This is the fix for the term-type transition race.
         let screen = if prev_action_executed {
-            read_settled_screen(perceptor.as_ref()).await
+            // baseline = the screen the prior action was applied to → wait for its effect to appear.
+            read_settled_screen(perceptor.as_ref(), &prev_screen).await
         } else {
             perceptor.read_screen()
         };
@@ -871,7 +879,9 @@ pub async fn agent_loop(
             memory.push(Step { index: enforcer.step(), prompt: String::new(), output, action: Some(tool_call) });
             current_sub += 1;
             prev_action_executed = false; // deterministic advance below — don't double-count at loop top
-            prev_screen = read_settled_screen(perceptor.as_ref()).await;
+            // Plain read: Type/Key fire-and-advance (no effect-confirmation needed), and typing often
+            // leaves the a11y tree unchanged, so a change-from-baseline settle would just burn the ceiling.
+            prev_screen = perceptor.read_screen();
             if current_sub >= sub_goals.len() {
                 chronos::log("sequencer_complete: all sub-goals done (deterministic final step)");
                 let _ = confirm_tx.send(envelope::make("action_log", envelope::ActionLogPayload {
