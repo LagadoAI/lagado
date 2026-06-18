@@ -579,8 +579,11 @@ pub async fn agent_loop(
         // regardless of `ref_id`, so wiring live CV/vision later changes nothing in this loop.
         let bboxes = crate::perception::parse_ref_bboxes(&screen);
         let labels = crate::perception::parse_ref_labels(&screen);
-        let fused = crate::perception::arbiter::fuse(&bboxes, &[], &[]);
-        let candidates = crate::perception::selection::build_candidates(&fused, &labels);
+        // Labels now flow THROUGH the arbiter (provenance: a11y > caption > OCR > None),
+        // which carries each element's resolved label on the FusedElement. cv/vision
+        // stay empty here until Phase 1b wires the live CV proposer.
+        let fused = crate::perception::arbiter::fuse(&bboxes, &labels, &[], &[]);
+        let candidates = crate::perception::selection::build_candidates(&fused);
         // AUDIT: log the exact labels the agent perceives this step (not just the count) so we can
         // see what the selector/fail-closed actually had to match against.
         chronos::log(&format!("candidates[{}] for \"{active_goal}\": {}", candidates.len(),

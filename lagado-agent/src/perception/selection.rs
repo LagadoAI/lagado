@@ -48,21 +48,16 @@ pub struct Candidate {
 /// Build the candidate list from the fused set. `labels` maps `ref_id → label`
 /// (parsed from the a11y screen text); CV/vision-only elements have no `ref_id`
 /// and therefore an empty label, but STILL receive a token and a center.
-pub fn build_candidates(
-    fused: &[FusedElement],
-    labels: &HashMap<String, String>,
-) -> Vec<Candidate> {
+pub fn build_candidates(fused: &[FusedElement]) -> Vec<Candidate> {
     fused
         .iter()
         .enumerate()
         .map(|(i, e)| {
             let (x, y, w, h) = e.bbox;
-            let label = e
-                .ref_id
-                .as_ref()
-                .and_then(|r| labels.get(r))
-                .cloned()
-                .unwrap_or_default();
+            // The arbiter already resolved the label by provenance (a11y > caption >
+            // OCR > None); an unlabeled element keeps an empty string so it still
+            // renders and stays selectable by its index token.
+            let label = e.label.clone().unwrap_or_default();
             let sense = match e.sense {
                 Sense::A11yOnly => "a11y",
                 Sense::VisionOnly => "vision",
@@ -238,13 +233,20 @@ pub fn render_candidates(candidates: &[Candidate]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::perception::arbiter::{FusedElement, Sense};
+    use crate::perception::arbiter::{FusedElement, LabelSource, Sense};
 
-    fn a11y(ref_id: &str, bbox: (i32, i32, i32, i32)) -> FusedElement {
-        FusedElement { ref_id: Some(ref_id.to_string()), bbox, sense: Sense::A11yOnly, patch_embd: None }
+    /// a11y-backed element carrying `label` (empty string = unlabeled, as the
+    /// arbiter would emit when a11y has no text for the ref).
+    fn a11y(ref_id: &str, bbox: (i32, i32, i32, i32), label: &str) -> FusedElement {
+        let (label, label_source) = if label.is_empty() {
+            (None, LabelSource::None)
+        } else {
+            (Some(label.to_string()), LabelSource::A11y)
+        };
+        FusedElement { ref_id: Some(ref_id.to_string()), bbox, sense: Sense::A11yOnly, patch_embd: None, label, label_source }
     }
     fn vision_only(bbox: (i32, i32, i32, i32)) -> FusedElement {
-        FusedElement { ref_id: None, bbox, sense: Sense::VisionOnly, patch_embd: None }
+        FusedElement { ref_id: None, bbox, sense: Sense::VisionOnly, patch_embd: None, label: None, label_source: LabelSource::None }
     }
 
     #[test]
@@ -255,11 +257,9 @@ mod tests {
 
     #[test]
     fn build_candidates_joins_a11y_label_and_centers() {
-        let fused = vec![a11y("ref_1", (0, 0, 100, 40))];
-        let mut labels = HashMap::new();
-        labels.insert("ref_1".to_string(), "Applications".to_string());
+        let fused = vec![a11y("ref_1", (0, 0, 100, 40), "Applications")];
 
-        let cands = build_candidates(&fused, &labels);
+        let cands = build_candidates(&fused);
         assert_eq!(cands.len(), 1);
         assert_eq!(cands[0].token, "el_0");
         assert_eq!(cands[0].label, "Applications");
@@ -272,7 +272,7 @@ mod tests {
     fn vision_only_element_still_gets_token_and_center() {
         // THE point of the index space: a label-less CV/vision element is selectable.
         let fused = vec![vision_only((200, 300, 60, 40))];
-        let cands = build_candidates(&fused, &HashMap::new());
+        let cands = build_candidates(&fused);
         assert_eq!(cands[0].token, "el_0");
         assert_eq!(cands[0].label, "", "no a11y label for a vision-only element");
         assert_eq!(cands[0].center, (230, 320));
@@ -282,16 +282,16 @@ mod tests {
     #[test]
     fn missing_label_does_not_drop_the_candidate() {
         // a11y element whose ref_id has no entry in the label map → empty label, kept.
-        let fused = vec![a11y("ref_99", (0, 0, 10, 10))];
-        let cands = build_candidates(&fused, &HashMap::new());
+        let fused = vec![a11y("ref_99", (0, 0, 10, 10), "")];
+        let cands = build_candidates(&fused);
         assert_eq!(cands.len(), 1);
         assert_eq!(cands[0].label, "");
     }
 
     #[test]
     fn candidate_coords_maps_every_token() {
-        let fused = vec![a11y("ref_1", (0, 0, 100, 40)), vision_only((200, 300, 60, 40))];
-        let cands = build_candidates(&fused, &HashMap::new());
+        let fused = vec![a11y("ref_1", (0, 0, 100, 40), ""), vision_only((200, 300, 60, 40))];
+        let cands = build_candidates(&fused);
         let coords = candidate_coords(&cands);
         assert_eq!(coords.get("el_0"), Some(&(50, 20)));
         assert_eq!(coords.get("el_1"), Some(&(230, 320)));
@@ -300,10 +300,8 @@ mod tests {
 
     #[test]
     fn render_lists_tokens_with_escape_instruction() {
-        let fused = vec![a11y("ref_1", (0, 0, 100, 40)), vision_only((200, 300, 60, 40))];
-        let mut labels = HashMap::new();
-        labels.insert("ref_1".to_string(), "Applications".to_string());
-        let cands = build_candidates(&fused, &labels);
+        let fused = vec![a11y("ref_1", (0, 0, 100, 40), "Applications"), vision_only((200, 300, 60, 40))];
+        let cands = build_candidates(&fused);
 
         let block = render_candidates(&cands);
         assert!(block.contains("el_0"));

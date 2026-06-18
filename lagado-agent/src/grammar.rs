@@ -75,10 +75,10 @@ mod tests {
 
     #[test]
     fn selector_grammar_constrains_to_index_tokens_and_escape() {
-        use crate::perception::arbiter::{FusedElement, Sense};
+        use crate::perception::arbiter::{FusedElement, LabelSource, Sense};
         let fused = vec![
-            FusedElement { ref_id: Some("ref_1".into()), bbox: (0, 0, 10, 10), sense: Sense::A11yOnly, patch_embd: None },
-            FusedElement { ref_id: None, bbox: (50, 50, 10, 10), sense: Sense::VisionOnly, patch_embd: None },
+            FusedElement { ref_id: Some("ref_1".into()), bbox: (0, 0, 10, 10), sense: Sense::A11yOnly, patch_embd: None, label: None, label_source: LabelSource::None },
+            FusedElement { ref_id: None, bbox: (50, 50, 10, 10), sense: Sense::VisionOnly, patch_embd: None, label: None, label_source: LabelSource::None },
         ];
         let g = selector_grammar(&fused);
         // every element's synthetic index is a valid target — including the vision-only one

@@ -32,6 +32,24 @@ pub enum Sense {
     Both,
 }
 
+/// Which sense supplied an element's *label* (text), independent of which sense
+/// supplied its *box*. Detection and labelling are separate merges: a box can be
+/// `Both` (a11y + CV saw it) while its label comes solely from a11y. The merge
+/// priority is `A11y > Caption > Ocr > None` — a real accessibility label always
+/// wins; an OmniParser caption rescues a box a11y left unlabeled; OCR is the last
+/// resort; `None` means no sense produced text (still selectable by index token).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LabelSource {
+    /// Text came from the AT-SPI2 accessibility tree.
+    A11y,
+    /// Text came from an OmniParser-style captioner (Phase 2).
+    Caption,
+    /// Text came from OCR (Phase 2).
+    Ocr,
+    /// No sense produced a non-empty label for this element.
+    None,
+}
+
 /// A fused, deduplicated GUI element from all active perception sources.
 pub struct FusedElement {
     /// Some(ref_id) iff backed by an AT-SPI2 box; None for CV-only elements.
@@ -43,6 +61,39 @@ pub struct FusedElement {
     /// Embedding of the highest-IoU SPATIAL vision patch, if any.
     /// Never populated from an overview tile.
     pub patch_embd: Option<Vec<f32>>,
+    /// Resolved label text by provenance priority (a11y > caption > OCR), or
+    /// `None` when no sense produced text. A `None`-labelled element is still a
+    /// valid selection target via its index token.
+    pub label: Option<String>,
+    /// Which sense supplied `label`. `LabelSource::None` iff `label` is `None`.
+    pub label_source: LabelSource,
+}
+
+/// Resolve an element's label by provenance priority: real a11y label > OmniParser
+/// caption > OCR text > None. Pure.
+///
+/// A source counts as *present* only if it is `Some` and non-empty after trimming —
+/// an empty or whitespace-only a11y label must NOT mask a real caption below it.
+/// This is the exact label-less case that breaks selection: a11y leaves the box
+/// unlabeled, and the next sense down is supposed to rescue it.
+pub fn resolve_label(
+    a11y:    Option<&str>,
+    caption: Option<&str>,
+    ocr:     Option<&str>,
+) -> (Option<String>, LabelSource) {
+    for (text, src) in [
+        (a11y,    LabelSource::A11y),
+        (caption, LabelSource::Caption),
+        (ocr,     LabelSource::Ocr),
+    ] {
+        if let Some(t) = text {
+            let t = t.trim();
+            if !t.is_empty() {
+                return (Some(t.to_string()), src);
+            }
+        }
+    }
+    (None, LabelSource::None)
 }
 
 /// IoU of two `(x, y, w, h)` boxes. Returns 0.0 on zero-area input or no overlap. Pure.
@@ -82,24 +133,34 @@ fn inflate(bbox: (i32, i32, i32, i32), dx: i32, dy: i32) -> (i32, i32, i32, i32)
 
 /// Fuse three perception inputs into one deduplicated element set.
 ///
-/// Step 1: seed from a11y — one FusedElement per box, sense = A11yOnly.
+/// Step 1: seed from a11y — one FusedElement per box, sense = A11yOnly, label
+///         resolved from `a11y_labels` (the only label source until Phase 2).
 /// Step 2: for each CV box — dedup against VisionOnly elements, upgrade a matching
-///         a11y element to Both, or add a new VisionOnly element.
+///         a11y element to Both, or add a new VisionOnly element. A CV box carries
+///         no text, so an upgrade to `Both` keeps the a11y label untouched and a
+///         new VisionOnly element is `None`-labelled.
 /// Step 3: attach the highest-IoU SPATIAL patch embedding to each element.
 ///         Overview tiles (is_overview == true) are skipped entirely (C3).
 pub fn fuse(
-    a11y:     &HashMap<String, (i32, i32, i32, i32)>,
-    cv_boxes: &[ScreenBox],
-    patches:  &[TilePatches],
+    a11y:        &HashMap<String, (i32, i32, i32, i32)>,
+    a11y_labels: &HashMap<String, String>,
+    cv_boxes:    &[ScreenBox],
+    patches:     &[TilePatches],
 ) -> Vec<FusedElement> {
     // ── Step 1: seed from a11y ─────────────────────────────────────────────
     let mut elements: Vec<FusedElement> = a11y
         .iter()
-        .map(|(id, &bbox)| FusedElement {
-            ref_id:     Some(id.clone()),
-            bbox,
-            sense:      Sense::A11yOnly,
-            patch_embd: None,
+        .map(|(id, &bbox)| {
+            let (label, label_source) =
+                resolve_label(a11y_labels.get(id).map(String::as_str), None, None);
+            FusedElement {
+                ref_id:     Some(id.clone()),
+                bbox,
+                sense:      Sense::A11yOnly,
+                patch_embd: None,
+                label,
+                label_source,
+            }
         })
         .collect();
 
@@ -132,10 +193,12 @@ pub fn fuse(
             }
             None => {
                 elements.push(FusedElement {
-                    ref_id:     None,
-                    bbox:       cv_bbox,
-                    sense:      Sense::VisionOnly,
-                    patch_embd: None,
+                    ref_id:       None,
+                    bbox:         cv_bbox,
+                    sense:        Sense::VisionOnly,
+                    patch_embd:   None,
+                    label:        None,            // CV carries no text; Phase 2 captions fill this
+                    label_source: LabelSource::None,
                 });
             }
         }
@@ -211,6 +274,11 @@ mod tests {
     use crate::perception::cv_proposer::ScreenBox;
     use crate::vision::{PatchEmbedding, TilePatches};
 
+    /// Empty a11y-label map for detection/embedding tests that don't exercise labels.
+    fn nolabels() -> HashMap<String, String> {
+        HashMap::new()
+    }
+
     fn spatial_tile(patch_x: u32, patch_y: u32, patch_w: u32, patch_h: u32, embd: Vec<f32>) -> TilePatches {
         TilePatches {
             is_overview:   false,
@@ -262,7 +330,7 @@ mod tests {
         // CV box is far away — no overlap
         let cv = vec![ScreenBox { x: 500, y: 500, w: 50, h: 50 }];
 
-        let result = fuse(&a11y, &cv, &[]);
+        let result = fuse(&a11y, &nolabels(), &cv, &[]);
 
         let elem = result.iter().find(|e| e.ref_id.as_deref() == Some("ref_1")).unwrap();
         assert!(matches!(elem.sense, Sense::A11yOnly));
@@ -278,7 +346,7 @@ mod tests {
         a11y.insert("ref_1".to_string(), (0, 0, 100, 100));
         let cv = vec![ScreenBox { x: 50, y: 0, w: 100, h: 100 }];
 
-        let result = fuse(&a11y, &cv, &[]);
+        let result = fuse(&a11y, &nolabels(), &cv, &[]);
 
         // One merged element, not two
         assert_eq!(result.len(), 1, "overlapping a11y+CV must merge, not split");
@@ -293,7 +361,7 @@ mod tests {
         let a11y = HashMap::new();
         let cv = vec![ScreenBox { x: 200, y: 200, w: 60, h: 40 }];
 
-        let result = fuse(&a11y, &cv, &[]);
+        let result = fuse(&a11y, &nolabels(), &cv, &[]);
 
         assert_eq!(result.len(), 1);
         assert!(matches!(result[0].sense, Sense::VisionOnly));
@@ -312,7 +380,7 @@ mod tests {
             ScreenBox { x: 10, y: 10, w: 80,  h: 80  },
         ];
 
-        let result = fuse(&a11y, &cv, &[]);
+        let result = fuse(&a11y, &nolabels(), &cv, &[]);
 
         assert_eq!(result.len(), 1, "heavily-overlapping CV boxes must collapse to one VisionOnly");
         assert!(matches!(result[0].sense, Sense::VisionOnly));
@@ -326,7 +394,7 @@ mod tests {
         a11y.insert("ref_1".to_string(), (0, 0, 100, 100));
         let tile = spatial_tile(0, 0, 27, 25, vec![1.0, 2.0, 3.0]);
 
-        let result = fuse(&a11y, &[], &[tile]);
+        let result = fuse(&a11y, &nolabels(), &[], &[tile]);
 
         assert!(result[0].patch_embd.is_some(), "overlapping spatial patch must attach");
         assert_eq!(result[0].patch_embd.as_ref().unwrap(), &[1.0_f32, 2.0, 3.0]);
@@ -350,7 +418,7 @@ mod tests {
             "without inflate the patch must not overlap the element"
         );
 
-        let result = fuse(&a11y, &[], &[tile]);
+        let result = fuse(&a11y, &nolabels(), &[], &[tile]);
 
         assert!(
             result[0].patch_embd.is_some(),
@@ -365,7 +433,7 @@ mod tests {
         let mut a11y = HashMap::new();
         a11y.insert("ref_1".to_string(), (0, 0, 100, 100));
 
-        let result = fuse(&a11y, &[], &[overview_tile()]);
+        let result = fuse(&a11y, &nolabels(), &[], &[overview_tile()]);
 
         assert!(
             result[0].patch_embd.is_none(),
@@ -381,7 +449,7 @@ mod tests {
         a11y.insert("ref_1".to_string(), (0, 0, 100, 100));
         let cv = vec![ScreenBox { x: 200, y: 200, w: 50, h: 50 }];
 
-        let result = fuse(&a11y, &cv, &[overview_tile()]);
+        let result = fuse(&a11y, &nolabels(), &cv, &[overview_tile()]);
 
         assert!(!result.is_empty());
         for elem in &result {
@@ -393,7 +461,7 @@ mod tests {
 
     #[test]
     fn empty_inputs_returns_empty_no_panic() {
-        let result = fuse(&HashMap::new(), &[], &[]);
+        let result = fuse(&HashMap::new(), &nolabels(), &[], &[]);
         assert!(result.is_empty());
     }
 
@@ -418,7 +486,7 @@ mod tests {
             ],
         };
 
-        let result = fuse(&a11y, &[], &[tile]);
+        let result = fuse(&a11y, &nolabels(), &[], &[tile]);
         let embd = result[0].patch_embd.as_ref().expect("patch_embd must be Some");
         assert!(
             (embd[0] - 3.0).abs() < 1e-5,
@@ -442,8 +510,8 @@ mod tests {
         a11y.insert("ref_a".to_string(), (10,  100, 30, 20)); // y=100
         a11y.insert("ref_b".to_string(), (5,   200, 40, 30)); // y=200
 
-        let result1 = fuse(&a11y, &[], &[]);
-        let result2 = fuse(&a11y, &[], &[]);
+        let result1 = fuse(&a11y, &nolabels(), &[], &[]);
+        let result2 = fuse(&a11y, &nolabels(), &[], &[]);
 
         // Both runs must produce the same bbox sequence
         let bboxes1: Vec<_> = result1.iter().map(|e| e.bbox).collect();
@@ -457,5 +525,83 @@ mod tests {
             v
         };
         assert_eq!(bboxes1, sorted, "output must be sorted by (y, x, w, h)");
+    }
+
+    // ── Label provenance (Phase 1) ────────────────────────────────────────────
+
+    #[test]
+    fn resolve_label_a11y_wins_over_caption_and_ocr() {
+        // Real a11y label is authoritative — captions/OCR never override it.
+        let (label, src) = resolve_label(Some("Applications"), Some("menu icon"), Some("Aplicaticns"));
+        assert_eq!(label.as_deref(), Some("Applications"));
+        assert_eq!(src, LabelSource::A11y);
+    }
+
+    #[test]
+    fn resolve_label_empty_a11y_falls_through_to_caption() {
+        // The label-less case this whole layer exists to fix: a11y produced an
+        // empty/whitespace string → the caption rescues the element.
+        let (label, src) = resolve_label(Some("   "), Some("Submit button"), None);
+        assert_eq!(label.as_deref(), Some("Submit button"));
+        assert_eq!(src, LabelSource::Caption);
+    }
+
+    #[test]
+    fn resolve_label_ocr_is_last_resort() {
+        let (label, src) = resolve_label(None, None, Some("OK"));
+        assert_eq!(label.as_deref(), Some("OK"));
+        assert_eq!(src, LabelSource::Ocr);
+    }
+
+    #[test]
+    fn resolve_label_all_absent_is_none() {
+        let (label, src) = resolve_label(None, Some(""), Some("  "));
+        assert!(label.is_none(), "no non-empty source → None");
+        assert_eq!(src, LabelSource::None);
+    }
+
+    #[test]
+    fn fuse_carries_a11y_label_onto_element() {
+        let mut a11y = HashMap::new();
+        a11y.insert("ref_1".to_string(), (0, 0, 100, 40));
+        let mut labels = HashMap::new();
+        labels.insert("ref_1".to_string(), "Applications".to_string());
+
+        let result = fuse(&a11y, &labels, &[], &[]);
+
+        assert_eq!(result[0].label.as_deref(), Some("Applications"));
+        assert_eq!(result[0].label_source, LabelSource::A11y);
+    }
+
+    #[test]
+    fn fuse_vision_only_element_is_unlabeled() {
+        // A CV-only box carries no text — it must be None-labelled (not "" of
+        // ambiguous provenance), yet still present and selectable downstream.
+        let a11y = HashMap::new();
+        let cv = vec![ScreenBox { x: 200, y: 200, w: 60, h: 40 }];
+
+        let result = fuse(&a11y, &nolabels(), &cv, &[]);
+
+        assert_eq!(result.len(), 1);
+        assert!(result[0].label.is_none());
+        assert_eq!(result[0].label_source, LabelSource::None);
+    }
+
+    #[test]
+    fn fuse_both_element_keeps_a11y_label_after_cv_upgrade() {
+        // CV overlaps an a11y box → sense upgrades to Both, but the label (which
+        // CV cannot supply) must stay the a11y label, not get wiped.
+        let mut a11y = HashMap::new();
+        a11y.insert("ref_1".to_string(), (0, 0, 100, 100));
+        let mut labels = HashMap::new();
+        labels.insert("ref_1".to_string(), "Save".to_string());
+        let cv = vec![ScreenBox { x: 50, y: 0, w: 100, h: 100 }]; // iou≈0.333 ≥ 0.30
+
+        let result = fuse(&a11y, &labels, &cv, &[]);
+
+        assert_eq!(result.len(), 1);
+        assert!(matches!(result[0].sense, Sense::Both));
+        assert_eq!(result[0].label.as_deref(), Some("Save"), "CV upgrade must not wipe the a11y label");
+        assert_eq!(result[0].label_source, LabelSource::A11y);
     }
 }
