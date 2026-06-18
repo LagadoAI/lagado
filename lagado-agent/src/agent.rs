@@ -472,6 +472,27 @@ pub fn structural_change(prev_screen: &str, screen: &str) -> bool {
     labels(prev_screen) != labels(screen) || screen_focus(prev_screen) != screen_focus(screen)
 }
 
+/// Read the a11y screen, polling until it SETTLES — two consecutive reads with the same structural
+/// signature (label-set + focus) — or a bounded poll ceiling. An action's effect may still be
+/// painting (a window opening, a menu animating), and deciding on a mid-transition world is what
+/// re-fired `term-type` and re-perceived the menu mid-open. This establishes a SETTLED before/after
+/// state so the advance comparison is reliable and direction is read from the structure, not a
+/// hardcoded open-vs-close rule. Returns the latest read regardless (ceiling = proceed, don't hang).
+async fn read_settled_screen(perceptor: &dyn Perceptor) -> String {
+    const STABILITY_INTERVAL_MS: u64 = 200;
+    const MAX_POLLS: usize = 15; // ~3s ceiling; returns immediately once two reads agree
+    let mut prev = perceptor.read_screen();
+    for _ in 0..MAX_POLLS {
+        tokio::time::sleep(tokio::time::Duration::from_millis(STABILITY_INTERVAL_MS)).await;
+        let curr = perceptor.read_screen();
+        if !structural_change(&prev, &curr) {
+            return curr; // two consecutive reads agree → settled world
+        }
+        prev = curr;
+    }
+    prev // still churning at the ceiling — proceed with the latest rather than hang
+}
+
 /// Map a step's observable result to a supervisor outcome. Pure — unit-testable.
 /// Observed at the TOP of the next loop iteration, where the prior action's on-screen
 /// effect is finally readable (the effect of an action at step N isn't visible until the
@@ -670,7 +691,15 @@ pub async fn agent_loop(
             break;
         }
 
-        let screen = perceptor.read_screen();
+        // Settle the world before reading it for the advance check + selection: only after an action
+        // executed (a transition may still be painting). A no-action re-perceive needs no settle.
+        // Reuses the live `structural_change` primitive as the stability test (not the dead
+        // verifier.rs SHA-256 path). This is the fix for the term-type transition race.
+        let screen = if prev_action_executed {
+            read_settled_screen(perceptor.as_ref()).await
+        } else {
+            perceptor.read_screen()
+        };
 
         // Compute and log screen-effect observation from previous turn.
         let observation = observation_for(prev_action_executed, &prev_screen, &screen);
@@ -787,7 +816,7 @@ pub async fn agent_loop(
             memory.push(Step { index: enforcer.step(), prompt: String::new(), output, action: Some(tool_call) });
             current_sub += 1;
             prev_action_executed = false; // deterministic advance below — don't double-count at loop top
-            prev_screen = perceptor.read_screen();
+            prev_screen = read_settled_screen(perceptor.as_ref()).await;
             if current_sub >= sub_goals.len() {
                 chronos::log("sequencer_complete: all sub-goals done (deterministic final step)");
                 let _ = confirm_tx.send(envelope::make("action_log", envelope::ActionLogPayload {
