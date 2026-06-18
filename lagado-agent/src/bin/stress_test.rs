@@ -51,6 +51,18 @@ async fn main() {
         Task { name: "term-type-touch",       kind: "4-step",   goal: "Open the Applications menu, then click the Terminal Emulator, then type the command: touch /tmp/lagado_probe, then press Enter", success: &["/tmp/lagado_probe"], verify_cmd: Some("ls /tmp/lagado_probe 2>/dev/null") },
         // typing chain with content + redirect — verifies the agent typed the whole argument string.
         Task { name: "term-type-echo",        kind: "4-step",   goal: "Open the Applications menu, then click the Terminal Emulator, then type the command: echo lagadomark > /tmp/lagado_echo, then press Enter", success: &["lagadomark"], verify_cmd: Some("cat /tmp/lagado_echo 2>/dev/null") },
+        // ── BREADTH PROBES (2026-06-18): deliberately hit surfaces the suite never exercised, to find
+        //    where the agent actually breaks instead of tuning to menu-launch. Failures here are the SIGNAL.
+        // SEQUENCER DEPTH: two type→Enter pairs (6 sub-goals) — does focus stay in the terminal and the
+        // pointer hold across a longer chain? Verified by the SECOND file existing.
+        Task { name: "probe-chain-2files",    kind: "probe",    goal: "Open the Applications menu, then click the Terminal Emulator, then type touch /tmp/lagado_a, then press Enter, then type touch /tmp/lagado_b, then press Enter", success: &["lagado_b"], verify_cmd: Some("ls /tmp/lagado_b 2>/dev/null") },
+        // TYPE FIDELITY: a quoted multi-word string (space + quote chars) — does the typed text survive intact?
+        Task { name: "probe-type-quoted",     kind: "probe",    goal: "Open the Applications menu, then click the Terminal Emulator, then type the command: echo 'ok done' > /tmp/lagado_q, then press Enter", success: &["ok done"], verify_cmd: Some("cat /tmp/lagado_q 2>/dev/null") },
+        // SUBMENU NAVIGATION: a surface never done — Settings is a category the agent must reveal/enter.
+        Task { name: "probe-submenu-settings", kind: "probe",   goal: "Open the Settings Manager", success: &["Settings"], verify_cmd: None },
+        // MODAL-DIALOG RECOVERY (hole #5): Mail Reader pops the "Choose Preferred Application" chooser
+        // (no mail app). Can the agent dismiss it and recover to a real task instead of being trapped?
+        Task { name: "probe-dialog-recovery", kind: "probe",    goal: "Open the Applications menu, then open the Mail Reader, then press Escape, then open the Applications menu, then click the Terminal Emulator", success: &["laputa@"], verify_cmd: None },
         // discrimination stressor LAST (its leaked modal can only poison nothing after it).
         Task { name: "menu-then-mail",        kind: "2-step",   goal: "Open the Applications menu then open the Mail Reader", success: &["Mail", "Thunderbird", "Evolution", "Geary"], verify_cmd: None },
     ];
@@ -127,7 +139,7 @@ async fn main() {
             let reset = "DISPLAY=:0 sh -c '\
                 for p in xfce4-terminal Thunar thunar firefox Navigator exo-open xfce4-appfinder \
                          thunderbird evolution geary xmessage mousepad ristretto; do pkill -9 -f \"$p\"; done; \
-                rm -f /tmp/lagado_probe /tmp/lagado_echo; \
+                rm -f /tmp/lagado_probe /tmp/lagado_echo /tmp/lagado_a /tmp/lagado_b /tmp/lagado_q; \
                 for i in 1 2 3; do xdotool key --clearmodifiers Escape; xdotool key --clearmodifiers alt+F4; done; \
                 xdotool key --clearmodifiers Escape; xdotool mousemove 640 400 click 1' 2>/dev/null; true";
             let _ = ssh_try(port, reset);

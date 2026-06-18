@@ -69,6 +69,30 @@ inner control.
 - ⚠️ Suite runs slow (observe-until-quiet polling + the Option-2-able menu oscillation) — timed out partway
   at runs=3, but every task run passed.
 
+## Breadth probes (2026-06-18) — the honest picture beyond menu-launch
+
+The 10-task suite is almost all "open menu → launch app" on one XFCE VM; 9/10 there is NOT general
+competence. Added 4 probes that hit surfaces never exercised. **Result: 11/14 — three of four new
+surfaces broke**, confirming the agent is far narrower than the suite implied:
+
+- ✅ **Type fidelity** (`probe-type-quoted`, `echo 'ok done'`): a quoted multi-word string survived intact.
+- ✗ **Sequencer depth** (`probe-chain-2files`, two `touch`→Enter pairs = 6 sub-goals): the SECOND file
+  was never created. The chain advanced through sub-goal 5 ("type touch /tmp/lagado_b") per the trace but
+  the second command didn't land — the deterministic Type/Key chain does not hold reliably past the first
+  command (focus/timing after the first Enter). **Real limit: multi-action chains break beyond ~4 steps.**
+- ✗ **Submenu navigation** (`probe-submenu-settings`, "Open the Settings Manager"): a **FALSE PASS** — the
+  predicate "Settings" matched incidentally while `focus=Thunar` (it opened the *file manager*, not
+  Settings). Two findings: submenu nav is unproven/broken, AND weak success predicates manufacture false
+  greens (a verification-quality lesson for the whole suite).
+- ✗ **Modal-dialog recovery** (`probe-dialog-recovery`, Mail chooser → Escape → recover to terminal): 6
+  clicks, 78s, ended in Thunar — **the agent cannot recover from an unexpected modal** (hole #5 confirmed,
+  not a one-off). The mail chooser isn't an "unwinnable task" to exclude; it's a representative trap the
+  agent has no escape behavior for.
+
+Implication: the real next work is breadth/robustness (chain depth, submenu reveal, modal escape,
+better predicates), not another rail tuned to the menu. Option 2 (toggle-oscillation cleanup) is
+correctly deprioritized against these.
+
 ## Banked / next
 
 - **Option 2 — precondition already-satisfied SKIP** (cleans the toggle oscillation). Now SAFE to build —
