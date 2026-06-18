@@ -165,8 +165,40 @@ async fn main() {
     let frame_after = "/dev/shm/first_walk_after.png";
     if let Ok(mut qmp) = QmpClient::connect(&cfg.qmp_socket) {
         let _ = qmp.screendump(frame_before);
+        // PRIME the live CV sense: production refreshes FRAME_PATH via the Tauri
+        // capture_frame IPC, which headless has no UI to drive. Without a fresh frame the
+        // agent loop's CV read degrades to a11y-only. Dump once here so step 1 has a frame;
+        // the background feed below keeps it fresh for subsequent steps.
+        let _ = qmp.screendump(config::FRAME_PATH);
         tokio::time::sleep(Duration::from_millis(400)).await;
     }
+
+    // ── Phase 1c gate: keep FRAME_PATH fresh for the duration of the walk ──
+    // A background thread OWNS QMP while hydra::run executes (QMP is single-client,
+    // server,nowait; the agent itself uses SSH, not QMP). It starts after the before-dump's
+    // client has dropped and is stopped before the after-dump connects, so the QMP users
+    // never overlap. This is a HARNESS instrument for measuring CV live — NOT the production
+    // frame-sync fix (that belongs in the perceptor; see commit notes).
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let feed_stop = Arc::new(AtomicBool::new(false));
+    let feed_handle = {
+        let stop = feed_stop.clone();
+        let sock = cfg.qmp_socket.clone();
+        std::thread::spawn(move || -> u32 {
+            let mut qmp = match QmpClient::connect(&sock) {
+                Ok(q) => q,
+                Err(_) => return 0,
+            };
+            let mut n = 0u32;
+            while !stop.load(Ordering::Relaxed) {
+                if qmp.screendump(config::FRAME_PATH).is_ok() {
+                    n += 1;
+                }
+                std::thread::sleep(Duration::from_millis(600));
+            }
+            n
+        })
+    };
 
     // ── Hand the goal to the full pipeline ──
     println!("\n[walk] handing goal to hydra::run — watching…\n");
@@ -193,6 +225,11 @@ async fn main() {
 
     let approvals = listener.await.unwrap_or(0);
     println!("[walk] HITL gate fired {approvals} time(s)");
+
+    // Stop the frame feed and release QMP BEFORE the after-dump reconnects.
+    feed_stop.store(true, Ordering::Relaxed);
+    let feed_frames = feed_handle.join().unwrap_or(0);
+    println!("[walk] frame feed: {feed_frames} screendumps to {} during the walk", config::FRAME_PATH);
 
     // Visual evidence: frame after, plus cell-level delta.
     if let Ok(mut qmp) = QmpClient::connect(&cfg.qmp_socket) {
