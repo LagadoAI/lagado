@@ -264,6 +264,85 @@ pub fn decompose_goal(goal: &str) -> Vec<String> {
     parts.into_iter().filter(|s| !s.is_empty()).collect()
 }
 
+/// A planned step's action class (Wall 2). The executor selects+clicks for `Click` (model in the
+/// loop), but `Type`/`Key` are DETERMINISTIC one-shot harness actions — there is no element to
+/// "click", and the model cannot be asked to pick a keystroke. They bypass perception/selection/
+/// fail-closed/grammar entirely and execute through the safety gate, then fire-and-advance.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SubAction {
+    Click,
+    Type(String),
+    Key(String),
+}
+
+/// One planned sub-goal: the original text (drives Click selection + logging) and its action class.
+#[derive(Debug, Clone)]
+pub struct SubGoal {
+    pub text:   String,
+    pub action: SubAction,
+}
+
+/// Classify a planned sub-goal string into its action class. Patterns are FEW and EXPLICIT
+/// (NL→action parsing is the fragile part): a leading "type …" → Type with the literal payload
+/// (ORIGINAL case preserved — commands are case-sensitive); a leading "press …"/"hit …" → Key;
+/// everything else → Click (handled by the selection loop).
+pub fn classify_subgoal(s: &str) -> SubGoal {
+    let t = s.trim();
+    let lower = t.to_lowercase();
+    if lower.starts_with("press ") {
+        return SubGoal { text: t.to_string(), action: SubAction::Key(normalize_key(&t[6..])) };
+    }
+    if lower.starts_with("hit ") {
+        return SubGoal { text: t.to_string(), action: SubAction::Key(normalize_key(&t[4..])) };
+    }
+    if lower.starts_with("type ") {
+        let payload = strip_type_lead(&t[5..]);
+        if !payload.is_empty() {
+            return SubGoal { text: t.to_string(), action: SubAction::Type(payload) };
+        }
+    }
+    SubGoal { text: t.to_string(), action: SubAction::Click }
+}
+
+/// Strip a "type" sub-goal's framing prefix ("the command:", "command:", "the text:", …), leaving
+/// the literal text to type. Case preserved; only the recognised lead is removed.
+fn strip_type_lead(s: &str) -> String {
+    let r = s.trim();
+    let low = r.to_lowercase();
+    for lead in ["the command:", "the text:", "the following:", "command:", "text:", "in:"] {
+        if low.starts_with(lead) {
+            return r[lead.len()..].trim_start_matches([':', ' ']).trim().to_string();
+        }
+    }
+    r.to_string()
+}
+
+/// Map a natural key name to an xdotool keysym ("enter"→"Return", "esc"→"Escape", …). Strips a
+/// leading "the " and a trailing " key"; unknown names are best-effort capitalised.
+fn normalize_key(s: &str) -> String {
+    let mut k = s.trim().to_lowercase();
+    k = k.strip_prefix("the ").unwrap_or(&k).to_string();
+    k = k.strip_suffix(" key").unwrap_or(&k).trim().to_string();
+    match k.as_str() {
+        "enter" | "return"        => "Return".to_string(),
+        "tab"                     => "Tab".to_string(),
+        "escape" | "esc"          => "Escape".to_string(),
+        "space" | "spacebar" | "the space bar" => "space".to_string(),
+        "backspace"               => "BackSpace".to_string(),
+        "delete" | "del"          => "Delete".to_string(),
+        "up"   => "Up".to_string(),   "down"  => "Down".to_string(),
+        "left" => "Left".to_string(), "right" => "Right".to_string(),
+        "home" => "Home".to_string(), "end"   => "End".to_string(),
+        other => {
+            let mut c = other.chars();
+            match c.next() {
+                Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+                None    => "Return".to_string(),
+            }
+        }
+    }
+}
+
 /// Assemble the executor (action-selection) prompt. **MEMORY-ISOLATED BY CONSTRUCTION (invariant
 /// #10):** this takes ONLY the pinned system prompt, the ranked+capped candidate block (or the raw
 /// screen as fallback), and the discriminating goal phrase. It has NO parameter for episodic /
@@ -485,16 +564,19 @@ pub async fn agent_loop(
     // Board-informed planning (upstream of the memory-isolated executor). For an implicit goal this
     // asks the brain to make preconditions explicit, shaped by learned skills; an explicit "X then Y"
     // stays on the deterministic split. Runs on the blocking pool (sync HTTP generate).
-    let sub_goals = {
+    let sub_goals: Vec<SubGoal> = {
         let g = goal.clone();
         let ad = adapter.clone();
         let sl = skill_library.clone();
-        tokio::task::spawn_blocking(move || {
+        let strings = tokio::task::spawn_blocking(move || {
             let skills = sl.retrieve(&g, 3);
             plan_goal(&g, &skills, &ad)
         })
         .await
-        .unwrap_or_else(|_| decompose_goal(&goal))
+        .unwrap_or_else(|_| decompose_goal(&goal));
+        // Classify each planned step into Click / Type / Key (Wall 2). Click steps run the selection
+        // loop; Type/Key are deterministic.
+        strings.iter().map(|s| classify_subgoal(s)).collect()
     };
     let mut current_sub: usize = 0;
     // DEVIATION DETECTION (§2.15): consecutive re-perceptions where NOTHING on screen matches the
@@ -664,12 +746,65 @@ pub async fn agent_loop(
                     break;
                 }
                 chronos::log(&format!("sequencer_advance: → sub-goal {}/{}: {}",
-                    current_sub + 1, sub_goals.len(), sub_goals[current_sub]));
+                    current_sub + 1, sub_goals.len(), sub_goals[current_sub].text));
             }
         }
         had_prior_step = true;
+
+        // ── WALL 2: deterministic Type/Key sub-goal ──────────────────────────────────────────
+        // No element to "click" and the model can't pick a keystroke, so a Type/Key step bypasses
+        // perception/selection/fail-closed/grammar entirely: build the tool call, run it through the
+        // SAME safety gate, then FIRE-AND-ADVANCE. We must not wait on structural_change to advance
+        // (typing often leaves the a11y element-set unchanged → we'd retype); a deterministic step is
+        // complete the moment it executes.
+        if !matches!(sub_goals[current_sub].action, SubAction::Click) {
+            let tool_call = match &sub_goals[current_sub].action {
+                SubAction::Type(text) => ToolCall::Type { selector: "focused".to_string(), text: text.clone() },
+                SubAction::Key(key)   => ToolCall::Key { key: key.clone() },
+                SubAction::Click      => unreachable!(),
+            };
+            // confidence = 1.0: the harness chose this deterministically, not the model.
+            let output = match gate::confidence_escalate(gate::evaluate_action(&tool_call, &registry), 1.0) {
+                gate::Verdict::Allow => {
+                    let desc = gate::describe_redacted(&tool_call);
+                    let out = execute_tool(&tool_call, actuator.as_ref(), perceptor.as_ref(), &memory_tiers).await;
+                    chronos::log(&format!("action(deterministic): {desc} -> {out}"));
+                    let _ = confirm_tx.send(envelope::make("action_log", envelope::ActionLogPayload {
+                        text: format!("{desc} -> {out}"),
+                    })).await;
+                    out
+                }
+                gate::Verdict::ConfirmTap => request_and_await_approval("tap", &tool_call, &state, actuator.as_ref(), perceptor.as_ref(), &memory_tiers, &mut approval_rx, &confirm_tx).await,
+                gate::Verdict::ConfirmTyped => request_and_await_approval("typed", &tool_call, &state, actuator.as_ref(), perceptor.as_ref(), &memory_tiers, &mut approval_rx, &confirm_tx).await,
+                gate::Verdict::Block(reason) => {
+                    chronos::log(&format!("blocked: {reason}"));
+                    let _ = confirm_tx.send(envelope::make("status", envelope::StatusPayload {
+                        state: "blocked".to_string(), detail: reason.clone(),
+                    })).await;
+                    format!("Blocked: {reason}")
+                }
+            };
+            memory.push(Step { index: enforcer.step(), prompt: String::new(), output, action: Some(tool_call) });
+            current_sub += 1;
+            prev_action_executed = false; // deterministic advance below — don't double-count at loop top
+            prev_screen = perceptor.read_screen();
+            if current_sub >= sub_goals.len() {
+                chronos::log("sequencer_complete: all sub-goals done (deterministic final step)");
+                let _ = confirm_tx.send(envelope::make("action_log", envelope::ActionLogPayload {
+                    text: "Goal accomplished — all steps completed.".to_string(),
+                })).await;
+                let _ = confirm_tx.send(envelope::make("status", envelope::StatusPayload {
+                    state: "goal_done".to_string(), detail: "Goal accomplished — all steps completed.".to_string(),
+                })).await;
+                break;
+            }
+            chronos::log(&format!("sequencer_advance(deterministic): → sub-goal {}/{}: {}",
+                current_sub + 1, sub_goals.len(), sub_goals[current_sub].text));
+            continue;
+        }
+
         // Active sub-goal drives THIS step's selection (ranking / fail-closed / prompt).
-        let active_goal: &str = &sub_goals[current_sub];
+        let active_goal: &str = &sub_goals[current_sub].text;
 
         // MEMORY-ISOLATED executor (verified 2026-06-17 §2.5): injecting retrieved priors (the
         // Board's episodic/visual/skill memory) lets semantically-related text OVERRIDE the
@@ -1242,6 +1377,24 @@ mod observation_tests {
         for leak in ["Relevant procedures from experience", "episodic", "similar past episode", "skill", "used 1 time"] {
             assert!(!prompt.to_lowercase().contains(&leak.to_lowercase()), "memory leaked into executor prompt: {leak}");
         }
+    }
+
+    #[test]
+    fn classify_subgoal_types_clicks_and_keys() {
+        // Type: framing prefix stripped, literal command preserved (case-sensitive).
+        assert_eq!(classify_subgoal("type the command: touch /tmp/x").action,
+                   SubAction::Type("touch /tmp/x".into()));
+        assert_eq!(classify_subgoal("type echo HeLLo > /tmp/y").action,
+                   SubAction::Type("echo HeLLo > /tmp/y".into()));
+        // Key: natural names → xdotool keysyms.
+        assert_eq!(classify_subgoal("press Enter").action, SubAction::Key("Return".into()));
+        assert_eq!(classify_subgoal("press the Tab key").action, SubAction::Key("Tab".into()));
+        assert_eq!(classify_subgoal("hit Escape").action, SubAction::Key("Escape".into()));
+        // Click: anything else (the default selection path).
+        assert_eq!(classify_subgoal("Click Terminal Emulator").action, SubAction::Click);
+        assert_eq!(classify_subgoal("Open the Applications menu").action, SubAction::Click);
+        // A bare "type" with no payload must not become an empty Type — falls back to Click.
+        assert_eq!(classify_subgoal("type").action, SubAction::Click);
     }
 
     #[test]

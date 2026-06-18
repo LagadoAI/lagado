@@ -46,10 +46,12 @@ async fn main() {
         // ── complexity ladder: action chains (click→type→Enter), world-verified by the filesystem ──
         // These run BEFORE the mail task: a Mail Reader launch pops a "Choose Preferred Application"
         // modal (no mail app configured) that leaks across resets and traps later tasks at 0 clicks.
-        // typing chain: launch terminal, TYPE a command, press Enter — verified by the file it creates.
-        Task { name: "term-type-touch",       kind: "3-step",   goal: "Launch the Terminal Emulator, type the command: touch /tmp/lagado_probe   then press Enter", success: &["/tmp/lagado_probe"], verify_cmd: Some("ls /tmp/lagado_probe 2>/dev/null") },
-        // typing chain with content: echo a marker into a file — verifies the agent typed an argument string correctly.
-        Task { name: "term-type-echo",        kind: "3-step",   goal: "Launch the Terminal Emulator, type the command: echo lagadomark > /tmp/lagado_echo   then press Enter", success: &["lagadomark"], verify_cmd: Some("cat /tmp/lagado_echo 2>/dev/null") },
+        // Action chain (Wall 2): explicit click→click→TYPE→Enter, verified by the file it creates.
+        // Explicit phrasing spells out the precondition (open menu, click app) so this isolates the
+        // type/key execution path, not Wall-1 precondition planning.
+        Task { name: "term-type-touch",       kind: "4-step",   goal: "Open the Applications menu, then click the Terminal Emulator, then type the command: touch /tmp/lagado_probe, then press Enter", success: &["/tmp/lagado_probe"], verify_cmd: Some("ls /tmp/lagado_probe 2>/dev/null") },
+        // typing chain with content + redirect — verifies the agent typed the whole argument string.
+        Task { name: "term-type-echo",        kind: "4-step",   goal: "Open the Applications menu, then click the Terminal Emulator, then type the command: echo lagadomark > /tmp/lagado_echo, then press Enter", success: &["lagadomark"], verify_cmd: Some("cat /tmp/lagado_echo 2>/dev/null") },
         // discrimination stressor LAST (its leaked modal can only poison nothing after it).
         Task { name: "menu-then-mail",        kind: "2-step",   goal: "Open the Applications menu then open the Mail Reader", success: &["Mail", "Thunderbird", "Evolution", "Geary"], verify_cmd: None },
     ];

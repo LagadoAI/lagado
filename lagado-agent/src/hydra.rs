@@ -101,6 +101,14 @@ impl Hydra {
     /// main 8B adapter. The parser searches the full response (not just the first
     /// word) to handle small-model preamble like "The answer is INTERACTIVE".
     pub async fn classify_intent(&self, message: &str) -> Intent {
+        // DETERMINISTIC FAST-PATH: a message opening with an unambiguous UI action verb is
+        // Interactive — don't ask the weak 1.2B classifier (~80%), which misroutes LONG action
+        // chains (e.g. "Open the menu, then click X, then type Y, then press Enter") to CHAT. CHAT
+        // is the DANGEROUS misroute: it routes to a one-shot chat_response that silently does
+        // nothing while reporting success. Determinism on the rails over a vibes guess.
+        if opens_with_action_verb(message) {
+            return Intent::Interactive;
+        }
         // Few-shot prompt — empirically validated on 1.2B Instruct (~80% accuracy)
         let prompt = format!(
             "Classify each message as CHAT, INTERACTIVE, or REASONING. One word only.\n\
@@ -171,6 +179,21 @@ impl Hydra {
 /// Checks the first word first (fast path for well-behaved models), then scans
 /// the whole response for the label (handles small-model preamble like
 /// "The classification is INTERACTIVE"). INTERACTIVE > REASONING > CHAT priority.
+/// True if the message opens with an unambiguous UI action verb → route Interactive deterministically.
+/// High-PRECISION list only (verbs that are essentially always computer-use commands): "open the
+/// file" is interactive; borderline verbs ("find", "search", "run") are left to the classifier so a
+/// genuine question isn't force-routed. Matches a whole leading word, so "opening hours" is excluded.
+pub fn opens_with_action_verb(message: &str) -> bool {
+    const VERBS: &[&str] = &[
+        "open", "click", "double-click", "right-click", "type", "press", "launch", "close",
+        "navigate", "select", "scroll", "drag", "switch", "minimize", "maximize", "focus", "toggle",
+    ];
+    let m = message.trim().to_lowercase();
+    VERBS.iter().any(|v| {
+        m.strip_prefix(v).is_some_and(|rest| rest.is_empty() || rest.starts_with(' '))
+    })
+}
+
 pub fn parse_intent_label(response: &str) -> Intent {
     let upper = response.trim().to_uppercase();
 
@@ -284,7 +307,21 @@ pub async fn run(
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_intent_label, Intent};
+    use super::{opens_with_action_verb, parse_intent_label, Intent};
+
+    #[test]
+    fn action_verb_fast_path() {
+        // The case that broke Wall-2 testing: a long explicit action chain → Interactive.
+        assert!(opens_with_action_verb(
+            "Open the Applications menu, then click the Terminal Emulator, then type touch /tmp/x, then press Enter"));
+        assert!(opens_with_action_verb("Click submit"));
+        assert!(opens_with_action_verb("press Enter"));
+        assert!(opens_with_action_verb("Launch the Terminal Emulator"));
+        // Not an action command → leave to the classifier.
+        assert!(!opens_with_action_verb("how are you today"));
+        assert!(!opens_with_action_verb("what time is it"));
+        assert!(!opens_with_action_verb("opening hours for the museum")); // whole-word guard
+    }
 
     #[test]
     fn parser_first_word_labels() {
