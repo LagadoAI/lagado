@@ -472,32 +472,88 @@ pub fn structural_change(prev_screen: &str, screen: &str) -> bool {
     labels(prev_screen) != labels(screen) || screen_focus(prev_screen) != screen_focus(screen)
 }
 
-/// Read the a11y screen, polling until the prior action's effect has both MANIFESTED (the screen
-/// changed from `baseline`, the pre-action state) AND STABILIZED (two consecutive reads agree), or a
-/// bounded poll ceiling elapses.
-///
-/// Waiting for stability ALONE is insufficient and was the `term-type-touch` race: the PRE-action
-/// state is also stable, so a slow-to-respond GUI lets a stability-only settle return the OLD state
-/// before the click's effect has begun → the advance gate sees no change → no advance → the sub-goal
-/// is re-prompted and the model fires a spurious second action. Requiring change-from-baseline makes
-/// the settle wait for the effect to actually appear before the advance gate reads it. An action with
-/// genuinely no structural effect polls to the ceiling and proceeds (then the no-effect path handles
-/// it). `baseline` empty disables the change requirement (stability-only, for non-advance callers).
-async fn read_settled_screen(perceptor: &dyn Perceptor, baseline: &str) -> String {
-    const STABILITY_INTERVAL_MS: u64 = 150;
-    const MAX_POLLS: usize = 20; // ~3s ceiling
-    let mut prev = perceptor.read_screen();
-    for _ in 0..MAX_POLLS {
-        tokio::time::sleep(tokio::time::Duration::from_millis(STABILITY_INTERVAL_MS)).await;
-        let curr = perceptor.read_screen();
-        let stabilized = !structural_change(&prev, &curr);
-        let manifested = baseline.is_empty() || structural_change(baseline, &curr);
-        if stabilized && manifested {
-            return curr; // effect has appeared AND the world is settled
+/// Is the world still CHANGING (an action still playing out) vs settled? The in-progress-vs-stuck
+/// discrimination — the crux of observe-until-quiet. Active iff the a11y element-set/focus changed OR
+/// pixels are painting above the ambient-noise floor (a cursor blink / clock tick is a cell or two).
+/// A slow window paint or page load keeps `frame_changed_cells` high → we keep waiting (it's
+/// progress, never a reason to quit). A genuinely hung screen is a11y-stable AND pixel-quiet → falls
+/// through to settled, and the downstream no-effect path (effect_confirmed → should_cutoff) escalates.
+/// `noise_cells` is the tunable floor. Pure — unit-tested.
+fn settling_active(a11y_changed: bool, frame_changed_cells: usize, noise_cells: usize) -> bool {
+    a11y_changed || frame_changed_cells > noise_cells
+}
+
+/// Decode the latest FRAME_PATH image and count grid cells whose pixels changed since the last call
+/// (the in-progress signal when a11y is momentarily quiet — a window painting). 0 on any frame error
+/// (then a11y carries the signal alone). Reuses the live DeltaDetector (same grid as the CV proposer).
+fn frame_changed_cells(delta: &mut crate::perception::delta::DeltaDetector) -> usize {
+    match std::fs::read(crate::config::FRAME_PATH)
+        .ok()
+        .and_then(|png| image::load_from_memory(&png).ok())
+    {
+        Some(img) => {
+            let rgb = img.to_rgb8();
+            let (w, h) = (rgb.width(), rgb.height());
+            delta.detect_changes(rgb.as_raw(), w, h).len()
         }
-        prev = curr;
+        None => 0,
     }
-    prev // ceiling hit (no effect, or still churning) — proceed with the latest rather than hang
+}
+
+/// OBSERVE-UNTIL-QUIET: read the world until the prior action's effect has MANIFESTED (changed from
+/// the pre-action `baseline`) and the world has gone QUIET (N consecutive settled observations) —
+/// terminating on an OBSERVED signal, never on a clock.
+///
+/// This replaces the fixed ~3s settle ceiling, which was the session's last "decide-without-observing"
+/// bug: a terminal cold-start (or any slow action — a laggy app, a slow web call) that took longer
+/// than the guess made the timer expire on a thing that was actually working → premature return →
+/// spurious re-action / false stall. Here a slow action keeps the world ACTIVE (a11y churn or pixels
+/// painting, via `settling_active`) and we keep waiting; we return only once it's stable. The
+/// MANIFEST phase stops a premature return during pre-effect latency (the pre-action world is also
+/// quiet). The fixed duration survives ONLY as a far-outer safety BACKSTOP (perpetual animation / a
+/// genuine no-op) — not the primary control; a no-effect return is caught downstream by the
+/// postcondition → should_cutoff escalation.
+async fn observe_until_quiet(perceptor: &dyn Perceptor, baseline: &str) -> String {
+    const INTERVAL_MS: u64 = 120;
+    const QUIET_READS: usize = 3;       // consecutive settled a11y checks → the world is quiet
+    const NOISE_CELLS: usize = 2;       // frame-delta floor: ambient cursor/clock, not activity (TUNABLE)
+    const BACKSTOP_POLLS: usize = 300;  // far-outer safety ONLY — not the termination control
+    let mut delta = crate::perception::delta::DeltaDetector::new();
+    perceptor.capture_frame();
+    let _ = frame_changed_cells(&mut delta); // prime the frame baseline (first call flags all cells)
+    // COST: a11y read is an ssh+python spawn; the frame-delta is the cheaper QMP path. So poll the
+    // FRAME each interval and read a11y ONLY when the frame is quiet (the candidate settle points) —
+    // while pixels are painting we already know the world is active and skip the expensive read.
+    let mut last_a11y: Option<String> = None;
+    let mut quiet = 0usize;
+    let mut manifested = baseline.is_empty(); // no baseline → skip the manifest phase
+    for _ in 0..BACKSTOP_POLLS {
+        tokio::time::sleep(tokio::time::Duration::from_millis(INTERVAL_MS)).await;
+        perceptor.capture_frame();
+        let cells = frame_changed_cells(&mut delta);
+        if settling_active(false, cells, NOISE_CELLS) {
+            quiet = 0; // pixels painting → in progress → don't pay for an a11y read this tick
+            continue;
+        }
+        // Frame quiet → read a11y to confirm the world settled, check manifest, and capture focus.
+        let curr = perceptor.read_screen();
+        let a11y_changed = last_a11y.as_deref().is_some_and(|p| structural_change(p, &curr));
+        if !manifested && (structural_change(baseline, &curr) || a11y_changed) {
+            manifested = true; // the action's effect has appeared
+        }
+        if a11y_changed {
+            quiet = 0; // a11y still settling (e.g. focus just moved to the new window) → keep waiting
+        } else if manifested {
+            quiet += 1;
+            if quiet >= QUIET_READS {
+                chronos::log(&format!("settled: quiet after effect (focus={})", screen_focus(&curr)));
+                return curr;
+            }
+        }
+        last_a11y = Some(curr);
+    }
+    chronos::log("settle_backstop: world never quieted — proceeding; downstream escalation decides");
+    last_a11y.unwrap_or_else(|| perceptor.read_screen())
 }
 
 /// Structural effect class for a Click sub-goal's POSTCONDITION (§2.15). Derived DETERMINISTICALLY
@@ -754,8 +810,9 @@ pub async fn agent_loop(
         // Reuses the live `structural_change` primitive as the stability test (not the dead
         // verifier.rs SHA-256 path). This is the fix for the term-type transition race.
         let screen = if prev_action_executed {
-            // baseline = the screen the prior action was applied to → wait for its effect to appear.
-            read_settled_screen(perceptor.as_ref(), &prev_screen).await
+            // baseline = the screen the prior action was applied to → observe until its effect
+            // manifests and the world goes quiet (no fixed ceiling).
+            observe_until_quiet(perceptor.as_ref(), &prev_screen).await
         } else {
             perceptor.read_screen()
         };
@@ -824,6 +881,12 @@ pub async fn agent_loop(
             if prev_action_executed
                 && effect_confirmed(effect_class(&sub_goals[current_sub].text), &prev_screen, &screen)
             {
+                // INSTRUMENT (Launch-dissolves? check): log the focus the advance fired on. For an app
+                // launch ("click Terminal Emulator"), a correct advance fires once focus == the new
+                // window; an advance that fires while focus is still the desktop/menu means the blank
+                // gap won and a focus-to-new-window LAUNCH gate is still needed.
+                chronos::log(&format!("advance_focus: \"{}\" → focus={}",
+                    sub_goals[current_sub].text, screen_focus(&screen)));
                 current_sub += 1;
                 subgoal_stuck = 0; // fresh sub-goal — reset the deviation counter
                 if current_sub >= sub_goals.len() {
@@ -1682,6 +1745,24 @@ mod observation_tests {
         assert!(effect_confirmed(EffectClass::Activate, DESK, MENU));
         assert!(effect_confirmed(EffectClass::Activate, MENU, DESK)); // even a close confirms Activate
         assert!(!effect_confirmed(EffectClass::Activate, DESK, DESK));
+    }
+
+    // ── observe-until-quiet: in-progress vs stuck discrimination (the hard part) ──
+
+    #[test]
+    fn settling_active_discriminates_in_progress_from_settled() {
+        const NOISE: usize = 2;
+        // COLD-START LAUNCH / SLOW WEB CALL (slow but FINE): pixels painting → in-progress → keep waiting.
+        assert!(settling_active(false, 40, NOISE), "a window painting / page loading is in-progress");
+        // GENUINELY HUNG (stalled): a11y stable AND pixels quiet → NOT active → settle, then the
+        // downstream no-effect path escalates (we don't wait forever on the inner control).
+        assert!(!settling_active(false, 0, NOISE), "a frozen screen is settled, not in-progress");
+        // A11Y CHANGING (focus/label churn): in-progress regardless of pixels.
+        assert!(settling_active(true, 0, NOISE), "a11y churn is in-progress");
+        // AMBIENT NOISE (cursor blink / clock tick = a cell or two): below the floor → NOT active,
+        // so an idle screen with a blinking cursor still reads as settled (no infinite wait).
+        assert!(!settling_active(false, 1, NOISE), "ambient 1-cell blink is not activity");
+        assert!(settling_active(false, 3, NOISE), "above the noise floor is activity");
     }
 }
 
