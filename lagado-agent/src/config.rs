@@ -41,6 +41,13 @@ fn dev_override(_key: &str) -> Option<String> {
     None
 }
 
+/// QMP control-socket path for the live VM (qemu `-qmp unix:…`). Used by the perceptor to
+/// co-capture the screen frame at the perception instant (synced with the a11y read), so the CV
+/// sense reads a fresh in-sync frame rather than a stale UI-polled one. Override: LAGADO_QMP_SOCKET.
+pub fn qmp_socket() -> String {
+    std::env::var("LAGADO_QMP_SOCKET").unwrap_or_else(|_| "/tmp/lagado-qmp.sock".to_string())
+}
+
 /// Whether the live CV perception sense (Phase 1b) runs. Default ON; set
 /// `LAGADO_CV_DISABLE=1` to fall back to a11y-only. Honored in ALL build profiles
 /// (unlike `dev_override`): it gates runtime behavior, not a code/path-loading surface,

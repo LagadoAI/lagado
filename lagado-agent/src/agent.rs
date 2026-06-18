@@ -930,6 +930,11 @@ pub async fn agent_loop(
             if !crate::config::cv_enabled() {
                 vec![]
             } else {
+                // PRODUCTION FRAME-SYNC: capture the frame NOW, on this SETTLED a11y screen, so CV
+                // reads an image in-sync with the perception the loop acts on — not a stale UI-polled
+                // frame. Reuses the manifest-settle win: `screen` above is already settled, so the
+                // frame and the a11y read describe the same instant.
+                perceptor.capture_frame();
                 match std::fs::read(crate::config::FRAME_PATH) {
                     Ok(png) => match image::load_from_memory(&png) {
                         Ok(img) => {

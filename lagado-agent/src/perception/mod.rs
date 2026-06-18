@@ -11,6 +11,13 @@ use regex::Regex;
 /// Reads the focused window's interactive elements as a text dump.
 pub trait Perceptor: Send + Sync {
     fn read_screen(&self) -> String;
+
+    /// Capture the current screen frame to `config::FRAME_PATH`, synced with the perception instant,
+    /// so the CV sense reads a fresh in-sync image rather than a stale UI-polled one. Call it on a
+    /// SETTLED screen (after `read_settled_screen`), so the frame matches the a11y read the loop acts
+    /// on. Default no-op (mock/host perceptors with no frame source); `SshPerceptor` does a QMP
+    /// screendump. Best-effort: a capture failure leaves CV to fail-open to a11y-only.
+    fn capture_frame(&self) {}
 }
 
 /// Performs user-input actions on the desktop.

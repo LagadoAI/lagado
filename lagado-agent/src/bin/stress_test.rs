@@ -23,8 +23,7 @@ async fn main() {
     use lagado_agent::inference::llama_cpp::LlamaCppAdapter;
     use lagado_agent::perception::{Actuator, PerceptionCache, Perceptor};
     use lagado_agent::skill_library::SkillLibrary;
-    use lagado_agent::vm::{QemuDesktopBackend, QmpClient, SshActuator, SshPerceptor, VmBackend, VmConfig};
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use lagado_agent::vm::{QemuDesktopBackend, SshActuator, SshPerceptor, VmBackend, VmConfig};
     use lagado_agent::{agent, config, hydra, memory_tiers::MemoryTiers};
     use tokio::sync::mpsc;
 
@@ -93,26 +92,11 @@ async fn main() {
     let _ = Command::new("scp").args(["-o","StrictHostKeyChecking=no","-o","BatchMode=yes","-P",&port.to_string(),"perceive.py","laputa@127.0.0.1:/home/laputa/perceive.py"]).status();
     println!("[vm] up.\n");
 
-    // ── Frame feed: keep FRAME_PATH fresh so the live CV sense runs (headless has no UI to drive
-    // the Tauri capture_frame IPC). Owns QMP for the whole session; the agent uses SSH and the
-    // success predicates use SSH, so nothing else contends for QMP. Skipped when CV is disabled.
-    let feed_stop = Arc::new(AtomicBool::new(false));
-    let feed_handle = if config::cv_enabled() {
-        let stop = feed_stop.clone();
-        let sock = cfg.qmp_socket.clone();
-        Some(std::thread::spawn(move || -> u32 {
-            let mut qmp = match QmpClient::connect(&sock) { Ok(q) => q, Err(_) => return 0 };
-            let mut n = 0u32;
-            while !stop.load(Ordering::Relaxed) {
-                if qmp.screendump(config::FRAME_PATH).is_ok() { n += 1; }
-                std::thread::sleep(Duration::from_millis(600));
-            }
-            n
-        }))
-    } else { None };
-    println!("[vm] CV sense: {} (frame feed {})",
-        if config::cv_enabled() { "ON" } else { "OFF (a11y-only)" },
-        if feed_handle.is_some() { "running" } else { "off" });
+    // Frame freshness is now the perceptor's job: the agent loop calls perceptor.capture_frame()
+    // (QMP screendump, synced with each settled perception) right before the CV read, so no separate
+    // background feed is needed — and a feed would contend with capture_frame for the single-client
+    // QMP socket. This run therefore exercises the real production frame-sync path.
+    println!("[vm] CV sense: {}", if config::cv_enabled() { "ON (perceptor frame-sync)" } else { "OFF (a11y-only)" });
 
     let cache = Arc::new(Mutex::new(PerceptionCache::new()));
     let perceptor: Arc<dyn Perceptor> = Arc::new(SshPerceptor::with_cache("127.0.0.1", port, "laputa", cache.clone()));
@@ -221,9 +205,5 @@ async fn main() {
         if total_n > 0 { 100.0 * total_s as f32 / total_n as f32 } else { 0.0 });
     println!("\n[stress] full results: {csv_path}");
 
-    feed_stop.store(true, Ordering::Relaxed);
-    if let Some(h) = feed_handle {
-        println!("[vm] frame feed: {} screendumps total", h.join().unwrap_or(0));
-    }
     let _ = backend.shutdown(handle);
 }

@@ -100,6 +100,15 @@ impl crate::perception::Perceptor for DynamicPerceptor {
             self.host.read_screen()
         }
     }
+
+    fn capture_frame(&self) {
+        // VM path → QMP screendump (SshPerceptor); host path → whatever the host perceptor does.
+        if self.vm_port.read().unwrap_or_else(|e| e.into_inner()).is_some() {
+            SshPerceptor::with_cache("127.0.0.1", 0, "laputa", self.ssh_cache.clone()).capture_frame();
+        } else {
+            self.host.capture_frame();
+        }
+    }
 }
 
 pub trait VmBackend: Send + Sync {

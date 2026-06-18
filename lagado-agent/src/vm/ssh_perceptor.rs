@@ -44,4 +44,13 @@ impl Perceptor for SshPerceptor {
         }
         text
     }
+
+    /// Co-capture the frame via a transient QMP screendump to FRAME_PATH (the production frame-sync:
+    /// the CV sense reads THIS image, captured at the perception instant, not a stale UI-polled one).
+    /// Best-effort — a QMP/connect failure just leaves the prior frame and CV fails open to a11y-only.
+    fn capture_frame(&self) {
+        if let Ok(mut qmp) = crate::vm::QmpClient::connect(&crate::config::qmp_socket()) {
+            let _ = qmp.screendump(crate::config::FRAME_PATH);
+        }
+    }
 }
