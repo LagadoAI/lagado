@@ -493,6 +493,57 @@ async fn read_settled_screen(perceptor: &dyn Perceptor) -> String {
     prev // still churning at the ceiling — proceed with the latest rather than hang
 }
 
+/// Structural effect class for a Click sub-goal's POSTCONDITION (§2.15). Derived DETERMINISTICALLY
+/// from the sub-goal text (never the model asserting its own completion). Each class maps to ONE
+/// structural signature that CONFIRMS the click's effect; the sequencer advances only on confirmation,
+/// so a click whose effect didn't occur — or occurred in the WRONG DIRECTION — holds the pointer
+/// instead of marching a dead plan. Direction-awareness falls OUT of the per-class signature (`Open`
+/// confirms only when elements APPEAR, so toggling an already-open menu shut does not read as
+/// "opened"); it is NOT a hardcoded open-vs-close rule bolted onto `structural_change` (the trap).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EffectClass {
+    /// Reveal new on-screen elements (menu / dropdown / submenu / panel): the label set must GROW.
+    Open,
+    /// Any other control activation (button / tab / list item / app launch): any structural change.
+    /// The weak catch-all — preserves the prior advance behavior for everything that isn't a reveal,
+    /// so generic clicks don't over-escalate. Every Click sub-goal maps to one of these two (no
+    /// unmapped class reaches the advance gate, so there is no guess-advance path).
+    Activate,
+}
+
+/// Classify a Click sub-goal's effect class from its text. HIGH-PRECISION for `Open` (a verb that
+/// reveals + a container target); everything else falls to `Activate`. By construction this can only
+/// make a *reveal* stricter, never a generic click — keeping misclassification low-blast-radius.
+fn effect_class(subgoal: &str) -> EffectClass {
+    let s = subgoal.to_lowercase();
+    let reveal_verb = s.contains("open") || s.contains("expand") || s.contains("show") || s.contains("reveal");
+    let reveal_target = s.contains("menu") || s.contains("dropdown") || s.contains("drop-down")
+        || s.contains("submenu") || s.contains("sub-menu") || s.contains("panel") || s.contains("context menu");
+    if reveal_verb && reveal_target { EffectClass::Open } else { EffectClass::Activate }
+}
+
+/// Did the click's expected structural effect occur? The sequencer's advance gate, replacing the
+/// direction-blind bare `structural_change`. Reuses the live a11y label-set / focus primitives.
+fn effect_confirmed(class: EffectClass, prev: &str, curr: &str) -> bool {
+    match class {
+        // CONFIRMS only when NEW elements appeared net-positive (the revealed menu/panel items). A
+        // net REMOVAL — the menu CLOSED because it was already open and the toggle shut it — does NOT
+        // confirm "open". This is the fix for the already-open toggle advancing on a regression.
+        EffectClass::Open => {
+            use std::collections::BTreeSet;
+            let labels = |s: &str| -> BTreeSet<String> {
+                crate::perception::parse_ref_labels(s).into_values().filter(|l| !l.is_empty()).collect()
+            };
+            let (before, after) = (labels(prev), labels(curr));
+            after.difference(&before).count() > before.difference(&after).count()
+                && after.len() > before.len()
+        }
+        // Any structural change (label-set or focus) — the prior advance signal, kept for everything
+        // that isn't a reveal (button / tab / item / app-launch all legitimately confirm on a change).
+        EffectClass::Activate => structural_change(prev, curr),
+    }
+}
+
 /// Map a step's observable result to a supervisor outcome. Pure — unit-testable.
 /// Observed at the TOP of the next loop iteration, where the prior action's on-screen
 /// effect is finally readable (the effect of an action at step N isn't visible until the
@@ -756,11 +807,15 @@ pub async fn agent_loop(
             // completion (not the model's fallthrough `complete`). No-effect → pointer holds → the
             // sub-goal is re-selected and should_cutoff/impasse catches a true stall. This subsumes
             // the single-action completion case (one sub-goal → effect → advance past end → done).
-            // v1 advance signal = structural screen change; the per-action-class effect SIGNATURE +
-            // precondition (already-satisfied → advance without acting) are the §2.15 refinement.
-            // Advance on a STRUCTURAL effect (element-set / focus change), not a raw screen hash —
-            // a tooltip or ambient pixel change must not advance the plan (§2.15 failures 1+3).
-            if prev_action_executed && structural_change(&prev_screen, &screen) {
+            // §2.15 POSTCONDITION: advance only when the sub-goal's ACTION-CLASS effect was confirmed,
+            // not on any structural delta. `Open` (reveal a menu) confirms only when elements APPEAR,
+            // so clicking an already-open menu's toggle SHUT (a net removal) no longer false-advances
+            // into a dead plan; `Activate` keeps the prior any-change signal for everything else. The
+            // class→signature map is deterministic (never the model judging itself); the settled
+            // before/after states (read_settled_screen) make the comparison direction-honest.
+            if prev_action_executed
+                && effect_confirmed(effect_class(&sub_goals[current_sub].text), &prev_screen, &screen)
+            {
                 current_sub += 1;
                 subgoal_stuck = 0; // fresh sub-goal — reset the deviation counter
                 if current_sub >= sub_goals.len() {
@@ -1581,6 +1636,37 @@ mod observation_tests {
         // (a tooltip / pixel animation that isn't an accessibility element must not advance).
         let with_trailing = format!("{DESK}\n  (cursor moved)");
         assert!(!structural_change(DESK, &with_trailing));
+    }
+
+    // ── §2.15 effect-signature postcondition ─────────────────────────
+
+    #[test]
+    fn effect_class_open_only_for_reveal_of_a_container() {
+        assert_eq!(effect_class("Open the Applications menu"), EffectClass::Open);
+        assert_eq!(effect_class("expand the context menu"), EffectClass::Open);
+        // App launch / generic clicks are NOT Open (no container target) → Activate (any-change).
+        assert_eq!(effect_class("click the Terminal Emulator"), EffectClass::Activate);
+        assert_eq!(effect_class("Open the file manager"), EffectClass::Activate);
+        assert_eq!(effect_class("click Submit"), EffectClass::Activate);
+    }
+
+    #[test]
+    fn open_confirms_on_reveal_not_on_close() {
+        // Opening the menu (DESK → MENU): "Terminal Emulator" appeared → confirmed.
+        assert!(effect_confirmed(EffectClass::Open, DESK, MENU));
+        // THE FIX: the menu was already open and the toggle SHUT it (MENU → DESK): elements vanished,
+        // none appeared → NOT confirmed → the sequencer must not advance into a now-closed menu.
+        assert!(!effect_confirmed(EffectClass::Open, MENU, DESK));
+        // No change at all → not confirmed either.
+        assert!(!effect_confirmed(EffectClass::Open, MENU, MENU));
+    }
+
+    #[test]
+    fn activate_keeps_any_structural_change_signal() {
+        // Activate is the catch-all = prior behavior: any structural change confirms.
+        assert!(effect_confirmed(EffectClass::Activate, DESK, MENU));
+        assert!(effect_confirmed(EffectClass::Activate, MENU, DESK)); // even a close confirms Activate
+        assert!(!effect_confirmed(EffectClass::Activate, DESK, DESK));
     }
 }
 
