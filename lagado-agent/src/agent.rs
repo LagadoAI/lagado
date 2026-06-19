@@ -29,14 +29,25 @@ pub struct AgentState {
 // ── Tool execution ────────────────────────────────────────────────
 async fn execute_tool(
     call: &ToolCall,
-    actuator: &dyn Actuator,
+    actuator: &Arc<dyn Actuator>,
     perceptor: &dyn Perceptor,
     memory_tiers: &Arc<tokio::sync::Mutex<crate::memory_tiers::MemoryTiers>>,
 ) -> String {
+    // Actuation is a blocking SSH round-trip per action → run it on the blocking pool so the click/
+    // type/key wait never freezes the async runtime (Theme 1). The Arc moves into the closure.
     match call {
-        ToolCall::Click { selector } => actuator.click(selector),
-        ToolCall::Type { selector, text } => actuator.type_text(selector, text),
-        ToolCall::Key { key } => actuator.key(key),
+        ToolCall::Click { selector } => {
+            let (a, sel) = (actuator.clone(), selector.clone());
+            tokio::task::spawn_blocking(move || a.click(&sel)).await.unwrap_or_default()
+        }
+        ToolCall::Type { selector, text } => {
+            let (a, sel, t) = (actuator.clone(), selector.clone(), text.clone());
+            tokio::task::spawn_blocking(move || a.type_text(&sel, &t)).await.unwrap_or_default()
+        }
+        ToolCall::Key { key } => {
+            let (a, k) = (actuator.clone(), key.clone());
+            tokio::task::spawn_blocking(move || a.key(&k)).await.unwrap_or_default()
+        }
         ToolCall::Wait { ms } => {
             tokio::time::sleep(tokio::time::Duration::from_millis(*ms as u64)).await;
             format!("Waited {}ms", ms)
@@ -54,7 +65,7 @@ async fn execute_tool(
 async fn dispatch_invoke(
     name: &str,
     args: &serde_json::Map<String, serde_json::Value>,
-    actuator: &dyn Actuator,
+    actuator: &Arc<dyn Actuator>,
     perceptor: &dyn Perceptor,
     memory_tiers: &Arc<tokio::sync::Mutex<crate::memory_tiers::MemoryTiers>>,
 ) -> String {
@@ -76,9 +87,9 @@ async fn dispatch_invoke(
                 Err(e) => format!("error: no frame available: {e}"),
             }
         }
-        "vm_command" => actuator.run_command(&s("command")),
-        "vm_type"    => actuator.type_text("focused", &s("text")),
-        "vm_click"   => actuator.click(&s("selector")),
+        "vm_command" => { let (a, c) = (actuator.clone(), s("command")); tokio::task::spawn_blocking(move || a.run_command(&c)).await.unwrap_or_default() }
+        "vm_type"    => { let (a, t) = (actuator.clone(), s("text"));    tokio::task::spawn_blocking(move || a.type_text("focused", &t)).await.unwrap_or_default() }
+        "vm_click"   => { let (a, sel) = (actuator.clone(), s("selector")); tokio::task::spawn_blocking(move || a.click(&sel)).await.unwrap_or_default() }
 
         // Memory tools — delegate to MemoryTiers
         "memory_store" => {
@@ -121,7 +132,7 @@ async fn request_and_await_approval(
     confirm_type: &str, // "tap" | "typed"
     tool_call: &ToolCall,
     state: &Arc<Mutex<AgentState>>,
-    actuator: &dyn Actuator,
+    actuator: &Arc<dyn Actuator>,
     perceptor: &dyn Perceptor,
     memory_tiers: &Arc<tokio::sync::Mutex<crate::memory_tiers::MemoryTiers>>,
     approval_rx: &mut mpsc::Receiver<bool>,
@@ -1407,15 +1418,15 @@ pub async fn agent_loop(
                 let tool_call = ToolCall::Invoke { name: "vm_command".to_string(), args };
                 let output = match gate::apply_plan_approval(gate::confidence_escalate(gate::evaluate_action(&tool_call, &registry), 1.0), plan_approved) {
                     gate::Verdict::Allow => {
-                        let out = execute_tool(&tool_call, actuator.as_ref(), perceptor.as_ref(), &memory_tiers).await;
+                        let out = execute_tool(&tool_call, &actuator, perceptor.as_ref(), &memory_tiers).await;
                         chronos::log(&format!("action(command): $ {cmd} -> {out}"));
                         let _ = confirm_tx.send(envelope::make("action_log", envelope::ActionLogPayload {
                             text: format!("$ {cmd}\n{out}"),
                         })).await;
                         out
                     }
-                    gate::Verdict::ConfirmTap => request_and_await_approval("tap", &tool_call, &state, actuator.as_ref(), perceptor.as_ref(), &memory_tiers, &mut approval_rx, &confirm_tx).await,
-                    gate::Verdict::ConfirmTyped => request_and_await_approval("typed", &tool_call, &state, actuator.as_ref(), perceptor.as_ref(), &memory_tiers, &mut approval_rx, &confirm_tx).await,
+                    gate::Verdict::ConfirmTap => request_and_await_approval("tap", &tool_call, &state, &actuator, perceptor.as_ref(), &memory_tiers, &mut approval_rx, &confirm_tx).await,
+                    gate::Verdict::ConfirmTyped => request_and_await_approval("typed", &tool_call, &state, &actuator, perceptor.as_ref(), &memory_tiers, &mut approval_rx, &confirm_tx).await,
                     gate::Verdict::Block(reason) => {
                         chronos::log(&format!("blocked: {reason}"));
                         let _ = confirm_tx.send(envelope::make("status", envelope::StatusPayload {
@@ -1507,15 +1518,15 @@ pub async fn agent_loop(
             let output = match gate::apply_plan_approval(gate::confidence_escalate(gate::evaluate_action(&tool_call, &registry), 1.0), plan_approved) {
                 gate::Verdict::Allow => {
                     let desc = gate::describe_redacted(&tool_call);
-                    let out = execute_tool(&tool_call, actuator.as_ref(), perceptor.as_ref(), &memory_tiers).await;
+                    let out = execute_tool(&tool_call, &actuator, perceptor.as_ref(), &memory_tiers).await;
                     chronos::log(&format!("action(deterministic): {desc} -> {out}"));
                     let _ = confirm_tx.send(envelope::make("action_log", envelope::ActionLogPayload {
                         text: format!("{desc} -> {out}"),
                     })).await;
                     out
                 }
-                gate::Verdict::ConfirmTap => request_and_await_approval("tap", &tool_call, &state, actuator.as_ref(), perceptor.as_ref(), &memory_tiers, &mut approval_rx, &confirm_tx).await,
-                gate::Verdict::ConfirmTyped => request_and_await_approval("typed", &tool_call, &state, actuator.as_ref(), perceptor.as_ref(), &memory_tiers, &mut approval_rx, &confirm_tx).await,
+                gate::Verdict::ConfirmTap => request_and_await_approval("tap", &tool_call, &state, &actuator, perceptor.as_ref(), &memory_tiers, &mut approval_rx, &confirm_tx).await,
+                gate::Verdict::ConfirmTyped => request_and_await_approval("typed", &tool_call, &state, &actuator, perceptor.as_ref(), &memory_tiers, &mut approval_rx, &confirm_tx).await,
                 gate::Verdict::Block(reason) => {
                     chronos::log(&format!("blocked: {reason}"));
                     let _ = confirm_tx.send(envelope::make("status", envelope::StatusPayload {
@@ -1811,7 +1822,7 @@ pub async fn agent_loop(
                 let output = match gate::apply_plan_approval(gate::confidence_escalate(base_verdict, confidence), plan_approved) {
                     gate::Verdict::Allow => {
                         let desc = gate::describe_redacted(&tool_call);
-                        let out = execute_tool(&tool_call, actuator.as_ref(), perceptor.as_ref(), &memory_tiers).await;
+                        let out = execute_tool(&tool_call, &actuator, perceptor.as_ref(), &memory_tiers).await;
                         chronos::log(&format!("action: {desc} -> {out}"));
                         let _ = confirm_tx.send(envelope::make("action_log", envelope::ActionLogPayload {
                             text: format!("{desc} -> {out}"),
@@ -1819,10 +1830,10 @@ pub async fn agent_loop(
                         out
                     }
                     gate::Verdict::ConfirmTap => {
-                        request_and_await_approval("tap", &tool_call, &state, actuator.as_ref(), perceptor.as_ref(), &memory_tiers, &mut approval_rx, &confirm_tx).await
+                        request_and_await_approval("tap", &tool_call, &state, &actuator, perceptor.as_ref(), &memory_tiers, &mut approval_rx, &confirm_tx).await
                     }
                     gate::Verdict::ConfirmTyped => {
-                        request_and_await_approval("typed", &tool_call, &state, actuator.as_ref(), perceptor.as_ref(), &memory_tiers, &mut approval_rx, &confirm_tx).await
+                        request_and_await_approval("typed", &tool_call, &state, &actuator, perceptor.as_ref(), &memory_tiers, &mut approval_rx, &confirm_tx).await
                     }
                     gate::Verdict::Block(reason) => {
                         chronos::log(&format!("blocked: {reason}"));
