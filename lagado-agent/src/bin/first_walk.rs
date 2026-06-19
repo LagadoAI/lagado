@@ -177,7 +177,7 @@ async fn main() {
     let walk = hydra::run(
         goal.clone(),
         String::new(),
-        false,
+        hydra::RouteContext { surface: hydra::SurfaceState { vm_active: true, ..Default::default() }, mode: hydra::RouteMode::Auto },
         state.clone(),
         adapter,
         perceptor.clone(),

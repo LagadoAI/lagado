@@ -172,7 +172,9 @@ async fn main() {
             });
 
             let t = Instant::now();
-            let walk = hydra::run(task.goal.to_string(), String::new(), false, state.clone(),
+            let walk = hydra::run(task.goal.to_string(), String::new(),
+                lagado_agent::hydra::RouteContext { surface: lagado_agent::hydra::SurfaceState { vm_active: true, ..Default::default() }, mode: lagado_agent::hydra::RouteMode::Auto },
+                state.clone(),
                 adapter.clone(), perceptor.clone(), actuator.clone(), approval_rx, confirm_tx,
                 memory_tiers.clone(), None, skill_library.clone());
             let outcome = tokio::time::timeout(Duration::from_secs(120), walk).await;

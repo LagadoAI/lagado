@@ -53,6 +53,12 @@ INTERACTIVE/REASONING → agent_loop() with HITL gate + RecoveryManager
 
 **CLEAN-CONTEXT DISCIPLINE is non-negotiable.** `classify_intent()` receives ONLY the current user message.
 
+**STATE-AWARE ROUTING (2026-06-18 — `hydra::deterministic_route`, the hard levers in front of the LLM router).** Routing = f(message-shape, system-state), NOT f(message) alone — system state is GROUND TRUTH, the LLM classify is a guess. Deterministic levers decide FIRST; the 1.2B fires only on the ambiguous/question residual (latency + reliability win; verified the 1.2B misroutes 6/7 natural task goals — create/make/delete/show/rename → CHAT/REASONING). NOT a clean-context violation: state ≠ conversation history (inv #2 safe, same carve-out as inv #10's trajectory state). Levers:
+- **`SurfaceState { vm_active, immersive_active, host_control_active }`** — what the agent can act on NOW. `vm_active` = ground truth from `vm_ssh_port`; immersive = frontend flag (TODO plumb); host = Segment-7 slot (stubbed false). `any()==false` ⇒ no surface ⇒ action request → **Offer** to start one, else CHAT.
+- **`RouteMode { Auto, ChatLock, ActLock }`** — explicit user mode; the REAL replacement for the weak/never-wired `is_paused`. ChatLock→always CHAT ("just chat"); ActLock→actionable acts, clear questions still chat ("you have control"); Auto→state+shape+residual-LLM.
+- **`is_action_shaped`** (message-shape): command phrase | GUI verb | STRONG task verb (install/run/kill/git…) | SOFT task verb (create/make/delete/show…) + a COMPUTER-OBJECT (path / file-ext / system noun — the object separates "create a FILE" from "create a POEM"). Surface-active + action-shaped → Interactive, no LLM. `is_clear_question` keeps questions as chat under ActLock.
+- Caller assembles `RouteContext` (e.g. `send_goal` reads `vm_ssh_port`); approval for autonomous plans = preview-whole-plan/approve-once + destructive-always-typed-confirm, inside the tiered earned-autonomy model (Strict/Balanced/Open + action_graph muscle-memory). See memory `lagado-autonomous-planning`.
+
 **State hash:** `blake3(perceptor.read_screen())` — used for action_graph lookups and recovery keys.
 
 ### VM Architecture (Phase 1.4 — COMPLETE)

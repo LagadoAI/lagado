@@ -106,7 +106,7 @@ impl Hydra {
         // chains (e.g. "Open the menu, then click X, then type Y, then press Enter") to CHAT. CHAT
         // is the DANGEROUS misroute: it routes to a one-shot chat_response that silently does
         // nothing while reporting success. Determinism on the rails over a vibes guess.
-        if opens_with_action_verb(message) {
+        if opens_with_action_verb(message) || opens_with_command_phrase(message) {
             return Intent::Interactive;
         }
         // Few-shot prompt — empirically validated on 1.2B Instruct (~80% accuracy)
@@ -194,6 +194,139 @@ pub fn opens_with_action_verb(message: &str) -> bool {
     })
 }
 
+/// True if the message opens with an explicit shell-command directive (a command-channel phrasing).
+/// Unlike the bare verb "run" (excluded above as borderline — "run a marathon" is a question),
+/// "run the command …" / "$ …" is unambiguously a CLI step → route Interactive deterministically.
+/// Shares its lead list with the sequencer (`agent::COMMAND_LEADS`) so routing and execution agree.
+pub fn opens_with_command_phrase(message: &str) -> bool {
+    let m = message.trim().to_lowercase();
+    crate::agent::COMMAND_LEADS.iter().any(|&lead| m.starts_with(lead))
+}
+
+// ── State-aware routing levers (deterministic-first; the LLM router is the residual) ────────────
+// Routing = f(message-shape, system-state) — NOT f(message) alone. The system state is GROUND TRUTH;
+// the LLM classify is a guess, so the deterministic levers decide first and the 1.2B fires only on the
+// genuinely-ambiguous remainder (latency + reliability win). State is NOT conversation history, so this
+// honors invariant #2 (clean-context routing): the message is still the only prose the classifier sees.
+
+/// What the agent can act on RIGHT NOW. `any()` false ⇒ there is no surface to operate, so an action
+/// request can only be CHAT (or an offer to start one). `host_control_active` is the forward slot for
+/// Segment-7 live-host mode (stubbed false until built — we model the full shape without depending on it).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SurfaceState {
+    pub vm_active: bool,
+    pub immersive_active: bool,
+    pub host_control_active: bool,
+}
+impl SurfaceState {
+    pub fn any(&self) -> bool { self.vm_active || self.immersive_active || self.host_control_active }
+}
+
+/// Explicit user routing mode — the real, intentional version of the old (weak, never-wired) pause flag.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum RouteMode {
+    /// State + message-shape + (residual) LLM decide.
+    #[default]
+    Auto,
+    /// "Just chat — don't touch anything." Hard override → always CHAT. (Replaces `is_paused`.)
+    ChatLock,
+    /// "You have control — act on what's actionable." Actionable shapes act; clear questions still chat.
+    ActLock,
+}
+
+/// The deterministic routing context the caller assembles from real system state + the user's mode.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RouteContext {
+    pub surface: SurfaceState,
+    pub mode: RouteMode,
+}
+
+/// A hard-lever routing decision. `None` from `deterministic_route` means "fall to the LLM classifier."
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RouteOutcome {
+    Chat,
+    Interactive,
+    /// Action requested but NO surface is active → offer to start one rather than silently chat.
+    Offer,
+}
+
+/// Does the message have the SHAPE of a computer action (vs a question/conversation)? Deterministic —
+/// the message-shape lever. TRUE on: an explicit command phrase; a GUI action verb; a STRONG task verb
+/// (install/run/kill/git… — always a computer action); OR a SOFT task verb (create/make/delete/show…)
+/// paired with a COMPUTER-OBJECT (a path, a filename extension, or a system noun). The object is the
+/// discriminator that separates "create a FILE" (action) from "create a POEM" (chat). Conservative:
+/// a soft verb with no object is NOT action-shaped.
+pub fn is_action_shaped(message: &str) -> bool {
+    if opens_with_action_verb(message) || opens_with_command_phrase(message) {
+        return true;
+    }
+    let m = message.trim().to_lowercase();
+    let first = m.split_whitespace().next().unwrap_or("");
+    // Verbs that are inherently a computer action regardless of object.
+    const STRONG: &[&str] = &[
+        "install", "uninstall", "run", "execute", "kill", "mount", "unmount", "compile", "build",
+        "deploy", "reboot", "shutdown", "ping", "curl", "wget", "clone", "commit", "push", "pull",
+        "chmod", "chown", "untar", "unzip", "grep",
+    ];
+    if STRONG.contains(&first) {
+        return true;
+    }
+    // Verbs that are an action ONLY with a computer-object present.
+    const SOFT: &[&str] = &[
+        "create", "make", "delete", "remove", "show", "list", "move", "copy", "rename", "find",
+        "read", "write", "edit", "append", "count", "search", "download", "extract", "compress", "print",
+    ];
+    if !SOFT.contains(&first) {
+        return false;
+    }
+    let has_path = m.contains('/') || m.contains('\\') || m.contains('~');
+    let has_ext = [".txt", ".md", ".log", ".json", ".sh", ".py", ".rs", ".png", ".jpg", ".pdf",
+                   ".csv", ".zip", ".tar", ".gz", ".conf", ".toml", ".yaml", ".yml"]
+        .iter().any(|e| m.contains(e));
+    const SYS_NOUNS: &[&str] = &[
+        "file", "files", "folder", "directory", "directories", "dir", "app", "application", "window",
+        "terminal", "browser", "process", "port", "package", "command", "script", "disk", "memory",
+        "service", "container", "repo", "repository", "branch", "commit",
+    ];
+    let has_sys_noun = m.split(|c: char| !c.is_alphanumeric()).any(|w| SYS_NOUNS.contains(&w));
+    has_path || has_ext || has_sys_noun
+}
+
+/// Is the message clearly a QUESTION (interrogative)? Used by ActLock to keep a genuine question as chat
+/// even when the user handed over control. Deterministic.
+pub fn is_clear_question(message: &str) -> bool {
+    let m = message.trim().to_lowercase();
+    if m.ends_with('?') {
+        return true;
+    }
+    const Q_LEADS: &[&str] = &["what", "why", "how", "who", "when", "where", "which", "is", "are",
+        "do", "does", "can", "could", "would", "should", "explain", "tell me", "describe"];
+    let first = m.split_whitespace().next().unwrap_or("");
+    Q_LEADS.contains(&first) || Q_LEADS.iter().any(|q| q.contains(' ') && m.starts_with(q))
+}
+
+/// The deterministic routing gate. Returns `Some(outcome)` when a HARD lever decides (no LLM call);
+/// `None` means "ambiguous/question with a surface in Auto mode" → fall to the LLM classifier. Pure.
+pub fn deterministic_route(message: &str, ctx: &RouteContext) -> Option<RouteOutcome> {
+    match ctx.mode {
+        RouteMode::ChatLock => return Some(RouteOutcome::Chat), // hard: just chat
+        RouteMode::ActLock => {
+            return Some(if is_clear_question(message) { RouteOutcome::Chat } else { RouteOutcome::Interactive });
+        }
+        RouteMode::Auto => {}
+    }
+    if !ctx.surface.any() {
+        // Nothing to act on → an action request can only be an offer to start a surface; else chat.
+        return Some(if is_action_shaped(message) { RouteOutcome::Offer } else { RouteOutcome::Chat });
+    }
+    // Surface active + Auto: a clear action acts deterministically; the rest (questions/ambiguous)
+    // fall to the LLM classifier.
+    if is_action_shaped(message) {
+        return Some(RouteOutcome::Interactive);
+    }
+    None
+}
+
 pub fn parse_intent_label(response: &str) -> Intent {
     let upper = response.trim().to_uppercase();
 
@@ -215,7 +348,7 @@ pub fn parse_intent_label(response: &str) -> Intent {
 pub async fn run(
     message: String,
     _context_hint: String,  // caller-supplied hint (unused — we assemble from tiers)
-    is_paused: bool,        // if true, always CHAT
+    route: RouteContext,    // deterministic routing levers: surface state + explicit user mode
     state: Arc<tokio::sync::Mutex<agent::AgentState>>,
     adapter: Arc<dyn InferenceAdapter>,
     perceptor: Arc<dyn Perceptor>,
@@ -258,11 +391,19 @@ pub async fn run(
         }
     }
 
-    // Classify intent (respecting pause state)
-    let intent = if is_paused {
-        Intent::Chat
-    } else {
-        hydra.classify_intent(&message).await
+    // STATE-AWARE ROUTING: the deterministic levers (surface state + user mode + message shape) decide
+    // first — the LLM classifier fires ONLY on the ambiguous/question residual (surface-active + Auto).
+    let intent = match deterministic_route(&message, &route) {
+        Some(RouteOutcome::Chat) => Intent::Chat,
+        Some(RouteOutcome::Interactive) => Intent::Interactive,
+        Some(RouteOutcome::Offer) => {
+            // Action requested but no surface is active — offer to start one rather than silently chat.
+            let _ = confirm_tx.send(envelope::make("action_log", envelope::ActionLogPayload {
+                text: "I'd need an active workspace to do that — start the VM (or open Immersive) and I'll take it from there.".to_string(),
+            })).await;
+            return;
+        }
+        None => hydra.classify_intent(&message).await,
     };
 
     match intent {
@@ -307,7 +448,7 @@ pub async fn run(
 
 #[cfg(test)]
 mod tests {
-    use super::{opens_with_action_verb, parse_intent_label, Intent};
+    use super::{opens_with_action_verb, opens_with_command_phrase, parse_intent_label, Intent};
 
     #[test]
     fn action_verb_fast_path() {
@@ -348,5 +489,85 @@ mod tests {
     fn parser_priority_interactive_over_reasoning() {
         // If a confused model emits both, INTERACTIVE wins (more impactful routing)
         assert_eq!(parse_intent_label("INTERACTIVE or REASONING"), Intent::Interactive);
+    }
+
+    #[test]
+    fn command_phrases_route_interactive_deterministically() {
+        // The fix for the CHAT-misroute: explicit command directives must NOT fall to the
+        // weak classifier (which sent "run the command …" → CHAT → hallucinated no-op).
+        for m in ["run the command touch /tmp/x", "run the command touch a, then run the command touch b",
+                  "execute the command ls -la", "$ whoami", "RUN THE COMMAND echo hi"] {
+            assert!(opens_with_command_phrase(m), "{m:?} should route Interactive");
+        }
+        // The bare verb "run" stays borderline (a genuine question must not be force-routed).
+        for m in ["run a marathon with me", "running late today", "is it worth a run"] {
+            assert!(!opens_with_command_phrase(m), "{m:?} must stay borderline");
+        }
+    }
+}
+
+#[cfg(test)]
+mod routing_lever_tests {
+    use super::*;
+
+    fn vm() -> RouteContext {
+        RouteContext { surface: SurfaceState { vm_active: true, ..Default::default() }, mode: RouteMode::Auto }
+    }
+    fn none() -> RouteContext {
+        RouteContext { surface: SurfaceState::default(), mode: RouteMode::Auto }
+    }
+
+    #[test]
+    fn action_shape_catches_tasks_rejects_chat() {
+        // The cases routing_probe showed MISROUTING to CHAT/REASONING — now caught deterministically.
+        for m in ["create two empty files: /tmp/a and /tmp/b", "make a directory called /tmp/project",
+                  "delete the file /tmp/old.log", "show how much disk space is free",
+                  "rename report.txt to final.txt", "install ripgrep", "open the web browser",
+                  "run the command touch /tmp/x"] {
+            assert!(is_action_shaped(m), "{m:?} should be action-shaped");
+        }
+        // Conversation / reasoning must NOT be grabbed (a soft verb with no computer-object is chat).
+        for m in ["write a poem about the sea", "what is the capital of France", "hello there",
+                  "explain how TCP works", "create"] {
+            assert!(!is_action_shaped(m), "{m:?} must NOT be action-shaped");
+        }
+    }
+
+    #[test]
+    fn clear_question_detection() {
+        for m in ["what is the capital of France", "how does TCP work", "is the VM running?",
+                  "explain how memory works", "Can you do this?"] {
+            assert!(is_clear_question(m), "{m:?} is a question");
+        }
+        for m in ["create two files in /tmp", "open firefox", "install ripgrep"] {
+            assert!(!is_clear_question(m), "{m:?} is not a question");
+        }
+    }
+
+    #[test]
+    fn hard_lever_no_surface_is_chat_or_offer() {
+        // No surface → an action becomes an OFFER (start a surface), a non-action is CHAT.
+        assert_eq!(deterministic_route("create two files in /tmp", &none()), Some(RouteOutcome::Offer));
+        assert_eq!(deterministic_route("what is the capital of France", &none()), Some(RouteOutcome::Chat));
+    }
+
+    #[test]
+    fn surface_active_action_is_interactive_question_is_residual() {
+        // Surface active + clear action → Interactive, no LLM. The exact demo goal that misrouted.
+        assert_eq!(deterministic_route("create two empty files: /tmp/a and /tmp/b", &vm()),
+                   Some(RouteOutcome::Interactive));
+        // Surface active + question/ambiguous → None → falls to the LLM classifier (residual).
+        assert_eq!(deterministic_route("what is the capital of France", &vm()), None);
+    }
+
+    #[test]
+    fn explicit_modes_hard_override() {
+        let chat_lock = RouteContext { surface: SurfaceState { vm_active: true, ..Default::default() }, mode: RouteMode::ChatLock };
+        // ChatLock → CHAT even for a clear action.
+        assert_eq!(deterministic_route("delete the file /tmp/x", &chat_lock), Some(RouteOutcome::Chat));
+        let act_lock = RouteContext { surface: SurfaceState { vm_active: true, ..Default::default() }, mode: RouteMode::ActLock };
+        // ActLock acts on anything that isn't a clear question; a question still chats.
+        assert_eq!(deterministic_route("organize my downloads", &act_lock), Some(RouteOutcome::Interactive));
+        assert_eq!(deterministic_route("what is the capital of France", &act_lock), Some(RouteOutcome::Chat));
     }
 }

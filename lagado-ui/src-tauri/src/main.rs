@@ -55,12 +55,20 @@ async fn send_goal(
         }
     });
 
-    let is_paused = {
+    {
         let mut s = state.agent.lock().await;
         s.approval_tx = Some(approval_tx);
         s.pending_id = None;
         s.running = true;
-        false
+    }
+
+    // STATE-AWARE ROUTING context: surface = what the agent can act on right now. vm_active is ground
+    // truth from vm_ssh_port (set at vm_boot). immersive_active / host_control_active are forward slots
+    // (frontend immersive flag + Segment-7 host control) — default false until plumbed. mode = Auto.
+    let vm_active = state.vm_ssh_port.read().map(|g| g.is_some()).unwrap_or(false);
+    let route = hydra::RouteContext {
+        surface: hydra::SurfaceState { vm_active, immersive_active: false, host_control_active: false },
+        mode: hydra::RouteMode::Auto,
     };
 
     let agent_arc = state.agent.clone();
@@ -75,7 +83,7 @@ async fn send_goal(
         hydra::run(
             goal,
             String::new(),
-            is_paused,
+            route,
             agent_arc,
             adapter,
             perceptor,

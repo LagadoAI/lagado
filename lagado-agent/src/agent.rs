@@ -76,7 +76,7 @@ async fn dispatch_invoke(
                 Err(e) => format!("error: no frame available: {e}"),
             }
         }
-        "vm_command" => actuator.click(&format!("cmd:{}", s("command"))),
+        "vm_command" => actuator.run_command(&s("command")),
         "vm_type"    => actuator.type_text("focused", &s("text")),
         "vm_click"   => actuator.click(&s("selector")),
 
@@ -273,6 +273,9 @@ pub enum SubAction {
     Click,
     Type(String),
     Key(String),
+    /// A shell-command step routed through the gated command channel (run + read
+    /// stdout/stderr/exit), NOT GUI typing. Advances on exit 0 (deterministic verification).
+    Command(String),
 }
 
 /// One planned sub-goal: the original text (drives Click selection + logging) and its action class.
@@ -286,9 +289,29 @@ pub struct SubGoal {
 /// (NL→action parsing is the fragile part): a leading "type …" → Type with the literal payload
 /// (ORIGINAL case preserved — commands are case-sensitive); a leading "press …"/"hit …" → Key;
 /// everything else → Click (handled by the selection loop).
+/// Explicit shell-command directives that route a step (and the goal's intent) to the command
+/// channel rather than GUI typing. SINGLE SOURCE OF TRUTH — also consumed by hydra's intent
+/// fast-path (`opens_with_command_phrase`) so classification and execution agree (a step the
+/// sequencer would run as a command must not be misrouted to CHAT upstream).
+pub const COMMAND_LEADS: &[&str] = &[
+    "run the command", "run command", "execute the command", "execute command",
+    "run shell command", "run shell", "run:", "$ ",
+];
+
 pub fn classify_subgoal(s: &str) -> SubGoal {
     let t = s.trim();
     let lower = t.to_lowercase();
+    // Command channel: an explicit shell-command step routes to the deterministic CLI channel
+    // (run + read output + exit-code verify), NOT GUI typing. Triggers are NARROW/EXPLICIT so
+    // "Launch Firefox" (Click) and "type the command: …" (Type, into a focused field) are unaffected.
+    for &lead in COMMAND_LEADS {
+        if lower.starts_with(lead) {
+            let payload = t[lead.len()..].trim_start_matches([':', ' ']).trim();
+            if !payload.is_empty() {
+                return SubGoal { text: t.to_string(), action: SubAction::Command(payload.to_string()) };
+            }
+        }
+    }
     if lower.starts_with("press ") {
         return SubGoal { text: t.to_string(), action: SubAction::Key(normalize_key(&t[6..])) };
     }
@@ -395,16 +418,30 @@ fn plan_goal(goal: &str, skills: &[Skill], adapter: &Arc<dyn InferenceAdapter>) 
         return syntactic; // explicit multi-step → trust the deterministic split
     }
     let skill_block = SkillLibrary::format_for_prompt(skills);
+    // CAPABILITY-AWARE prompt: the planner knows the agent's TWO action surfaces and CHOOSES per goal.
+    // Verified on the live 8B (planner_probe): it decomposes implicit goals and picks CLI-vs-GUI well
+    // for well-specified goals; the `no sudo / no interactive programs` rules + the post-filter below
+    // catch the failure modes the probe exposed (hallucinated/dangerous/hang-prone commands).
     let prompt = format!(
-"Break the goal into the FEWEST on-screen click steps, one per line.
+"Break the goal into the FEWEST concrete steps, one per line. The agent can act two ways:
+- run the command <shell command>   — runs a shell command and reads its output. PREFER this for
+  file operations, system info, running a program, package work — anything a terminal does well.
+- Click <element>                   — clicks an on-screen GUI element. Use ONLY to launch a GUI app
+  or for a GUI-only task. To open an app: Click the Applications menu, then Click <the app>.
+
 Rules:
-- Each step is exactly: Click <the element to click>. Nothing else.
-- To launch or open an application: TWO steps — Click the Applications menu, then Click <the app>.
-- One click per step. Do NOT add steps like locate, find, wait, open the folder, verify, or double-click.
-- If the target is already a visible item, output ONE step.
+- One action per line. Pick the SIMPLEST surface for the goal.
+- Output ONLY the steps. No narration, no 'locate'/'wait'/'verify'/'check'/'open the folder'.
+- Do NOT use sudo. Do NOT use interactive programs (nano, vim, less, top, man) — they hang.
+- If the goal is a single action, output ONE line.
 
 Example:
-Goal: Launch the Web Browser
+Goal: create an empty file at /tmp/notes.txt
+Steps:
+run the command touch /tmp/notes.txt
+
+Example:
+Goal: open the web browser
 Steps:
 Click the Applications menu
 Click Web Browser
@@ -412,11 +449,11 @@ Click Web Browser
 Goal: {goal}
 Steps:"
     );
-    // Lead verbs that are not a discrete click target — the planner sometimes emits narration
-    // ("Locate X", "Wait for Y") that has no on-screen element and would only fail-close.
+    // Lead verbs that are not a discrete action — the planner sometimes emits narration
+    // ("Locate X", "Wait for Y") that has no on-screen element / no command and would only fail-close.
     const NON_ACTION_LEAD: &[&str] =
         &["wait", "locate", "find", "ensure", "verify", "confirm", "observe", "check", "look", "see"];
-    match adapter.generate(&prompt, 128, 0.1) {
+    match adapter.generate(&prompt, 192, 0.1) {
         Ok(text) => {
             let steps: Vec<String> = text
                 .lines()
@@ -427,8 +464,19 @@ Steps:"
                     !NON_ACTION_LEAD.contains(&lead.as_str())
                 })
                 .collect();
-            // Adopt only a genuine expansion; a 0/1-line reply adds nothing and risks drift.
-            if steps.len() > 1 {
+            // GUARDRAIL (fail-closed, per the probe): a plan that needs sudo or an interactive program
+            // would HANG the (TTY-less) command channel — reject the whole LLM plan and fall back to the
+            // conservative deterministic path rather than execute a hanging step. Keeps plan_goal's
+            // can-only-improve-never-corrupt property.
+            if steps.iter().any(|s| command_would_hang(s)) {
+                chronos::log(&format!("planner: rejected plan with hang-prone step for \"{goal}\" → deterministic"));
+                return syntactic;
+            }
+            // Adopt when the model produced a real expansion: multiple steps, OR a single step that
+            // CHOSE the command surface (a CLI plan the deterministic click-split could never produce).
+            // A lone restated click adds nothing → fall back.
+            let chose_command = steps.iter().any(|s| matches!(classify_subgoal(s).action, SubAction::Command(_)));
+            if steps.len() > 1 || (steps.len() == 1 && chose_command) {
                 chronos::log(&format!("planner: expanded \"{goal}\" → {steps:?}"));
                 steps
             } else {
@@ -440,6 +488,25 @@ Steps:"
             syntactic
         }
     }
+}
+
+/// A planned step that would HANG the command channel: `sudo` (no TTY for the password prompt) or an
+/// interactive program (editor/pager/monitor that never returns without a terminal). The command
+/// channel runs over non-interactive SSH, so these block forever — reject the plan rather than run them.
+fn command_would_hang(step: &str) -> bool {
+    let cmd = match classify_subgoal(step).action {
+        SubAction::Command(c) => c.to_lowercase(),
+        _ => return false,
+    };
+    let first = cmd.split_whitespace().next().unwrap_or("");
+    if first == "sudo" {
+        return true;
+    }
+    const INTERACTIVE: &[&str] = &[
+        "nano", "vim", "vi", "emacs", "pico", "less", "more", "man", "top", "htop",
+        "vimdiff", "tmux", "screen", "ssh", "telnet", "ftp", "python", "python3", "node", "irb",
+    ];
+    INTERACTIVE.contains(&first)
 }
 
 /// The focused-window label from a perception dump line `[focused: X]`, or "" if absent.
@@ -906,6 +973,66 @@ pub async fn agent_loop(
         }
         had_prior_step = true;
 
+        // ── Command channel: deterministic CLI sub-goal with EXIT-CODE verification ───────────
+        // Routes a planned shell-command step through the gated command channel (run + read
+        // stdout/stderr/exit) instead of GUI typing. Unlike Type/Key (fire-and-advance), the
+        // sequencer advances ONLY on exit 0 — a non-zero exit HOLDS the pointer and escalates at
+        // threshold, so a failed command in a chain is caught, not marched past (the chain-depth
+        // fix). The gate applies the "1 and 3" tiering: read-only commands auto-run, writes confirm.
+        if let SubAction::Command(cmd) = sub_goals[current_sub].action.clone() {
+            let mut args = serde_json::Map::new();
+            args.insert("command".to_string(), serde_json::Value::String(cmd.clone()));
+            let tool_call = ToolCall::Invoke { name: "vm_command".to_string(), args };
+            let output = match gate::confidence_escalate(gate::evaluate_action(&tool_call, &registry), 1.0) {
+                gate::Verdict::Allow => {
+                    let out = execute_tool(&tool_call, actuator.as_ref(), perceptor.as_ref(), &memory_tiers).await;
+                    chronos::log(&format!("action(command): $ {cmd} -> {out}"));
+                    let _ = confirm_tx.send(envelope::make("action_log", envelope::ActionLogPayload {
+                        text: format!("$ {cmd}\n{out}"),
+                    })).await;
+                    out
+                }
+                gate::Verdict::ConfirmTap => request_and_await_approval("tap", &tool_call, &state, actuator.as_ref(), perceptor.as_ref(), &memory_tiers, &mut approval_rx, &confirm_tx).await,
+                gate::Verdict::ConfirmTyped => request_and_await_approval("typed", &tool_call, &state, actuator.as_ref(), perceptor.as_ref(), &memory_tiers, &mut approval_rx, &confirm_tx).await,
+                gate::Verdict::Block(reason) => {
+                    chronos::log(&format!("blocked: {reason}"));
+                    let _ = confirm_tx.send(envelope::make("status", envelope::StatusPayload {
+                        state: "blocked".to_string(), detail: reason.clone(),
+                    })).await;
+                    format!("Blocked: {reason}")
+                }
+            };
+            memory.push(Step { index: enforcer.step(), prompt: String::new(), output: output.clone(), action: None });
+            prev_action_executed = false;
+            prev_screen = perceptor.read_screen();
+            // VERIFY via exit code: advance only on success. The command channel makes the
+            // postcondition deterministic — no pixel/a11y inference needed for command tasks.
+            if output.contains("[exit 0]") {
+                subgoal_stuck = 0;
+                current_sub += 1;
+                if current_sub >= sub_goals.len() {
+                    chronos::log("sequencer_complete: all sub-goals done (command verified)");
+                    let _ = confirm_tx.send(envelope::make("action_log", envelope::ActionLogPayload {
+                        text: "Goal accomplished — all steps completed.".to_string() })).await;
+                    let _ = confirm_tx.send(envelope::make("status", envelope::StatusPayload {
+                        state: "goal_done".to_string(), detail: "Goal accomplished — all steps completed.".to_string() })).await;
+                    break;
+                }
+                chronos::log(&format!("sequencer_advance(command ok): → sub-goal {}/{}: {}",
+                    current_sub + 1, sub_goals.len(), sub_goals[current_sub].text));
+            } else {
+                subgoal_stuck += 1;
+                chronos::log(&format!("command_failed: $ {cmd} -> {output} ({subgoal_stuck}/{SUBGOAL_STUCK_LIMIT})"));
+                if subgoal_stuck >= SUBGOAL_STUCK_LIMIT {
+                    let msg = format!("A command step failed and didn't recover (\"{cmd}\") — handing back to you.");
+                    let _ = confirm_tx.send(envelope::make("status", envelope::StatusPayload {
+                        state: "goal_done".to_string(), detail: msg })).await;
+                    break;
+                }
+            }
+            continue;
+        }
+
         // ── WALL 2: deterministic Type/Key sub-goal ──────────────────────────────────────────
         // No element to "click" and the model can't pick a keystroke, so a Type/Key step bypasses
         // perception/selection/fail-closed/grammar entirely: build the tool call, run it through the
@@ -917,6 +1044,7 @@ pub async fn agent_loop(
                 SubAction::Type(text) => ToolCall::Type { selector: "focused".to_string(), text: text.clone() },
                 SubAction::Key(key)   => ToolCall::Key { key: key.clone() },
                 SubAction::Click      => unreachable!(),
+                SubAction::Command(_) => unreachable!(), // handled above
             };
             // confidence = 1.0: the harness chose this deterministically, not the model.
             let output = match gate::confidence_escalate(gate::evaluate_action(&tool_call, &registry), 1.0) {
@@ -1817,5 +1945,35 @@ mod distill_tests {
         let text = r#"Here is the skill: {"name": "resize_window", "description": "user needs to resize an application window", "approach": "Drag the window edge."} Done."#;
         let skill = parse_skill_json(text, "resize window").unwrap();
         assert_eq!(skill.name, "resize_window");
+    }
+
+    #[test]
+    fn classify_subgoal_routes_command_steps_to_channel() {
+        // Explicit command directives → the CLI channel (payload stripped of the lead).
+        assert_eq!(classify_subgoal("run the command touch /tmp/x").action,
+                   SubAction::Command("touch /tmp/x".to_string()));
+        assert_eq!(classify_subgoal("execute the command: ls -la").action,
+                   SubAction::Command("ls -la".to_string()));
+        assert_eq!(classify_subgoal("$ whoami").action,
+                   SubAction::Command("whoami".to_string()));
+        // GUI typing and app-launch must NOT be hijacked by the command leads.
+        assert_eq!(classify_subgoal("type the command: touch /tmp/x").action,
+                   SubAction::Type("touch /tmp/x".to_string()));
+        assert!(matches!(classify_subgoal("Launch the Terminal Emulator").action, SubAction::Click));
+    }
+
+    #[test]
+    fn command_would_hang_rejects_sudo_and_interactive() {
+        // These hang the TTY-less command channel → the planner must reject a plan containing them.
+        for s in ["run the command sudo apt-get clean", "run the command nano /tmp/x",
+                  "run the command vim foo", "run the command top", "run the command less /var/log/syslog",
+                  "run the command python"] {
+            assert!(command_would_hang(s), "{s:?} should be flagged as hang-prone");
+        }
+        // Normal commands and non-command steps are fine.
+        for s in ["run the command touch /tmp/x", "run the command ls -la", "run the command df -h",
+                  "Click the Applications menu"] {
+            assert!(!command_would_hang(s), "{s:?} should NOT be flagged");
+        }
     }
 }

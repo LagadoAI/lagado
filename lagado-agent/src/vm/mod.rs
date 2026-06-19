@@ -90,6 +90,13 @@ impl crate::perception::Actuator for DynamicActuator {
             self.host.key(key)
         }
     }
+    fn run_command(&self, cmd: &str) -> String {
+        if let Some(port) = *self.vm_port.read().unwrap_or_else(|e| e.into_inner()) {
+            SshActuator::with_cache("127.0.0.1", port, "laputa", self.ssh_cache.clone()).run_command(cmd)
+        } else {
+            self.host.run_command(cmd)
+        }
+    }
 }
 
 impl crate::perception::Perceptor for DynamicPerceptor {

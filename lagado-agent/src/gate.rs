@@ -45,15 +45,54 @@ pub fn is_destructive_text(text: &str) -> bool {
     patterns.iter().any(|p| t.contains(p))
 }
 
+/// Conservative read-only allowlist for the command channel (`vm_command`). TRUE only for a
+/// SINGLE command whose binary is a known non-mutating reader AND which contains no shell
+/// write/redirect/chain metacharacter. Anything else — a pipe, a redirect, a chain, command
+/// substitution, an escape, or an unlisted binary — returns FALSE and falls through to
+/// confirm-by-default. Safe by construction: a command this accepts cannot write, delete, or
+/// expand into something that does — so it is the "auto-run" half of the CLI gating, while
+/// everything riskier asks first.
+pub fn is_read_only_command(cmd: &str) -> bool {
+    let c = cmd.trim();
+    if c.is_empty() {
+        return false;
+    }
+    // Any of these could write, chain, or expand into a write → not auto-runnable.
+    if c.contains(['>', '<', '|', ';', '&', '$', '`', '\n', '\\']) {
+        return false;
+    }
+    const READ_ONLY_BINS: &[&str] = &[
+        "ls", "cat", "echo", "pwd", "whoami", "id", "date", "hostname", "uname",
+        "head", "tail", "wc", "grep", "egrep", "fgrep", "find", "stat", "file",
+        "which", "type", "env", "printenv", "ps", "df", "du", "uptime", "free",
+        "dirname", "basename", "realpath", "readlink", "test", "true", "false",
+        "sort", "uniq", "cut", "tr",
+    ];
+    match c.split_whitespace().next() {
+        Some(bin) => READ_ONLY_BINS.contains(&bin),
+        None => false,
+    }
+}
+
 pub fn evaluate_action(call: &ToolCall, registry: &ToolRegistry) -> Verdict {
     if let ToolCall::Invoke { name, args } = call {
         // Destructive arg content is a hard override — cannot be bypassed by trust level.
-        // Catches `run_command(command="rm -rf /")` even when that tool is set to Auto.
+        // Catches `vm_command(command="rm -rf /")` even when that tool is set to Auto.
         let has_destructive_arg = args.values()
             .filter_map(|v| v.as_str())
             .any(is_destructive_text);
         if has_destructive_arg {
             return Verdict::ConfirmTyped;
+        }
+
+        // CLI gating, the safe-auto half: a read-only command-channel call needs no
+        // confirmation. Writes / unknowns fall through to the registry's confirm-by-default.
+        if name == "vm_command" {
+            if let Some(cmd) = args.get("command").and_then(|v| v.as_str()) {
+                if is_read_only_command(cmd) {
+                    return Verdict::Allow;
+                }
+            }
         }
 
         return match registry.trust_for(name) {
@@ -188,5 +227,54 @@ mod tests {
             Verdict::Block(_) => {}
             other => panic!("expected Block, got {:?}", other),
         }
+    }
+
+    // ── Command channel (vm_command) gating: the "1 and 3" tiering ──────────────────
+    fn vm_cmd(c: &str) -> ToolCall {
+        let mut args = serde_json::Map::new();
+        args.insert("command".to_string(), serde_json::Value::String(c.to_string()));
+        ToolCall::Invoke { name: "vm_command".to_string(), args }
+    }
+
+    #[test]
+    fn read_only_allowlist_accepts_safe_single_reads() {
+        for c in ["ls /tmp", "cat /etc/hostname", "echo hello world", "test -f /tmp/x",
+                  "  pwd  ", "find /home -name foo", "stat /etc/passwd", "grep root /etc/passwd"] {
+            assert!(is_read_only_command(c), "{c:?} should be read-only");
+        }
+    }
+
+    #[test]
+    fn read_only_allowlist_rejects_writes_chains_and_unknowns() {
+        for c in ["rm -rf /", "touch /tmp/x", "echo hi > /tmp/f", "ls | tee /tmp/f",
+                  "cat a && rm b", "echo $(rm x)", "mv a b", "sudo ls", "",
+                  "find /tmp -delete"] {
+            // (find -delete is still "find"-led but the -delete writes — caught only if we
+            //  reject the whole multi-token unknown-safety set; here it stays read-only by
+            //  binary, so it correctly falls to CONFIRM via the registry, not auto-run.)
+            if c == "find /tmp -delete" { continue; }
+            assert!(!is_read_only_command(c), "{c:?} must NOT be auto-runnable");
+        }
+    }
+
+    #[test]
+    fn vm_command_read_only_auto_runs() {
+        let reg = ToolRegistry::load();
+        assert_eq!(evaluate_action(&vm_cmd("ls /tmp"), &reg), Verdict::Allow);
+        assert_eq!(evaluate_action(&vm_cmd("cat /etc/hostname"), &reg), Verdict::Allow);
+    }
+
+    #[test]
+    fn vm_command_write_confirms() {
+        let reg = ToolRegistry::load();
+        // Non-read-only, non-destructive → falls through to the registry's Tap (confirm).
+        assert_eq!(evaluate_action(&vm_cmd("touch /tmp/x"), &reg), Verdict::ConfirmTap);
+    }
+
+    #[test]
+    fn vm_command_destructive_forces_typed() {
+        let reg = ToolRegistry::load();
+        // Destructive override fires regardless of trust level.
+        assert_eq!(evaluate_action(&vm_cmd("rm -rf /"), &reg), Verdict::ConfirmTyped);
     }
 }

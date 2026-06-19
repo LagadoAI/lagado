@@ -26,6 +26,15 @@ pub trait Actuator: Send + Sync {
     fn type_text(&self, selector: &str, text: &str) -> String;
     fn key(&self, key: &str) -> String;
 
+    /// Run a shell command on the target and return its output (stdout/stderr plus an
+    /// `[exit N]` marker). Default: unavailable — only a VM-backed actuator implements a
+    /// real command channel. This is the agent's CLI sense: it RUNS commands and reads
+    /// their output directly, because terminal text is not exposed through a11y (verified
+    /// on the live guest — the AT-SPI Text interface returns empty for the VTE terminal).
+    fn run_command(&self, _cmd: &str) -> String {
+        "[command channel unavailable]".to_string()
+    }
+
     /// Register synthetic-index targets (`el_N` → center coords) for the current
     /// frame so the selection grammar's tokens resolve to coordinate clicks. Works
     /// for label-less / `ref_id`-`None` elements too. Default no-op; coord-cache
