@@ -5,10 +5,11 @@ set -e
 REPO="$(cd "$(dirname "$0")" && pwd)"
 LLAMA_BUILD="$REPO/lagado-agent/vendored/llama.cpp-2/build/bin"
 
-# When launched from a GUI app icon (not a shell), PATH is minimal — pull cargo/node onto PATH.
+# When launched from a GUI app icon (not a shell), PATH can be minimal or EMPTY — so node/npm (at
+# /usr/bin) and cargo aren't found and `exec npm` dies silently. Prepend cargo + the standard system
+# bin dirs unconditionally so the launch works regardless of the desktop launcher's environment.
 [ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"
-case ":$PATH:" in *":/usr/local/bin:"*) ;; *) PATH="/usr/local/bin:$PATH" ;; esac
-export PATH
+export PATH="$HOME/.cargo/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
 
 export WEBKIT_DISABLE_DMABUF_RENDERER=1
 

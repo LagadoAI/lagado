@@ -826,26 +826,37 @@ fn main() {
 
             // System-tray icon: Lagado lives in the tray while running, like any app. Left-click /
             // "Show" focuses the window; "Quit" runs the full shutdown (kills every subprocess).
-            let tray_menu = Menu::with_items(app, &[
-                &MenuItem::with_id(app, "show", "Show Lagado", true, None::<&str>)?,
-                &MenuItem::with_id(app, "quit", "Quit Lagado", true, None::<&str>)?,
-            ])?;
-            let mut tray = TrayIconBuilder::with_id("lagado-tray")
-                .tooltip("Lagado — sovereign local AI")
-                .menu(&tray_menu)
-                .on_menu_event(|app, event| match event.id.as_ref() {
-                    "show" => {
-                        if let Some(w) = app.get_webview_window("main") {
-                            let _ = w.show(); let _ = w.unminimize(); let _ = w.set_focus();
+            // NON-FATAL: many desktops (GNOME by default) have no system tray, so building one FAILS.
+            // That must NOT abort app startup — a failed tray is logged and the app runs windowed only.
+            // (Regression fix: the `?`s here previously propagated the tray error out of setup() and
+            // killed the whole app before the window opened.)
+            let tray_result = (|| -> tauri::Result<()> {
+                let tray_menu = Menu::with_items(app, &[
+                    &MenuItem::with_id(app, "show", "Show Lagado", true, None::<&str>)?,
+                    &MenuItem::with_id(app, "quit", "Quit Lagado", true, None::<&str>)?,
+                ])?;
+                let mut tray = TrayIconBuilder::with_id("lagado-tray")
+                    .tooltip("Lagado — sovereign local AI")
+                    .menu(&tray_menu)
+                    .on_menu_event(|app, event| match event.id.as_ref() {
+                        "show" => {
+                            if let Some(w) = app.get_webview_window("main") {
+                                let _ = w.show(); let _ = w.unminimize(); let _ = w.set_focus();
+                            }
                         }
-                    }
-                    "quit" => { shutdown_everything(app); app.exit(0); }
-                    _ => {}
-                });
-            if let Some(icon) = app.default_window_icon() {
-                tray = tray.icon(icon.clone());
+                        "quit" => { shutdown_everything(app); app.exit(0); }
+                        _ => {}
+                    });
+                if let Some(icon) = app.default_window_icon() {
+                    tray = tray.icon(icon.clone());
+                }
+                tray.build(app)?;
+                Ok(())
+            })();
+            if let Err(e) = tray_result {
+                tracing::warn!("system tray unavailable ({e}) — running windowed (no tray icon). \
+                                Use the window close button + the app to quit; shutdown still cleans up.");
             }
-            let _tray = tray.build(app)?;
             // SIGTERM / SIGINT handler: shut down the VM cleanly before exiting.
             // Drop does not run on signals, so we must do this explicitly.
             // Guard is dropped before .await — mutex invariant satisfied.
