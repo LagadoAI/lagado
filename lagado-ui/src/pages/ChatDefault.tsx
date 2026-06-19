@@ -4,7 +4,7 @@ import { useChatContext } from "@/hooks/use-chat-context";
 import { PermissionCard } from "@/components/PermissionCard";
 import { HyperLoader } from "../components/HyperLoader";
 import { AppSidebar } from "../components/AppSidebar";
-import { PanelLeft, Paperclip, Mic, ArrowUp } from "lucide-react";
+import { PanelLeft, Paperclip, Mic, ArrowUp, Square } from "lucide-react";
 
 const surfaceRoutes: Record<string, string> = {
   immersive: "/immersive",
@@ -14,7 +14,7 @@ const surfaceRoutes: Record<string, string> = {
 
 export default function ChatDefault() {
   const navigate = useNavigate();
-  const { messages, sendMessage, status, isPaused, setIsPaused, connState, pendingPermission, approve, deny } = useChatContext();
+  const { messages, sendMessage, status, isPaused, setIsPaused, connState, pendingPermission, approve, deny, stop } = useChatContext();
 
   const [input, setInput] = useState("");
   const [showSidebar, setShowSidebar] = useState(true);
@@ -168,19 +168,32 @@ export default function ChatDefault() {
               <button className="lg-iconbtn lg-iconbtn--md" aria-label="Voice">
                 <Mic size={18} />
               </button>
-              <button
-                onClick={handleSend}
-                disabled={!input.trim() || isLoading}
-                className="lg-iconbtn lg-iconbtn--md"
-                aria-label="Send"
-                style={{
-                  background: input.trim() && !isLoading ? "var(--grad-brand-h)" : "var(--surface-raised)",
-                  color: input.trim() && !isLoading ? "#fff" : "var(--text-dim)",
-                  borderRadius: 12,
-                }}
-              >
-                <ArrowUp size={18} />
-              </button>
+              {isLoading ? (
+                /* While the agent runs, the send control becomes a STOP (abort) — the user can always
+                   halt a running agent (the §4 send→stop morph). */
+                <button
+                  onClick={stop}
+                  className="lg-iconbtn lg-iconbtn--md"
+                  aria-label="Stop"
+                  style={{ background: "var(--surface-raised)", color: "var(--text-body)", borderRadius: 12 }}
+                >
+                  <Square size={15} fill="currentColor" />
+                </button>
+              ) : (
+                <button
+                  onClick={handleSend}
+                  disabled={!input.trim()}
+                  className="lg-iconbtn lg-iconbtn--md"
+                  aria-label="Send"
+                  style={{
+                    background: input.trim() ? "var(--grad-brand-h)" : "var(--surface-raised)",
+                    color: input.trim() ? "#fff" : "var(--text-dim)",
+                    borderRadius: 12,
+                  }}
+                >
+                  <ArrowUp size={18} />
+                </button>
+              )}
             </div>
           </div>
         </div>

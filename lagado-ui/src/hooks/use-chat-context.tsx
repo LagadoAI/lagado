@@ -24,6 +24,7 @@ interface ChatContextValue {
   pendingPermission: PermissionRequest | null
   approve: (id: string) => void
   deny: (id: string) => void
+  stop: () => void
   connState: ConnState
 }
 
@@ -106,13 +107,20 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     setPendingPermission(null)
   }, [socket])
 
+  // Abort a running agent (the frozen contract's command:"stop") and return the UI to ready.
+  const stop = useCallback(() => {
+    socket.sendCommand('stop')
+    setPendingPermission(null)
+    setStatus('idle')
+  }, [socket])
+
   return (
     <ChatContext.Provider value={{
       messages, sendMessage, status,
       isPaused, setIsPaused,
       idleOpacity, setIdleOpacity,
       chatBoxHidden, setChatBoxHidden,
-      pendingPermission, approve, deny,
+      pendingPermission, approve, deny, stop,
       connState: socket.connState,
     }}>
       {children}
