@@ -393,6 +393,18 @@ pub fn classify_subgoal(s: &str) -> SubGoal {
             }
         }
     }
+    // WRITE-FILE PRIMITIVE: "write to <path>: <content>" authors file content ROBUSTLY (base64
+    // round-trip — the content is never shell-escaped), instead of the brittle multi-line `echo` the
+    // small model mangles (it emitted literal `\n` + invented commands). `\n`/`\t` in the content are
+    // interpreted. Routes through the command channel as a base64-decode write → gated, verified,
+    // postconditioned (a redirect `> path` → `test -e path`) like any command.
+    if let Some((path, content)) = parse_write_file(t) {
+        use base64::Engine;
+        let bytes = content.replace("\\n", "\n").replace("\\t", "\t");
+        let b64 = base64::engine::general_purpose::STANDARD.encode(bytes.as_bytes());
+        let cmd = format!("echo {b64} | base64 -d > {path}");
+        return SubGoal { text: t.to_string(), action: SubAction::Command(cmd) };
+    }
     if lower.starts_with("press ") {
         return SubGoal { text: t.to_string(), action: SubAction::Key(normalize_key(&t[6..])) };
     }
@@ -412,6 +424,26 @@ pub fn classify_subgoal(s: &str) -> SubGoal {
         return SubGoal { text: t.to_string(), action: SubAction::Command(t.to_string()) };
     }
     SubGoal { text: t.to_string(), action: SubAction::Click }
+}
+
+/// Parse a write-file directive `write to <path>: <content>` (also "write the file <path> …: …") into
+/// (path, content). Requires an explicit `:` separating the path clause from the content, and a path
+/// before it. Deliberately does NOT match "write the text X into Y" (no colon → the planner emits a
+/// plain `echo` for simple single-line text). PURE.
+pub fn parse_write_file(s: &str) -> Option<(String, String)> {
+    let lo = s.trim().to_lowercase();
+    if !(lo.starts_with("write to ") || lo.starts_with("write the file ") || lo.starts_with("write file ")) {
+        return None;
+    }
+    let colon = s.find(':')?;
+    let content = s[colon + 1..].trim();
+    if content.is_empty() {
+        return None;
+    }
+    let path = s[..colon].split_whitespace()
+        .find(|t| t.contains('/'))?
+        .trim_matches(|c: char| matches!(c, '"' | '\'' | '`'));
+    Some((path.to_string(), content.to_string()))
 }
 
 /// True if the fragment IS a bare shell command: a known non-GUI tool AND a concrete shell argument
@@ -534,6 +566,8 @@ fn plan_goal(goal: &str, skills: &[Skill], adapter: &Arc<dyn InferenceAdapter>) 
 "Break the goal into the FEWEST concrete steps, one per line. The agent can act two ways:
 - run the command <shell command>   — runs a shell command and reads its output. PREFER this for
   file operations, system info, running a program, package work — anything a terminal does well.
+- write to <path>: <content>        — writes the given content to a file (use \\n for a newline). Use
+  this to author a SCRIPT or config file with multi-line content — never a multi-line echo.
 - Click <element>                   — clicks an on-screen GUI element. Use ONLY to launch a GUI app
   or for a GUI-only task. To open an app: Click the Applications menu, then Click <the app>.
 
@@ -541,6 +575,8 @@ Rules:
 - One action per line. Pick the SIMPLEST surface for the goal.
 - Output ONLY the steps. No narration, no 'locate'/'wait'/'verify'/'check'/'open the folder'.
 - Do NOT use sudo. Do NOT use interactive programs (nano, vim, less, top, man) — they hang.
+- A 'write to' step authors ONLY the file's real content. Put chmod/run as SEPARATE later steps —
+  never inside the file's content. To run a script you wrote: a separate 'run the command sh <path>'.
 - If the goal is a single action, output ONE line.
 
 Example:
@@ -552,6 +588,12 @@ Example:
 Goal: delete the file /tmp/old.log
 Steps:
 run the command rm /tmp/old.log
+
+Example:
+Goal: write a script /tmp/run.sh that prints hello, then run it
+Steps:
+write to /tmp/run.sh: #!/bin/sh\\necho hello
+run the command sh /tmp/run.sh
 
 Example:
 Goal: open the web browser
@@ -2562,6 +2604,28 @@ mod distill_tests {
             |_| true);
         assert!(matches!(action, ReapproachAction::Escalate(_)));
         assert!(iters <= 3, "oscillation must be caught fast, got {iters} iters");
+    }
+
+    #[test]
+    fn write_file_primitive_authors_robustly() {
+        assert_eq!(parse_write_file("write to /tmp/run.sh: #!/bin/sh\\necho hi"),
+                   Some(("/tmp/run.sh".to_string(), "#!/bin/sh\\necho hi".to_string())));
+        assert_eq!(parse_write_file("write the file /tmp/x: content"),
+                   Some(("/tmp/x".to_string(), "content".to_string())));
+        // "write the text X into Y" (no colon, not a write-to lead) is NOT the primitive → plain echo.
+        assert_eq!(parse_write_file("write the text hello into the file /tmp/y"), None);
+        // classify_subgoal builds a robust base64 write; the decoded content interprets \n.
+        match classify_subgoal("write to /tmp/run.sh: #!/bin/sh\\ntouch /tmp/out").action {
+            SubAction::Command(cmd) => {
+                assert!(cmd.contains("base64 -d > /tmp/run.sh"), "got: {cmd}");
+                use base64::Engine;
+                let b64 = cmd.split_whitespace().nth(1).unwrap();
+                let decoded = String::from_utf8(
+                    base64::engine::general_purpose::STANDARD.decode(b64).unwrap()).unwrap();
+                assert_eq!(decoded, "#!/bin/sh\ntouch /tmp/out"); // \n became a real newline
+            }
+            other => panic!("expected Command, got {other:?}"),
+        }
     }
 
     #[test]
