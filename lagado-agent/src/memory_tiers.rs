@@ -398,11 +398,13 @@ impl MemoryTiers {
                 // NOTE (plaintext-minimization consequence): importance_heuristic's `substance` term
                 // reads e.text.len(). Here cold entries' text is still CIPHERTEXT (decryption is
                 // deferred to the survivors), so substance for cold is computed on the ciphertext
-                // length — a monotonic length PROXY, not plaintext bytes (the security property holds:
-                // no plaintext is materialized in this pass). It does mean cold importance differs
-                // slightly from a plaintext-length basis. Dead-path today; revisit when the v2 planner
-                // makes assemble_slice live (e.g. store a plaintext-length column, or neutral substance
-                // for cold) so ranking isn't silently length-distorted.
+                // length — a length PROXY, not plaintext bytes (the security property holds: no plaintext
+                // is materialized in this pass). OPEN QUESTION (NOT resolved by this comment): does
+                // ciphertext-length ranking measurably change COLD-TIER RETENTION vs a plaintext-length
+                // basis? substance → importance → ranking → what survives decay / surfaces in recall —
+                // a retention bias is invisible per-step and COMPOUNDS over months. Likely negligible
+                // (lightly-weighted, saturating), but that's an ASSUMPTION, not a measurement. Dead-path
+                // today; quantify it (or neutralize substance for cold) when v2 makes assemble_slice live.
                 importance: crate::board::importance_heuristic(e),
             })
             .collect();
