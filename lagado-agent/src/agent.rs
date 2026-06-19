@@ -239,6 +239,27 @@ async fn request_plan_approval(
     approval_rx.recv().await.unwrap_or(false)
 }
 
+/// Declare the goal done — but ONLY after verifying its GOAL-DERIVED world-state holds. If an intended
+/// artifact is absent (plan incompleteness, or a step that achieved its own effect but not the goal),
+/// hand back instead of falsely claiming success. Emits the terminal status either way.
+async fn complete_goal(goal: &str, actuator: &dyn Actuator, confirm_tx: &mpsc::Sender<String>) {
+    for check in goal_postconditions(goal) {
+        if parse_exit_code(&actuator.run_command(&check)) != Some(0) {
+            chronos::log(&format!("goal_postcondition_failed: {check}"));
+            let _ = confirm_tx.send(envelope::make("status", envelope::StatusPayload {
+                state: "goal_done".to_string(),
+                detail: format!("I ran the steps, but the goal isn't fully done — `{check}` doesn't hold. Handing back to you."),
+            })).await;
+            return;
+        }
+    }
+    chronos::log("goal_verified: goal postconditions hold");
+    let _ = confirm_tx.send(envelope::make("action_log", envelope::ActionLogPayload {
+        text: "Goal accomplished — all steps completed.".to_string() })).await;
+    let _ = confirm_tx.send(envelope::make("status", envelope::StatusPayload {
+        state: "goal_done".to_string(), detail: "Goal accomplished — all steps completed.".to_string() })).await;
+}
+
 // ── Observation helpers ───────────────────────────────────────────
 
 /// Returns Some(observation text) when an executed action's screen effect should be
@@ -710,6 +731,40 @@ pub fn command_postcondition(cmd: &str) -> Option<String> {
         "cp" | "mv" | "install" | "ln" => Some(format!("test -e {last}")),
         _ => None,
     }
+}
+
+/// Path-like tokens in a string (contain `/`), stripped of surrounding quotes/parens and trailing
+/// punctuation. PURE.
+fn extract_paths(text: &str) -> Vec<String> {
+    text.split(|c: char| c.is_whitespace() || c == ',' || c == ';')
+        .map(|t| t.trim_matches(|c: char| matches!(c, '"' | '\'' | '(' | ')')).trim_end_matches([':', '.']))
+        .filter(|t| t.contains('/') && t.len() > 1 && !t.starts_with('-'))
+        .map(str::to_string)
+        .collect()
+}
+
+/// GOAL-DERIVED world-state checks — parsed from the user's stated GOAL (effect verb + paths), verified
+/// at plan completion. Catches what per-step exit codes can't: plan INCOMPLETENESS (a needed artifact
+/// never got a step) or a step that achieved its OWN effect but not the goal's. DETERMINISTIC parse of
+/// the user's words — NOT the model judging itself (§11.4). Conservative: only create/delete intents
+/// with explicit paths; ambiguous source→target verbs (move/copy) are skipped to avoid false negatives.
+pub fn goal_postconditions(goal: &str) -> Vec<String> {
+    let lo = goal.to_lowercase();
+    if ["move ", "rename", "copy ", " mv ", " cp ", " to /", "from /"].iter().any(|v| lo.contains(v)) {
+        return Vec::new(); // a path moves between two locations — which one "counts" is ambiguous
+    }
+    let wants_absent = ["delete", "remove", "get rid of", "erase"].iter().any(|v| lo.contains(v));
+    let wants_create = ["create", "make ", "write", "touch", "save", "generate", "new file",
+                        "new folder", "new director"].iter().any(|v| lo.contains(v));
+    if !wants_absent && !wants_create {
+        return Vec::new(); // not a create/delete intent → no checkable goal artifact
+    }
+    let wants_dir = lo.contains("director") || lo.contains("folder");
+    extract_paths(goal).into_iter().map(|p| {
+        if wants_absent { format!("test ! -e {p}") }
+        else if wants_dir { format!("test -d {p}") }
+        else { format!("test -e {p}") }
+    }).collect()
 }
 
 /// Build the reform prompt (pure — tested for content). Asks the model for ONE corrected command for the
@@ -1272,13 +1327,7 @@ pub async fn agent_loop(
                 subgoal_stuck = 0; // fresh sub-goal — reset the deviation counter
                 if current_sub >= sub_goals.len() {
                     chronos::log("sequencer_complete: all sub-goals done");
-                    let _ = confirm_tx.send(envelope::make("action_log", envelope::ActionLogPayload {
-                        text: "Goal accomplished — all steps completed.".to_string(),
-                    })).await;
-                    let _ = confirm_tx.send(envelope::make("status", envelope::StatusPayload {
-                        state: "goal_done".to_string(),
-                        detail: "Goal accomplished — all steps completed.".to_string(),
-                    })).await;
+                    complete_goal(&goal, actuator.as_ref(), &confirm_tx).await;
                     break;
                 }
                 chronos::log(&format!("sequencer_advance: → sub-goal {}/{}: {}",
@@ -1375,10 +1424,7 @@ pub async fn agent_loop(
                 current_sub += 1;
                 if current_sub >= sub_goals.len() {
                     chronos::log("sequencer_complete: all sub-goals done (command verified)");
-                    let _ = confirm_tx.send(envelope::make("action_log", envelope::ActionLogPayload {
-                        text: "Goal accomplished — all steps completed.".to_string() })).await;
-                    let _ = confirm_tx.send(envelope::make("status", envelope::StatusPayload {
-                        state: "goal_done".to_string(), detail: "Goal accomplished — all steps completed.".to_string() })).await;
+                    complete_goal(&goal, actuator.as_ref(), &confirm_tx).await;
                     break;
                 }
                 chronos::log(&format!("sequencer_advance(command ok): → sub-goal {}/{}: {}",
@@ -1434,12 +1480,7 @@ pub async fn agent_loop(
             prev_screen = perceptor.read_screen();
             if current_sub >= sub_goals.len() {
                 chronos::log("sequencer_complete: all sub-goals done (deterministic final step)");
-                let _ = confirm_tx.send(envelope::make("action_log", envelope::ActionLogPayload {
-                    text: "Goal accomplished — all steps completed.".to_string(),
-                })).await;
-                let _ = confirm_tx.send(envelope::make("status", envelope::StatusPayload {
-                    state: "goal_done".to_string(), detail: "Goal accomplished — all steps completed.".to_string(),
-                })).await;
+                complete_goal(&goal, actuator.as_ref(), &confirm_tx).await;
                 break;
             }
             chronos::log(&format!("sequencer_advance(deterministic): → sub-goal {}/{}: {}",
@@ -2416,6 +2457,23 @@ mod distill_tests {
         assert_eq!(command_postcondition("lsof -i :8080"), None);
         assert_eq!(command_postcondition("df -h"), None);
         assert_eq!(command_postcondition("python3 --version"), None);
+    }
+
+    #[test]
+    fn goal_postcondition_derivation() {
+        // Create intents → the artifacts must EXIST (catches plan incompleteness: a path that never got a step).
+        assert_eq!(goal_postconditions("create two empty files: /tmp/a and /tmp/b"),
+                   vec!["test -e /tmp/a", "test -e /tmp/b"]);
+        assert_eq!(goal_postconditions("make a directory /tmp/project"), vec!["test -d /tmp/project"]);
+        // Delete intent → the artifact must be GONE.
+        assert_eq!(goal_postconditions("delete the file /tmp/old.log"), vec!["test ! -e /tmp/old.log"]);
+        // Ambiguous source→target (move/copy) → skip (which path "counts" is unclear).
+        assert!(goal_postconditions("move /tmp/a to /tmp/b").is_empty());
+        // Not a create/delete intent, or no path → nothing to check.
+        assert!(goal_postconditions("show the contents of /etc/hosts").is_empty());
+        assert!(goal_postconditions("what is using port 8080").is_empty());
+        assert!(goal_postconditions("open the web browser").is_empty());
+        assert!(goal_postconditions("create a poem about the sea").is_empty()); // create, but no path
     }
 
     #[test]
