@@ -561,6 +561,133 @@ fn command_would_hang(step: &str) -> bool {
     INTERACTIVE.contains(&first)
 }
 
+// ── REASSESS: diagnose → reform → bounded retry → escalate (command class) ───────────────────────────
+// The supervisor's reapproach muscle for commands ("forge retries; the supervisor reapproaches"). A
+// failed command (exit != 0) is DIAGNOSED, REFORMED into a corrected command (bounded, no-repeat), and
+// retried — not blind-retried, not marched-past. The exit code is the failure signal; the loop control
+// (`decide_reapproach`) is PURE + exhaustively unit-tested; reform itself is the one LLM step (the
+// §2.14-distrusted free generation — kept bounded + gated + no-repeat-guarded).
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommandFailure { CommandNotFound, NoSuchPath, PermissionDenied, Other }
+
+/// Parse the `[exit N]` marker the command channel prepends. None ⇒ no marker (treat as failure).
+pub fn parse_exit_code(output: &str) -> Option<i32> {
+    output.lines().next()?.trim().strip_prefix("[exit ")?.strip_suffix(']')?.parse().ok()
+}
+
+/// Deterministic diagnosis from the command channel's output (exit code + stderr text).
+pub fn diagnose_command(output: &str) -> CommandFailure {
+    let lo = output.to_lowercase();
+    let code = parse_exit_code(output);
+    if code == Some(127) || lo.contains("command not found") {
+        CommandFailure::CommandNotFound
+    } else if code == Some(126) || lo.contains("permission denied") || lo.contains("operation not permitted") {
+        CommandFailure::PermissionDenied
+    } else if lo.contains("no such file or directory") {
+        CommandFailure::NoSuchPath
+    } else {
+        CommandFailure::Other
+    }
+}
+
+/// Reform this failure, or escalate immediately? PermissionDenied is unfixable without sudo (which the
+/// agent refuses) → escalate fast, don't burn reform budget on it.
+pub fn should_reform(failure: CommandFailure) -> bool {
+    !matches!(failure, CommandFailure::PermissionDenied)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReapproachAction { Advance, Retry(String), Escalate(String) }
+
+/// PURE reapproach decision — the testable core. Given the just-run `output`, an already-produced reform
+/// `candidate`, the set of commands already `tried`, and the budget `limit` → decide. Exit 0 → Advance;
+/// a fresh non-empty non-GIVE_UP candidate within budget → Retry; otherwise (perms / budget exhausted /
+/// no candidate / GIVE_UP / oscillation back to an already-tried command) → Escalate.
+///
+/// ⚠ RESIDUAL (documented, tested): this TRUSTS exit 0 — it CANNOT detect "exit 0 but wrong effect" (a
+/// reform that runs cleanly without achieving the sub-goal, e.g. deletes nothing / touches the wrong
+/// path). Catching that needs a per-sub-goal WORLD-STATE postcondition (the §11.4 effect-signature for
+/// commands), not the exit code. Until then, exit-as-verification is the known limit of the command class.
+pub fn decide_reapproach(
+    output: &str,
+    candidate: Option<&str>,
+    tried: &std::collections::HashSet<String>,
+    limit: usize,
+) -> ReapproachAction {
+    if parse_exit_code(output) == Some(0) {
+        return ReapproachAction::Advance;
+    }
+    let failure = diagnose_command(output);
+    if !should_reform(failure) {
+        return ReapproachAction::Escalate(format!("{failure:?} — can't fix without elevated rights"));
+    }
+    if tried.len() > limit {
+        return ReapproachAction::Escalate("reform budget exhausted".to_string());
+    }
+    match candidate.map(str::trim) {
+        Some(c) if !c.is_empty() && !c.eq_ignore_ascii_case("GIVE_UP") && !tried.contains(c) => {
+            ReapproachAction::Retry(c.to_string())
+        }
+        _ => ReapproachAction::Escalate("no further fix found".to_string()),
+    }
+}
+
+/// A short, directive hint per failure kind — gives the weak model a concrete repair instruction
+/// instead of a vague "fix it" (measured: bare reform produced worse commands).
+fn reform_hint(failure: CommandFailure) -> &'static str {
+    match failure {
+        CommandFailure::CommandNotFound =>
+            "The program name was NOT FOUND — it is misspelled or the wrong program. Output the SAME command with ONLY the program name corrected to the right standard tool (e.g. a one-letter typo of a common command). Change nothing else.",
+        CommandFailure::NoSuchPath =>
+            "A path does not exist — create the parent directory first, or correct the path. Do not invent placeholder paths.",
+        CommandFailure::PermissionDenied =>
+            "Avoid anything needing elevated rights — the agent cannot sudo.",
+        CommandFailure::Other => "Correct the command so it succeeds.",
+    }
+}
+
+/// Build the reform prompt (pure — tested for content). Asks the model for ONE corrected command for the
+/// SAME sub-goal, with a diagnosis-specific repair hint, or `GIVE_UP`.
+pub fn reform_prompt(subgoal: &str, failed_cmd: &str, output: &str) -> String {
+    let hint = reform_hint(diagnose_command(output));
+    let err = output.lines().filter(|l| !l.starts_with("[exit")).collect::<Vec<_>>().join(" ");
+    format!(
+"A shell command failed. Output ONLY the single corrected command line.
+Sub-goal: {subgoal}
+Failed command: {failed_cmd}
+Error: {err}
+Fix: {hint}
+If it genuinely cannot be fixed, output exactly: GIVE_UP
+Corrected command:")
+}
+
+/// The one LLM step in reapproach: ask the model for a corrected command. Returns None on GIVE_UP /
+/// empty / unchanged. Bounded + gated + no-repeat-guarded by `decide_reapproach` at the call site.
+fn reform_command(subgoal: &str, failed_cmd: &str, output: &str, adapter: &Arc<dyn InferenceAdapter>) -> Option<String> {
+    let text = adapter.generate(&reform_prompt(subgoal, failed_cmd, output), 96, 0.1).ok()?;
+    let line = text.lines().map(str::trim).find(|l| !l.is_empty())?;
+    let cmd = line.trim_start_matches('$').trim();
+    if cmd.is_empty() || cmd.eq_ignore_ascii_case("GIVE_UP") || cmd == failed_cmd || command_would_hang(&format!("run the command {cmd}")) {
+        return None;
+    }
+    if !reform_is_conservative(failed_cmd, cmd) {
+        chronos::log(&format!("reform_rejected (not a conservative correction): {cmd}"));
+        return None;
+    }
+    Some(cmd.to_string())
+}
+
+/// A reform must be a CORRECTION of the failed command, not a re-plan: it may not introduce shell
+/// chaining / redirection / substitution / a new program-launch that the original lacked. This bounds
+/// the blast radius of a bad reform from the weak model (measured: the 8B "fixes" `cat x` into
+/// `mkdir && cat x` and emits non-command meta-text) — the worst a guarded reform can do is swap the
+/// program and fail again → clean escalate, never run a side-effecting chain. Pure.
+pub fn reform_is_conservative(original: &str, candidate: &str) -> bool {
+    const OPS: &[&str] = &["&&", "||", ";", "|", "exec ", ">", "<", "`", "$(", "\n"];
+    !OPS.iter().any(|op| candidate.contains(op) && !original.contains(op))
+}
+
 /// The focused-window label from a perception dump line `[focused: X]`, or "" if absent.
 fn screen_focus(screen: &str) -> String {
     for line in screen.lines() {
@@ -1053,35 +1180,67 @@ pub async fn agent_loop(
         // sequencer advances ONLY on exit 0 — a non-zero exit HOLDS the pointer and escalates at
         // threshold, so a failed command in a chain is caught, not marched past (the chain-depth
         // fix). The gate applies the "1 and 3" tiering: read-only commands auto-run, writes confirm.
-        if let SubAction::Command(cmd) = sub_goals[current_sub].action.clone() {
-            let mut args = serde_json::Map::new();
-            args.insert("command".to_string(), serde_json::Value::String(cmd.clone()));
-            let tool_call = ToolCall::Invoke { name: "vm_command".to_string(), args };
-            let output = match gate::apply_plan_approval(gate::confidence_escalate(gate::evaluate_action(&tool_call, &registry), 1.0), plan_approved) {
-                gate::Verdict::Allow => {
-                    let out = execute_tool(&tool_call, actuator.as_ref(), perceptor.as_ref(), &memory_tiers).await;
-                    chronos::log(&format!("action(command): $ {cmd} -> {out}"));
-                    let _ = confirm_tx.send(envelope::make("action_log", envelope::ActionLogPayload {
-                        text: format!("$ {cmd}\n{out}"),
-                    })).await;
-                    out
-                }
-                gate::Verdict::ConfirmTap => request_and_await_approval("tap", &tool_call, &state, actuator.as_ref(), perceptor.as_ref(), &memory_tiers, &mut approval_rx, &confirm_tx).await,
-                gate::Verdict::ConfirmTyped => request_and_await_approval("typed", &tool_call, &state, actuator.as_ref(), perceptor.as_ref(), &memory_tiers, &mut approval_rx, &confirm_tx).await,
-                gate::Verdict::Block(reason) => {
-                    chronos::log(&format!("blocked: {reason}"));
-                    let _ = confirm_tx.send(envelope::make("status", envelope::StatusPayload {
-                        state: "blocked".to_string(), detail: reason.clone(),
-                    })).await;
-                    format!("Blocked: {reason}")
+        if let SubAction::Command(cmd0) = sub_goals[current_sub].action.clone() {
+            let subgoal_text = sub_goals[current_sub].text.clone();
+            const REFORM_LIMIT: usize = 2; // ≤2 reforms ⇒ ≤3 command executions per sub-goal, all within
+                                           // ONE outer step (does not burn subgoal_stuck or MAX_STEPS).
+            let mut cmd = cmd0.clone();
+            let mut tried: std::collections::HashSet<String> = std::collections::HashSet::new();
+            tried.insert(cmd0.clone());
+            // REASSESS loop: run → (exit 0 ? advance) → diagnose → reform (bounded, gated, no-repeat) → retry.
+            let advanced = loop {
+                let mut args = serde_json::Map::new();
+                args.insert("command".to_string(), serde_json::Value::String(cmd.clone()));
+                let tool_call = ToolCall::Invoke { name: "vm_command".to_string(), args };
+                let output = match gate::apply_plan_approval(gate::confidence_escalate(gate::evaluate_action(&tool_call, &registry), 1.0), plan_approved) {
+                    gate::Verdict::Allow => {
+                        let out = execute_tool(&tool_call, actuator.as_ref(), perceptor.as_ref(), &memory_tiers).await;
+                        chronos::log(&format!("action(command): $ {cmd} -> {out}"));
+                        let _ = confirm_tx.send(envelope::make("action_log", envelope::ActionLogPayload {
+                            text: format!("$ {cmd}\n{out}"),
+                        })).await;
+                        out
+                    }
+                    gate::Verdict::ConfirmTap => request_and_await_approval("tap", &tool_call, &state, actuator.as_ref(), perceptor.as_ref(), &memory_tiers, &mut approval_rx, &confirm_tx).await,
+                    gate::Verdict::ConfirmTyped => request_and_await_approval("typed", &tool_call, &state, actuator.as_ref(), perceptor.as_ref(), &memory_tiers, &mut approval_rx, &confirm_tx).await,
+                    gate::Verdict::Block(reason) => {
+                        chronos::log(&format!("blocked: {reason}"));
+                        let _ = confirm_tx.send(envelope::make("status", envelope::StatusPayload {
+                            state: "blocked".to_string(), detail: reason.clone(),
+                        })).await;
+                        format!("Blocked: {reason}")
+                    }
+                };
+                memory.push(Step { index: enforcer.step(), prompt: String::new(), output: output.clone(), action: None });
+                // Only spend an LLM reform call when the failure is reformable AND budget remains.
+                let candidate = if parse_exit_code(&output) != Some(0)
+                    && should_reform(diagnose_command(&output))
+                    && tried.len() <= REFORM_LIMIT
+                {
+                    reform_command(&subgoal_text, &cmd, &output, &adapter)
+                } else {
+                    None
+                };
+                match decide_reapproach(&output, candidate.as_deref(), &tried, REFORM_LIMIT) {
+                    ReapproachAction::Advance => break true,
+                    ReapproachAction::Retry(next) => {
+                        chronos::log(&format!("reapproach: '{cmd}' failed ({:?}) → reform → '{next}'", diagnose_command(&output)));
+                        let _ = confirm_tx.send(envelope::make("action_log", envelope::ActionLogPayload {
+                            text: format!("That didn't work — trying instead: {next}"),
+                        })).await;
+                        tried.insert(next.clone());
+                        cmd = next;
+                        continue;
+                    }
+                    ReapproachAction::Escalate(reason) => {
+                        chronos::log(&format!("reapproach_escalate: {reason} (sub-goal '{subgoal_text}')"));
+                        break false;
+                    }
                 }
             };
-            memory.push(Step { index: enforcer.step(), prompt: String::new(), output: output.clone(), action: None });
             prev_action_executed = false;
             prev_screen = perceptor.read_screen();
-            // VERIFY via exit code: advance only on success. The command channel makes the
-            // postcondition deterministic — no pixel/a11y inference needed for command tasks.
-            if output.contains("[exit 0]") {
+            if advanced {
                 subgoal_stuck = 0;
                 current_sub += 1;
                 if current_sub >= sub_goals.len() {
@@ -1095,14 +1254,10 @@ pub async fn agent_loop(
                 chronos::log(&format!("sequencer_advance(command ok): → sub-goal {}/{}: {}",
                     current_sub + 1, sub_goals.len(), sub_goals[current_sub].text));
             } else {
-                subgoal_stuck += 1;
-                chronos::log(&format!("command_failed: $ {cmd} -> {output} ({subgoal_stuck}/{SUBGOAL_STUCK_LIMIT})"));
-                if subgoal_stuck >= SUBGOAL_STUCK_LIMIT {
-                    let msg = format!("A command step failed and didn't recover (\"{cmd}\") — handing back to you.");
-                    let _ = confirm_tx.send(envelope::make("status", envelope::StatusPayload {
-                        state: "goal_done".to_string(), detail: msg })).await;
-                    break;
-                }
+                let msg = format!("A command step failed and I couldn't fix it (\"{subgoal_text}\") — handing back to you.");
+                let _ = confirm_tx.send(envelope::make("status", envelope::StatusPayload {
+                    state: "goal_done".to_string(), detail: msg })).await;
+                break;
             }
             continue;
         }
@@ -2034,6 +2189,113 @@ mod distill_tests {
         assert_eq!(classify_subgoal("type the command: touch /tmp/x").action,
                    SubAction::Type("touch /tmp/x".to_string()));
         assert!(matches!(classify_subgoal("Launch the Terminal Emulator").action, SubAction::Click));
+    }
+
+    // ── REASSESS (reapproach) adversarial tests — the pure core, deterministically injected ─────────
+    use std::collections::HashSet;
+
+    #[test]
+    fn diagnose_and_parse_exit() {
+        assert_eq!(parse_exit_code("[exit 0]"), Some(0));
+        assert_eq!(parse_exit_code("[exit 127]\nbash: foo: command not found"), Some(127));
+        assert_eq!(parse_exit_code("no marker here"), None);
+        assert_eq!(diagnose_command("[exit 127]\n[stderr] bash: gnome-terminal: command not found"), CommandFailure::CommandNotFound);
+        assert_eq!(diagnose_command("[exit 2]\n[stderr] ls: cannot access '/x': No such file or directory"), CommandFailure::NoSuchPath);
+        assert_eq!(diagnose_command("[exit 126]\n[stderr] Permission denied"), CommandFailure::PermissionDenied);
+        assert_eq!(diagnose_command("[exit 1]\n[stderr] some other error"), CommandFailure::Other);
+    }
+
+    #[test]
+    fn decide_reapproach_table() {
+        let empty: HashSet<String> = HashSet::new();
+        // exit 0 → Advance (the success path)...
+        assert_eq!(decide_reapproach("[exit 0]\nok", Some("anything"), &empty, 2), ReapproachAction::Advance);
+        // ⚠ RESIDUAL: exit 0 ADVANCES even when the effect was wrong — the core cannot tell. Documented.
+        assert_eq!(decide_reapproach("[exit 0]", None, &empty, 2), ReapproachAction::Advance);
+        // PermissionDenied → escalate fast, never reform (agent can't sudo).
+        assert!(matches!(decide_reapproach("[exit 126]\nPermission denied", Some("sudo x"), &empty, 2), ReapproachAction::Escalate(_)));
+        // Fresh candidate within budget → Retry it.
+        assert_eq!(decide_reapproach("[exit 127]\ncommand not found", Some("xfce4-terminal"), &empty, 2),
+                   ReapproachAction::Retry("xfce4-terminal".to_string()));
+        // GIVE_UP / empty / None → escalate.
+        assert!(matches!(decide_reapproach("[exit 1]\nx", Some("GIVE_UP"), &empty, 2), ReapproachAction::Escalate(_)));
+        assert!(matches!(decide_reapproach("[exit 1]\nx", None, &empty, 2), ReapproachAction::Escalate(_)));
+        // Oscillation: candidate is a command already tried → escalate, do NOT loop back to it.
+        let mut tried = HashSet::new(); tried.insert("badA".to_string());
+        assert!(matches!(decide_reapproach("[exit 1]\nx", Some("badA"), &tried, 2), ReapproachAction::Escalate(_)));
+        // Budget exhausted (tried beyond limit) → escalate even with a fresh candidate.
+        let mut full = HashSet::new(); for c in ["c0","c1","c2"] { full.insert(c.to_string()); }
+        assert!(matches!(decide_reapproach("[exit 1]\nx", Some("c3"), &full, 2), ReapproachAction::Escalate(_)));
+    }
+
+    // Drive the reapproach control flow EXACTLY as the Command branch does, with injected mock
+    // reform/run closures — so failure (and reform behaviour) is deterministic every run.
+    fn simulate(initial: &str, limit: usize,
+                mut reform: impl FnMut(&str) -> Option<String>,
+                mut run: impl FnMut(&str) -> String) -> (usize, ReapproachAction) {
+        let mut cmd = initial.to_string();
+        let mut tried: HashSet<String> = HashSet::new();
+        tried.insert(initial.to_string());
+        let mut iters = 0usize;
+        loop {
+            iters += 1;
+            assert!(iters <= 100, "INFINITE LOOP — reapproach failed to terminate");
+            let output = run(&cmd);
+            let candidate = if parse_exit_code(&output) != Some(0)
+                && should_reform(diagnose_command(&output)) && tried.len() <= limit {
+                reform(&cmd)
+            } else { None };
+            match decide_reapproach(&output, candidate.as_deref(), &tried, limit) {
+                ReapproachAction::Advance => return (iters, ReapproachAction::Advance),
+                ReapproachAction::Retry(next) => { tried.insert(next.clone()); cmd = next; }
+                e @ ReapproachAction::Escalate(_) => return (iters, e),
+            }
+        }
+    }
+
+    #[test]
+    fn reapproach_recovers_a_fixable_failure() {
+        // initial fails (command not found); reform yields a good command that runs clean.
+        let (iters, action) = simulate("gnome-terminal", 2,
+            |_| Some("xfce4-terminal".to_string()),
+            |c| if c == "xfce4-terminal" { "[exit 0]".into() } else { "[exit 127]\ncommand not found".into() });
+        assert_eq!(action, ReapproachAction::Advance);
+        assert_eq!(iters, 2); // initial fail + one reformed success
+    }
+
+    #[test]
+    fn reapproach_bounds_an_unfixable_failure() {
+        // run ALWAYS fails; reform ALWAYS produces a fresh (still-bad) command → must escalate, bounded.
+        let mut n = 0;
+        let (iters, action) = simulate("bad0", 2,
+            |_| { n += 1; Some(format!("bad{n}")) },
+            |_| "[exit 1]\nstill broken".into());
+        assert!(matches!(action, ReapproachAction::Escalate(_)));
+        assert_eq!(iters, 3, "must escalate within REFORM_LIMIT+1 executions, not loop");
+    }
+
+    #[test]
+    fn reform_must_be_conservative() {
+        // A correction (binary swap, same shape) is allowed.
+        assert!(reform_is_conservative("tuch /tmp/x", "touch /tmp/x"));
+        assert!(reform_is_conservative("lst -la /tmp", "ls -la /tmp"));
+        assert!(reform_is_conservative("grep x | wc", "grep y | wc")); // original already had the pipe
+        // Introducing chaining / redirection / exec / substitution the original lacked is REJECTED —
+        // these are the exact garbage shapes the live 8B produced and they have side effects.
+        assert!(!reform_is_conservative("cat x", "mkdir -p x && cat x"));
+        assert!(!reform_is_conservative("cat x", "cat x; exec bash -c 'cat x'"));
+        assert!(!reform_is_conservative("echo hi", "echo hi > /tmp/f"));
+        assert!(!reform_is_conservative("ls", "ls $(rm -rf /tmp/z)"));
+    }
+
+    #[test]
+    fn reapproach_stops_on_oscillation() {
+        // reform flip-flops between two already-tried bad commands → no-repeat guard escalates fast.
+        let (iters, action) = simulate("A", 5,
+            |c| Some(if c == "A" { "B".to_string() } else { "A".to_string() }),
+            |_| "[exit 1]\nbroken".into());
+        assert!(matches!(action, ReapproachAction::Escalate(_)));
+        assert!(iters <= 3, "oscillation must be caught fast, got {iters} iters");
     }
 
     #[test]

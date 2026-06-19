@@ -9,6 +9,9 @@ pub fn log(event: &str) {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
+    // ONE timestamped line per event — sanitize embedded newlines (multi-line events, e.g. a plan
+    // preview, would otherwise emit continuation lines with no timestamp and break the format).
+    let event = event.replace(['\n', '\r'], " | ");
     let line = format!("{ts}\t{event}\n");
     let p = path();
     if let Some(parent) = p.parent() {
