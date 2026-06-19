@@ -1,8 +1,11 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::{mpsc, Mutex};
-use tauri::{State, Emitter};
+use tauri::{State, Emitter, Manager, WindowEvent};
+use tauri::tray::TrayIconBuilder;
+use tauri::menu::{Menu, MenuItem};
 use lagado_agent::{
     agent::AgentState,
     bootstrap::{ensure_llama_server, ensure_classifier_server, ensure_embedder_server, KillOnDrop},
@@ -34,6 +37,8 @@ struct AppState {
     ssh_cache: Arc<std::sync::Mutex<PerceptionCache>>,
     memory_tiers: Arc<Mutex<MemoryTiers>>,
     skill_library: Arc<SkillLibrary>,
+    // Run-flag for the in-process sleep-gate loop; flipped false on shutdown for a clean stop.
+    sleep_running: Arc<AtomicBool>,
 }
 
 #[tauri::command]
@@ -633,6 +638,35 @@ async fn test_network_connection(settings: NetworkSettings) -> String {
     }
 }
 
+/// Kill the model-server + VM SUBPROCESSES deterministically — owned OR reused, so NO orphans survive
+/// the app. Pattern-matches their unique signatures (the vendored llama-server binary path; the agent's
+/// QEMU disk image), so this catches servers a previous run left behind or that this run reused without
+/// owning. The in-process sleep-gate is NOT here — it's a tokio task that dies with the process.
+fn kill_subprocesses() {
+    #[cfg(unix)]
+    {
+        let _ = std::process::Command::new("pkill")
+            .args(["-f", "llama.cpp-2/build/bin/llama-server"]).status();
+        let _ = std::process::Command::new("pkill")
+            .args(["-f", "lagado-guest.qcow2"]).status();
+    }
+    #[cfg(windows)]
+    {
+        let _ = std::process::Command::new("taskkill").args(["/F", "/IM", "llama-server.exe"]).status();
+        let _ = std::process::Command::new("taskkill").args(["/F", "/IM", "qemu-system-x86_64.exe"]).status();
+    }
+}
+
+/// Full shutdown: stop the in-process sleep-gate loop cleanly (so it isn't aborted mid-SQLite-cycle —
+/// SQLite's journal makes even a hard kill atomic-safe, but this is the graceful path), then kill every
+/// subprocess. Idempotent — safe to call from the window-close, the tray Quit, and the signal handler.
+fn shutdown_everything(app: &tauri::AppHandle) {
+    if let Some(state) = app.try_state::<Arc<AppState>>() {
+        state.sleep_running.store(false, Ordering::SeqCst);
+    }
+    kill_subprocesses();
+}
+
 fn main() {
     tracing_subscriber::fmt::init();
 
@@ -654,6 +688,11 @@ fn main() {
     let skill_library = Arc::new(SkillLibrary::open(&config::data_dir()));
     let memory_for_setup  = memory_tiers.clone();
     let adapter_for_sleep = adapter.clone();
+
+    // Build the sleep-gate now so its run-flag can live in AppState (for a clean shutdown stop);
+    // it's started in setup. Its loop is an in-process tokio task — it cannot orphan as a process.
+    let sleep_gate = SleepGate::new(memory_for_setup, adapter_for_sleep);
+    let sleep_running = sleep_gate.stop_flag();
 
     let llama_child: Arc<Mutex<Option<KillOnDrop>>> = Arc::new(Mutex::new(None));
     let llama_for_setup = llama_child.clone();
@@ -732,6 +771,7 @@ fn main() {
         ssh_cache,
         memory_tiers,
         skill_library,
+        sleep_running,
     });
 
     // Clone for the SIGTERM/SIGINT handler — must happen before .manage() consumes state.
@@ -779,12 +819,33 @@ fn main() {
                 .run()
                 .await;
             });
-            // Start background memory consolidation loop (5-min decay cycles)
-            tauri::async_runtime::spawn(async move {
-                let gate = SleepGate::new(memory_for_setup, adapter_for_sleep);
-                let _handle = gate.start();
-                std::future::pending::<()>().await;
-            });
+            // Start the background memory consolidation loop (5-min decay cycles). In-process tokio
+            // task (NOT a subprocess — it can't orphan; it dies with the process). Stopped cleanly on
+            // shutdown via state.sleep_running so a cycle isn't aborted mid-SQLite-write.
+            let _sleep_handle = sleep_gate.start();
+
+            // System-tray icon: Lagado lives in the tray while running, like any app. Left-click /
+            // "Show" focuses the window; "Quit" runs the full shutdown (kills every subprocess).
+            let tray_menu = Menu::with_items(app, &[
+                &MenuItem::with_id(app, "show", "Show Lagado", true, None::<&str>)?,
+                &MenuItem::with_id(app, "quit", "Quit Lagado", true, None::<&str>)?,
+            ])?;
+            let mut tray = TrayIconBuilder::with_id("lagado-tray")
+                .tooltip("Lagado — sovereign local AI")
+                .menu(&tray_menu)
+                .on_menu_event(|app, event| match event.id.as_ref() {
+                    "show" => {
+                        if let Some(w) = app.get_webview_window("main") {
+                            let _ = w.show(); let _ = w.unminimize(); let _ = w.set_focus();
+                        }
+                    }
+                    "quit" => { shutdown_everything(app); app.exit(0); }
+                    _ => {}
+                });
+            if let Some(icon) = app.default_window_icon() {
+                tray = tray.icon(icon.clone());
+            }
+            let _tray = tray.build(app)?;
             // SIGTERM / SIGINT handler: shut down the VM cleanly before exiting.
             // Drop does not run on signals, so we must do this explicitly.
             // Guard is dropped before .await — mutex invariant satisfied.
@@ -804,19 +865,32 @@ fn main() {
                         _ = sigterm.recv() => { tracing::info!("SIGTERM received — shutting down VM"); }
                         _ = sigint.recv()  => { tracing::info!("SIGINT received — shutting down VM"); }
                     }
+                    // Stop the sleep-gate loop cleanly first.
+                    state_for_signal.sleep_running.store(false, Ordering::SeqCst);
                     let handle = {
                         let mut vm = state_for_signal.vm.lock().await;
                         vm.take()
                     }; // Mutex guard dropped here before any further .await
                     if let Some(h) = handle {
-                        let _ = state_for_signal.vm_backend.shutdown(h);
+                        let _ = state_for_signal.vm_backend.shutdown(h); // graceful QMP powerdown
                     }
+                    // Kill the model servers + any VM remnant (owned OR reused) — no orphans, even
+                    // though Drop won't run after process::exit.
+                    kill_subprocesses();
                     std::process::exit(0);
                 });
             }
             Ok(())
         })
         .manage(state)
+        .on_window_event(|window, event| {
+            // Closing the window = shut EVERYTHING down (no orphan processes), as requested — not
+            // hide-to-tray. The subprocess kill runs synchronously before the process tears down.
+            if let WindowEvent::CloseRequested { .. } = event {
+                shutdown_everything(window.app_handle());
+                window.app_handle().exit(0);
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             send_goal, send_chat, send_command, send_approval,
             initialize_timeline, get_active_model, set_active_model, list_models,

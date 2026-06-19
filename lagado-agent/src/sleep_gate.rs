@@ -52,6 +52,12 @@ impl SleepGate {
         self.running.store(false, Ordering::SeqCst);
     }
 
+    /// The shared run-flag, so a shutdown path that doesn't hold the `SleepGate` can stop the loop
+    /// cleanly (set false → the loop exits at its next check instead of being killed mid-cycle).
+    pub fn stop_flag(&self) -> std::sync::Arc<AtomicBool> {
+        self.running.clone()
+    }
+
     /// Run one full cycle immediately — called on shutdown or explicit trigger.
     pub async fn consolidate_now(&self) {
         run_cycle(&self.memory, &self.adapter).await;
