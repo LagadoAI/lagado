@@ -246,16 +246,36 @@ pub async fn ensure_embedder_server() -> Option<Child> {
 }
 
 pub async fn ensure_llama_server() -> Option<Child> {
-    let model_bytes = std::fs::metadata(config::model_path())
-        .map(|m| m.len())
-        .unwrap_or(0);
+    let model_path = config::model_path();
+    let model_bytes = std::fs::metadata(&model_path).map(|m| m.len()).unwrap_or(0);
+    // Base config (threads / parallelism / GPU detection) from the legacy planner.
     let cfg = governor::detect_and_plan(config::CONTEXT_SIZE, model_bytes);
+
+    // GGUF-AWARE OFFLOAD (optimization audit v1, Theme 2): read the model's real layer/expert/ctx
+    // metadata and run the partial-offload planner instead of the crude all-or-nothing 1.1×-headroom
+    // rule. This is what lets a 4.7GB MoE model run mostly on a 6GB GPU (partial -ngl + --cpu-moe)
+    // rather than dumping everything to CPU. Env overrides (LAGADO_NGL/LAGADO_CTX/LAGADO_CPU_MOE) feed
+    // EnginePrefs (invariant #9 defer-to-user). Falls back to the legacy cfg if GGUF can't be read.
+    let prefs = governor::EnginePrefs {
+        ctx: std::env::var("LAGADO_CTX").ok().and_then(|v| v.parse().ok()),
+        n_gpu_layers: std::env::var("LAGADO_NGL").ok().and_then(|v| v.parse().ok()),
+        cpu_moe: if std::env::var("LAGADO_CPU_MOE").is_ok() { Some(true) } else { None },
+    };
+    let (ctx, n_gpu_layers, cpu_moe) = match crate::gguf::read_metadata(&model_path) {
+        Ok(model) => {
+            let plan = governor::plan_engine(&model, cfg.gpu.as_ref(), &prefs, &[]);
+            chronos::log(&format!("engine_plan: {}", plan.rationale));
+            (plan.ctx as usize, plan.n_gpu_layers, plan.cpu_moe)
+        }
+        Err(e) => {
+            chronos::log(&format!("gguf read failed ({e}) — legacy offload plan"));
+            (cfg.ctx, cfg.n_gpu_layers, cfg.moe_experts_on_cpu)
+        }
+    };
+    let flash_attn = n_gpu_layers > 0; // follow the FINAL offload, not the legacy cfg's
     chronos::log(&format!(
-        "server_config: gpu={} vram_fit={:.0}% ctx={} ngl={} threads={} parallel={} moe_cpu={}",
-        cfg.n_gpu_layers > 0,
-        cfg.vram_fit_fraction(model_bytes) * 100.0,
-        cfg.ctx, cfg.n_gpu_layers, cfg.threads, cfg.n_parallel,
-        cfg.moe_experts_on_cpu,
+        "server_config: gpu={} ctx={} ngl={} threads={} parallel={} moe_cpu={}",
+        n_gpu_layers > 0, ctx, n_gpu_layers, cfg.threads, cfg.n_parallel, cpu_moe,
     ));
 
     let already_up = tokio::task::spawn_blocking(|| {
@@ -270,23 +290,22 @@ pub async fn ensure_llama_server() -> Option<Child> {
         return None;
     }
 
-    let model_path = config::model_path();
     let mut args = vec![
         "-m".to_string(), model_path.to_string_lossy().to_string(),
-        "-c".to_string(), cfg.ctx.to_string(),
-        "-ngl".to_string(), cfg.n_gpu_layers.to_string(),
+        "-c".to_string(), ctx.to_string(),
+        "-ngl".to_string(), n_gpu_layers.to_string(),
         "-t".to_string(), cfg.threads.to_string(),
         "--parallel".to_string(), cfg.n_parallel.to_string(),
         "--host".to_string(), config::llama_host(),
         "--port".to_string(), config::llama_port().to_string(),
     ];
-    if cfg.flash_attn {
+    if flash_attn {
         args.push("-fa".to_string());
         args.push("on".to_string());
     }
-    if cfg.moe_experts_on_cpu {
-        // MoE model: keep expert tensors on CPU, attention/embedding on GPU.
-        // Set by governor when Phase 3.x GGUF parser detects expert_count > 1.
+    if cpu_moe {
+        // MoE model: keep expert tensors on CPU, attention/embedding on GPU. Set by plan_engine
+        // when the GGUF metadata reports expert_count > 1 and VRAM is tight (or LAGADO_CPU_MOE).
         args.push("--cpu-moe".to_string());
     }
     tracing::info!("Spawning: {} {}", config::llama_server_bin().display(), args.join(" "));
