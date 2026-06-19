@@ -351,6 +351,28 @@ mod tests {
     }
 
     #[test]
+    fn cache_hit_does_not_write_last_used() {
+        // PIN the "bypass inference" fast path: a cache HIT must be a pure READ — it returns before
+        // the last_used UPDATE. (The audit wrongly claimed it wrote on every hit; it returns early.
+        // This test makes that early-return permanent: if a refactor moves the write before the cache
+        // return, the hot read path silently becomes a disk fsync and this fails.)
+        let g = mem_graph();
+        let action = r#"{"tool":"click","selector":"submit"}"#;
+        g.record_outcome("s1", action, true).unwrap();
+        // First call → ensures the state is cached.
+        assert!(g.get_best_action("s1", 0.0).unwrap().is_some());
+        // Stamp a sentinel last_used directly, then do a cache HIT.
+        g.conn.lock().unwrap()
+            .execute("UPDATE edges SET last_used = 1.0 WHERE state_hash = 's1'", [])
+            .unwrap();
+        assert!(g.get_best_action("s1", 0.0).unwrap().is_some()); // cache hit
+        let lu: f64 = g.conn.lock().unwrap()
+            .query_row("SELECT last_used FROM edges WHERE state_hash = 's1'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(lu, 1.0, "cache-hit path wrote last_used — the read-only early-return regressed");
+    }
+
+    #[test]
     fn test_get_best_action_below_threshold() {
         let g = mem_graph();
         let action = r#"{"tool":"click","selector":"submit"}"#;
