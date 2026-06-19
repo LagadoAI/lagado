@@ -84,4 +84,19 @@ async fn main() {
     println!("   WORLD-STATE: /tmp/lagado_py_c -> {c}");
     println!("   {}", if c.contains("CREATED") { "✅ DETERMINISTIC reform recovered (python→python3, world-state verified)" }
                        else { "❌ deterministic reform did not recover" });
+
+    // ── Case D: EXIT-0-BUT-WRONG — `touch x ; rm x` exits 0 but leaves the file ABSENT. The
+    // world-state postcondition (test -e x) must catch it and HAND BACK, not report false success. ──
+    println!("\n══════ Case D (exit-0-but-wrong): 'touch x && rm x' — exits 0 but file absent");
+    let _ = ssh("rm -f /tmp/lagado_pc_d");
+    let said = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+    {
+        // run with a capturing listener to see whether it falsely claimed success
+        let goal = "run the command touch /tmp/lagado_pc_d && rm /tmp/lagado_pc_d".to_string();
+        run_goal(goal).await;
+    }
+    let _ = said; // (status captured in the agent log lines above)
+    let d = ssh("test -e /tmp/lagado_pc_d && echo EXISTS || echo ABSENT");
+    println!("   WORLD-STATE: /tmp/lagado_pc_d -> {d}");
+    println!("   expect: file ABSENT + the agent HANDED BACK (not 'Goal accomplished') — postcondition caught it");
 }

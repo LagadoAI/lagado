@@ -647,6 +647,36 @@ fn reform_hint(failure: CommandFailure) -> &'static str {
     }
 }
 
+/// Derive a deterministic WORLD-STATE postcondition for a command — a shell `test` that exits 0 iff the
+/// command's stated file-effect actually HOLDS in the world. This closes the "exit 0 ≠ effect" gap for
+/// file operations: a command (or reform) that exits cleanly without creating/removing the file is
+/// caught. Returns None for commands whose effect isn't a checkable file-state (queries/compute — exit
+/// code is the only signal we have there). DETERMINISTIC parse of the command — NOT the model asserting
+/// its own completion (§11.4). Scope: existence-level for direct file ops + redirects; not content/semantics.
+pub fn command_postcondition(cmd: &str) -> Option<String> {
+    let toks: Vec<&str> = cmd.split_whitespace().collect();
+    // A redirect `> file` / `>> file` must leave `file` existing.
+    if let Some(pos) = toks.iter().position(|t| *t == ">" || *t == ">>") {
+        if let Some(f) = toks.get(pos + 1) {
+            return Some(format!("test -e {f}"));
+        }
+    }
+    let bin = *toks.first()?;
+    // Non-flag arguments — the operands (paths).
+    let args: Vec<&str> = toks.iter().skip(1).copied()
+        .take_while(|a| *a != "&&" && *a != "||" && *a != ";" && *a != "|")
+        .filter(|a| !a.starts_with('-'))
+        .collect();
+    let last = args.last()?;
+    match bin {
+        "touch"          => Some(format!("test -e {last}")),
+        "mkdir"          => Some(format!("test -d {last}")),
+        "rmdir" | "rm"   => Some(format!("test ! -e {last}")),
+        "cp" | "mv" | "install" | "ln" => Some(format!("test -e {last}")),
+        _ => None,
+    }
+}
+
 /// Build the reform prompt (pure — tested for content). Asks the model for ONE corrected command for the
 /// SAME sub-goal, with a diagnosis-specific repair hint, or `GIVE_UP`.
 pub fn reform_prompt(subgoal: &str, failed_cmd: &str, output: &str) -> String {
@@ -1260,6 +1290,19 @@ pub async fn agent_loop(
                     }
                 };
                 memory.push(Step { index: enforcer.step(), prompt: String::new(), output: output.clone(), action: None });
+                // WORLD-STATE POSTCONDITION (§11.4): exit 0 ≠ effect achieved. For a file command, confirm
+                // its stated effect actually MATERIALIZED in the world (a deterministic `test`, not the
+                // model judging itself). A clean exit with the effect ABSENT is exit-0-but-wrong → escalate
+                // (reform can't fix a command that "succeeded" without doing the thing).
+                if parse_exit_code(&output) == Some(0) {
+                    if let Some(check) = command_postcondition(&cmd) {
+                        if parse_exit_code(&actuator.run_command(&check)) != Some(0) {
+                            chronos::log(&format!("postcondition_failed: '{cmd}' exited 0 but effect absent ({check}) → escalate"));
+                            break false;
+                        }
+                        chronos::log(&format!("postcondition_ok: {check}"));
+                    }
+                }
                 // Reform only when the failure is reformable AND budget remains. DETERMINISTIC-FIRST
                 // (the spine): an equivalence-class program swap, command-v-verified — reliable; the weak
                 // LLM reform is only the fallback for what determinism can't fix.
@@ -2281,10 +2324,11 @@ mod distill_tests {
     }
 
     // Drive the reapproach control flow EXACTLY as the Command branch does, with injected mock
-    // reform/run closures — so failure (and reform behaviour) is deterministic every run.
+    // reform/run/confirm closures — so failure, reform, AND world-state postcondition are deterministic.
     fn simulate(initial: &str, limit: usize,
                 mut reform: impl FnMut(&str) -> Option<String>,
-                mut run: impl FnMut(&str) -> String) -> (usize, ReapproachAction) {
+                mut run: impl FnMut(&str) -> String,
+                mut confirm: impl FnMut(&str) -> bool) -> (usize, ReapproachAction) {
         let mut cmd = initial.to_string();
         let mut tried: HashSet<String> = HashSet::new();
         tried.insert(initial.to_string());
@@ -2293,6 +2337,10 @@ mod distill_tests {
             iters += 1;
             assert!(iters <= 100, "INFINITE LOOP — reapproach failed to terminate");
             let output = run(&cmd);
+            // World-state postcondition: a clean exit whose effect is ABSENT must NOT advance.
+            if parse_exit_code(&output) == Some(0) && !confirm(&cmd) {
+                return (iters, ReapproachAction::Escalate("postcondition failed".into()));
+            }
             let candidate = if parse_exit_code(&output) != Some(0)
                 && should_reform(diagnose_command(&output)) && tried.len() <= limit {
                 reform(&cmd)
@@ -2306,11 +2354,39 @@ mod distill_tests {
     }
 
     #[test]
+    fn command_postcondition_derivation() {
+        assert_eq!(command_postcondition("touch /tmp/x"), Some("test -e /tmp/x".into()));
+        assert_eq!(command_postcondition("mkdir -p /tmp/d"), Some("test -d /tmp/d".into()));
+        assert_eq!(command_postcondition("rm -f /tmp/x"), Some("test ! -e /tmp/x".into()));
+        assert_eq!(command_postcondition("cp a /tmp/b"), Some("test -e /tmp/b".into()));
+        assert_eq!(command_postcondition("mv a /tmp/b"), Some("test -e /tmp/b".into()));
+        assert_eq!(command_postcondition("echo hi > /tmp/x"), Some("test -e /tmp/x".into()));
+        // queries / compute have no checkable file-state → exit code is the only available signal.
+        assert_eq!(command_postcondition("lsof -i :8080"), None);
+        assert_eq!(command_postcondition("df -h"), None);
+        assert_eq!(command_postcondition("python3 --version"), None);
+    }
+
+    #[test]
+    fn postcondition_catches_exit_0_but_wrong() {
+        // Command exits 0 EVERY time but its effect never materializes (confirm=false) → must NOT
+        // advance — the exit-0-but-wrong case the advisor flagged. Escalates instead of false-success.
+        let (iters, action) = simulate("touch /tmp/x", 2,
+            |_| None, |_| "[exit 0]".into(), |_| false);
+        assert!(matches!(action, ReapproachAction::Escalate(_)), "exit-0-but-wrong must NOT advance");
+        assert_eq!(iters, 1);
+        // Sanity: exit 0 WITH the effect present → advance.
+        let (_, ok) = simulate("touch /tmp/x", 2, |_| None, |_| "[exit 0]".into(), |_| true);
+        assert_eq!(ok, ReapproachAction::Advance);
+    }
+
+    #[test]
     fn reapproach_recovers_a_fixable_failure() {
         // initial fails (command not found); reform yields a good command that runs clean.
         let (iters, action) = simulate("gnome-terminal", 2,
             |_| Some("xfce4-terminal".to_string()),
-            |c| if c == "xfce4-terminal" { "[exit 0]".into() } else { "[exit 127]\ncommand not found".into() });
+            |c| if c == "xfce4-terminal" { "[exit 0]".into() } else { "[exit 127]\ncommand not found".into() },
+            |_| true);
         assert_eq!(action, ReapproachAction::Advance);
         assert_eq!(iters, 2); // initial fail + one reformed success
     }
@@ -2321,7 +2397,8 @@ mod distill_tests {
         let mut n = 0;
         let (iters, action) = simulate("bad0", 2,
             |_| { n += 1; Some(format!("bad{n}")) },
-            |_| "[exit 1]\nstill broken".into());
+            |_| "[exit 1]\nstill broken".into(),
+            |_| true);
         assert!(matches!(action, ReapproachAction::Escalate(_)));
         assert_eq!(iters, 3, "must escalate within REFORM_LIMIT+1 executions, not loop");
     }
@@ -2354,7 +2431,8 @@ mod distill_tests {
         // reform flip-flops between two already-tried bad commands → no-repeat guard escalates fast.
         let (iters, action) = simulate("A", 5,
             |c| Some(if c == "A" { "B".to_string() } else { "A".to_string() }),
-            |_| "[exit 1]\nbroken".into());
+            |_| "[exit 1]\nbroken".into(),
+            |_| true);
         assert!(matches!(action, ReapproachAction::Escalate(_)));
         assert!(iters <= 3, "oscillation must be caught fast, got {iters} iters");
     }
