@@ -319,12 +319,18 @@ pub fn deterministic_route(message: &str, ctx: &RouteContext) -> Option<RouteOut
         // Nothing to act on → an action request can only be an offer to start a surface; else chat.
         return Some(if is_action_shaped(message) { RouteOutcome::Offer } else { RouteOutcome::Chat });
     }
-    // Surface active + Auto: a clear action acts deterministically; the rest (questions/ambiguous)
-    // fall to the LLM classifier.
+    // Surface active + Auto: a clear action acts deterministically.
     if is_action_shaped(message) {
         return Some(RouteOutcome::Interactive);
     }
-    None
+    // A clear QUESTION is conversational even with a surface active — route Chat, NEVER the action
+    // planner. (A user hit this: "do you know how to write in rust?" was classified REASONING and driven
+    // through the file-task planner into a bogus write-to-file plan.) An action-shaped message already
+    // returned above, so this can't swallow a real command.
+    if is_clear_question(message) {
+        return Some(RouteOutcome::Chat);
+    }
+    None // genuinely ambiguous → fall to the LLM classifier
 }
 
 pub fn parse_intent_label(response: &str) -> Intent {
@@ -552,12 +558,16 @@ mod routing_lever_tests {
     }
 
     #[test]
-    fn surface_active_action_is_interactive_question_is_residual() {
+    fn surface_active_action_is_interactive_question_is_chat() {
         // Surface active + clear action → Interactive, no LLM. The exact demo goal that misrouted.
         assert_eq!(deterministic_route("create two empty files: /tmp/a and /tmp/b", &vm()),
                    Some(RouteOutcome::Interactive));
-        // Surface active + question/ambiguous → None → falls to the LLM classifier (residual).
-        assert_eq!(deterministic_route("what is the capital of France", &vm()), None);
+        // Surface active + a clear QUESTION → Chat, never the action planner (the user bug:
+        // "do you know how to write in rust?" became a bogus write-to-file plan).
+        assert_eq!(deterministic_route("what is the capital of France", &vm()), Some(RouteOutcome::Chat));
+        assert_eq!(deterministic_route("do you know how to write in rust?", &vm()), Some(RouteOutcome::Chat));
+        // Genuinely ambiguous (not action-shaped, not a clear question) → LLM residual.
+        assert_eq!(deterministic_route("the files in my downloads folder", &vm()), None);
     }
 
     #[test]

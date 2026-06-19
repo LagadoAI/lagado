@@ -402,7 +402,13 @@ pub fn classify_subgoal(s: &str) -> SubGoal {
         use base64::Engine;
         let bytes = content.replace("\\n", "\n").replace("\\t", "\t");
         let b64 = base64::engine::general_purpose::STANDARD.encode(bytes.as_bytes());
-        let cmd = format!("echo {b64} | base64 -d > {path}");
+        // mkdir -p the PARENT first: writing a file to a nested path inherently needs its directory
+        // (the bug a user hit — "create folder /tmp/myapp with main.py inside" failed because the
+        // planner never made /tmp/myapp; writing a file is deterministically allowed to create its dir).
+        let cmd = match path.rsplit_once('/') {
+            Some((dir, _)) if !dir.is_empty() => format!("mkdir -p {dir} && echo {b64} | base64 -d > {path}"),
+            _ => format!("echo {b64} | base64 -d > {path}"),
+        };
         return SubGoal { text: t.to_string(), action: SubAction::Command(cmd) };
     }
     if lower.starts_with("press ") {
@@ -2614,12 +2620,14 @@ mod distill_tests {
                    Some(("/tmp/x".to_string(), "content".to_string())));
         // "write the text X into Y" (no colon, not a write-to lead) is NOT the primitive → plain echo.
         assert_eq!(parse_write_file("write the text hello into the file /tmp/y"), None);
-        // classify_subgoal builds a robust base64 write; the decoded content interprets \n.
-        match classify_subgoal("write to /tmp/run.sh: #!/bin/sh\\ntouch /tmp/out").action {
+        // classify_subgoal builds a robust base64 write that mkdir -p's the parent; decoded content
+        // interprets \n. (The /tmp/myapp/main.py failure: a nested path needs its dir created first.)
+        match classify_subgoal("write to /tmp/proj/run.sh: #!/bin/sh\\ntouch /tmp/out").action {
             SubAction::Command(cmd) => {
-                assert!(cmd.contains("base64 -d > /tmp/run.sh"), "got: {cmd}");
+                assert!(cmd.starts_with("mkdir -p /tmp/proj &&"), "must create parent dir: {cmd}");
+                assert!(cmd.contains("base64 -d > /tmp/proj/run.sh"), "got: {cmd}");
                 use base64::Engine;
-                let b64 = cmd.split_whitespace().nth(1).unwrap();
+                let b64 = cmd.split("echo ").nth(1).unwrap().split_whitespace().next().unwrap();
                 let decoded = String::from_utf8(
                     base64::engine::general_purpose::STANDARD.decode(b64).unwrap()).unwrap();
                 assert_eq!(decoded, "#!/bin/sh\ntouch /tmp/out"); // \n became a real newline
