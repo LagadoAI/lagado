@@ -293,14 +293,22 @@ pub fn should_cutoff(current: &str, last: &str, count: usize, screen_unchanged: 
 pub fn decompose_goal(goal: &str) -> Vec<String> {
     // Markers ordered so multi-word forms are tried before their substrings.
     const MARKERS: &[&str] = &[", and then ", " and then ", ", then ", " then ", "; ", " after that "];
+    // `;` is BOTH an agent separator ("open A ; open B") AND shell syntax. Inside a "run the command …"
+    // payload it is SHELL (one compound command) — splitting it stranded the tail ("rm x") as a bogus
+    // Click step. So exclude `;` from the markers FOR a command-lead part only; "then" still separates
+    // distinct directives ("run the command A then run the command B").
+    const SHELL_OP: &str = "; ";
     let mut parts: Vec<String> = vec![goal.trim().to_string()];
     loop {
         let mut next = Vec::new();
         let mut split_any = false;
         for p in &parts {
             let lower = p.to_lowercase();
-            // earliest marker position across all markers
-            let cut = MARKERS.iter().filter_map(|m| lower.find(m).map(|i| (i, m.len()))).min_by_key(|(i, _)| *i);
+            let is_command = COMMAND_LEADS.iter().any(|&l| lower.starts_with(l));
+            // earliest marker position across all markers (`;` skipped inside a command payload)
+            let cut = MARKERS.iter()
+                .filter(|m| !(is_command && **m == SHELL_OP))
+                .filter_map(|m| lower.find(m).map(|i| (i, m.len()))).min_by_key(|(i, _)| *i);
             match cut {
                 Some((i, len)) => {
                     next.push(p[..i].trim().to_string());
@@ -376,7 +384,34 @@ pub fn classify_subgoal(s: &str) -> SubGoal {
             return SubGoal { text: t.to_string(), action: SubAction::Type(payload) };
         }
     }
+    // A BARE shell command that lost its "run the command" lead — a fragment of a split compound step,
+    // or a planner step that dropped the prefix. Recognized only with a concrete shell argument so NL
+    // ("find my documents", "open the menu") stays a Click.
+    if is_bare_shell_command(t) {
+        return SubGoal { text: t.to_string(), action: SubAction::Command(t.to_string()) };
+    }
     SubGoal { text: t.to_string(), action: SubAction::Click }
+}
+
+/// True if the fragment IS a bare shell command: a known non-GUI tool AND a concrete shell argument
+/// (a path, a flag, or a redirect). CONSERVATIVE by design — a shell-tool name alone ("find", "echo")
+/// without a path/flag is NOT enough, so natural language ("find my documents", "echo your thoughts")
+/// and GUI phrasing ("open the menu") stay a Click. GUI verbs (open/launch/click) are not in the set.
+fn is_bare_shell_command(s: &str) -> bool {
+    let s = s.trim();
+    let first = s.split_whitespace().next().unwrap_or("");
+    const SHELL_BINS: &[&str] = &[
+        "rm", "rmdir", "ls", "cat", "touch", "mkdir", "cp", "mv", "ln", "chmod", "chown", "grep",
+        "egrep", "fgrep", "find", "head", "tail", "wc", "sort", "uniq", "cut", "tr", "sed", "awk",
+        "tar", "gzip", "gunzip", "zip", "unzip", "curl", "wget", "git", "make", "stat", "file", "df",
+        "du", "ps", "kill", "pkill", "md5sum", "sha256sum", "mount", "umount", "ping", "echo",
+        "python3", "node", "npm", "pip3",
+    ];
+    if !SHELL_BINS.contains(&first) {
+        return false;
+    }
+    let rest = s[first.len()..].trim();
+    rest.contains('/') || rest.contains('>') || rest.split_whitespace().any(|w| w.starts_with('-'))
 }
 
 /// Strip a "type" sub-goal's framing prefix ("the command:", "command:", "the text:", …), leaving
@@ -2284,6 +2319,22 @@ mod distill_tests {
         assert_eq!(classify_subgoal("type the command: touch /tmp/x").action,
                    SubAction::Type("touch /tmp/x".to_string()));
         assert!(matches!(classify_subgoal("Launch the Terminal Emulator").action, SubAction::Click));
+    }
+
+    #[test]
+    fn shell_command_is_not_split_and_bare_command_classifies() {
+        // ROOT CAUSE: a "run the command X ; Y" must stay ONE compound shell command (`;` is shell
+        // syntax), not be split into a stranded "rm x" Click step.
+        assert_eq!(decompose_goal("run the command touch /tmp/a ; rm /tmp/a").len(), 1);
+        // But "then" still separates two agent-level command directives.
+        assert_eq!(decompose_goal("run the command touch a then run the command touch b").len(), 2);
+        // A bare shell command (lost its lead) with a concrete path/flag → Command, not Click.
+        assert_eq!(classify_subgoal("rm /tmp/x").action, SubAction::Command("rm /tmp/x".to_string()));
+        assert_eq!(classify_subgoal("find /home -name foo").action, SubAction::Command("find /home -name foo".to_string()));
+        // Conservative: NL phrasing and GUI actions stay a Click (no concrete shell arg / not a tool).
+        assert!(matches!(classify_subgoal("find my documents").action, SubAction::Click));
+        assert!(matches!(classify_subgoal("open the file manager").action, SubAction::Click));
+        assert!(matches!(classify_subgoal("echo your thoughts").action, SubAction::Click));
     }
 
     // ── REASSESS (reapproach) adversarial tests — the pure core, deterministically injected ─────────
