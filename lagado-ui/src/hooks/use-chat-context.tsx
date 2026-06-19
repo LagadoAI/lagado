@@ -70,10 +70,12 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       if (!isMountedRef.current) return
       // Only show meaningful status updates, not goal_received noise
       if (s.state === 'goal_received') return; // suppress — hydra already handles routing
+      // The detail is already human-friendly ("Goal accomplished…", "handing back to you…") — show it
+      // directly, no technical "[state]" prefix. Fall back to a readable label only when detail is empty.
       const msg: Message = {
         id: crypto.randomUUID(),
         role: 'assistant',
-        content: s.detail ? `[${s.state}] ${s.detail}` : `[${s.state}]`,
+        content: s.detail || s.state.replace(/_/g, ' '),
       }
       setMessages(prev => [...prev, msg])
       if (s.state === 'goal_done' || s.state === 'goal_aborted') {

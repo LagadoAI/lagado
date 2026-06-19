@@ -15,6 +15,51 @@ export function PermissionCard({ req, onApprove, onDeny, onSwitch }: PermissionC
   const isTyped = req.type === "typed";
   const approveEnabled = !isTyped || typedConfirm.trim().length > 0;
 
+  // PLAN PREVIEW (Option 2): the agent decomposed the goal and wants ONE approval for the whole plan.
+  // Render it as a scannable numbered list (not a collapsed run-on), flagging destructive steps that
+  // will STILL hard-stop individually.
+  if (req.tool === "plan") {
+    const lines = req.action.split("\n").map((l) => l.trim()).filter(Boolean);
+    const header = lines[0] ?? "Here's my plan";
+    const steps = lines.slice(1);
+    return (
+      <div className="border border-lagado-border rounded-lg bg-lagado-surface p-4 space-y-3 max-w-3xl mx-auto">
+        <div className="text-body-sm font-semibold text-lagado-text">{header}</div>
+        <ol className="space-y-1.5">
+          {steps.map((s, i) => {
+            const danger = s.includes("⚠") || /destructive/i.test(s);
+            const text = s.replace(/^\d+\.\s*/, "").replace(/\s*⚠.*$/, "").trim();
+            return (
+              <li key={i} className="flex items-start gap-2 text-body-sm">
+                <span className="text-lagado-text-dim font-mono w-5 text-right flex-shrink-0">{i + 1}.</span>
+                <span className={`font-mono break-all leading-relaxed flex-1 ${danger ? "text-lagado-red" : "text-lagado-text"}`}>
+                  {text}
+                </span>
+                {danger && (
+                  <span className="text-caption text-lagado-red flex-shrink-0 whitespace-nowrap">⚠ will confirm</span>
+                )}
+              </li>
+            );
+          })}
+        </ol>
+        <div className="flex gap-2 pt-1">
+          <button
+            onClick={onApprove}
+            className="px-4 py-1.5 rounded-md text-body-sm font-semibold bg-lagado-green text-white hover:bg-opacity-90 transition-colors"
+          >
+            Approve plan
+          </button>
+          <button
+            onClick={onDeny}
+            className="px-4 py-1.5 rounded-md text-body-sm font-semibold bg-lagado-surface-2 border border-lagado-border text-lagado-text hover:border-lagado-red hover:text-lagado-red transition-colors"
+          >
+            Reject
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="border border-lagado-border rounded-lg bg-lagado-surface p-3 space-y-3 max-w-3xl mx-auto">
       {/* Action + Details toggle */}

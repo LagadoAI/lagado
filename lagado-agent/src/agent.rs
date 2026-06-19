@@ -254,8 +254,8 @@ async fn complete_goal(goal: &str, actuator: &dyn Actuator, confirm_tx: &mpsc::S
         }
     }
     chronos::log("goal_verified: goal postconditions hold");
-    let _ = confirm_tx.send(envelope::make("action_log", envelope::ActionLogPayload {
-        text: "Goal accomplished — all steps completed.".to_string() })).await;
+    // ONE message: the status carries the human detail (the UI renders it + flips to idle). Sending it
+    // ALSO as an action_log duplicated "Goal accomplished" in the chat.
     let _ = confirm_tx.send(envelope::make("status", envelope::StatusPayload {
         state: "goal_done".to_string(), detail: "Goal accomplished — all steps completed.".to_string() })).await;
 }
