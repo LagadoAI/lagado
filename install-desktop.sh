@@ -37,7 +37,7 @@ Icon=lagado
 Terminal=false
 Categories=Utility;
 StartupNotify=true
-StartupWMClass=Lagado
+StartupWMClass=lagado-tauri
 EOF
 chmod +x "$DESKTOP"
 

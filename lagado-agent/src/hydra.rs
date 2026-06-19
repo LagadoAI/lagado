@@ -153,15 +153,27 @@ impl Hydra {
 
     /// Conversational inference (no tool loop)
     pub async fn chat_response(&self, message: &str, context: &str) -> String {
-        let system_prompt = config::system_prompt();
-        let prompt = format!(
-            "{system_prompt}\n\n{context}\n\nUser: {message}\nAssistant:"
-        );
+        // The intent router ALREADY decided this is CHAT — so give the model a CONVERSATION-ONLY
+        // prompt, NOT the dual-mode agent prompt (config::system_prompt teaches the [click(...)] tool
+        // format). The 8B can't hold the "decide your mode" line: handed the agent instructions it
+        // role-plays a fake tool transcript even for "how are you". Mode is the harness's job, not the
+        // model's — here the mode is chat, so the prompt is chat.
+        const CHAT_SYSTEM: &str = "You are Lagado, a sovereign local AI assistant running entirely on \
+            the user's own machine — private, offline-capable, no cloud. You are in a CONVERSATION: \
+            reply naturally in plain text. Do NOT emit tool calls, bracketed actions, ref ids, \
+            [click(...)], [type(...)], [key(...)], [done(...)], [focused: ...] or any action transcript \
+            — those belong to a separate agent mode the harness invokes only when the user asks you to \
+            DO something on screen. Just talk.";
+        let prompt = format!("{CHAT_SYSTEM}\n\n{context}\n\nUser: {message}\nAssistant:");
 
-        match self.adapter.generate(&prompt, 2048, 0.7) {
+        let raw = match self.adapter.generate(&prompt, 1024, 0.7) {
             Ok(response) => response,
-            Err(_) => "I'm having trouble responding right now.".to_string(),
-        }
+            Err(_) => return "I'm having trouble responding right now.".to_string(),
+        };
+        // Safety net: even with the chat prompt, a weak model can leak an agent transcript. Keep the
+        // conversational part up to the first hallucinated bracket-artifact line.
+        let cleaned = strip_agent_artifacts(&raw);
+        if cleaned.is_empty() { raw.trim().to_string() } else { cleaned }
     }
 
     /// Context budget in tokens based on capability tier
@@ -192,6 +204,23 @@ pub fn opens_with_action_verb(message: &str) -> bool {
     VERBS.iter().any(|v| {
         m.strip_prefix(v).is_some_and(|rest| rest.is_empty() || rest.starts_with(' '))
     })
+}
+
+/// Strip agent-transcript artifacts a weak model may hallucinate inside a CHAT reply (bracketed tool
+/// calls / observation lines like `[click(...)]`, `[focused: ...]`, `[done(...)]`). Keeps the reply up
+/// to the FIRST such line — the conversational part — and drops the role-played transcript after it.
+pub fn strip_agent_artifacts(text: &str) -> String {
+    const MARKERS: &[&str] = &["click(", "type(", "key(", "done(", "wait(", "focused:", "window:", "observation"];
+    let mut out = Vec::new();
+    for line in text.lines() {
+        let t = line.trim_start();
+        let lower = t.to_lowercase();
+        if t.starts_with('[') && MARKERS.iter().any(|m| lower.contains(m)) {
+            break; // first hallucinated transcript line → stop; the rest is agent role-play
+        }
+        out.push(line);
+    }
+    out.join("\n").trim().to_string()
 }
 
 /// True if the message opens with an explicit shell-command directive (a command-channel phrasing).
@@ -495,6 +524,22 @@ mod tests {
     fn parser_priority_interactive_over_reasoning() {
         // If a confused model emits both, INTERACTIVE wins (more impactful routing)
         assert_eq!(parse_intent_label("INTERACTIVE or REASONING"), Intent::Interactive);
+    }
+
+    #[test]
+    fn chat_reply_strips_hallucinated_agent_transcript() {
+        // The exact failure a user hit: "how are you" → greeting + a fake [click(...)] transcript.
+        let raw = "Hey! I'm functioning well, thank you. How can I assist you today?\n\
+                   [click(ref_11 menu \"Help\")]\n[click(ref_11 button \"OK\")]\n\
+                   [focused: Help window \"Welcome\"]\n[done(reason=\"Technology topic opened\")]";
+        assert_eq!(super::strip_agent_artifacts(raw),
+                   "Hey! I'm functioning well, thank you. How can I assist you today?");
+        // A clean conversational reply is untouched.
+        let clean = "I can help with files, the web, and your desktop. What do you need?";
+        assert_eq!(super::strip_agent_artifacts(clean), clean);
+        // Brackets that aren't tool artifacts (e.g. a markdown list / citation) are NOT stripped.
+        let listy = "Options:\n[1] first\n[2] second";
+        assert_eq!(super::strip_agent_artifacts(listy), listy);
     }
 
     #[test]
