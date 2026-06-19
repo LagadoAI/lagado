@@ -1223,64 +1223,13 @@ pub async fn agent_loop(
     // the ColBERT embedder when it's up AND the board has embedded rows; deterministic
     // recency floor (`assemble_context`) otherwise. The spine: a model-upgrade layer over a
     // floor that always works. embed() is blocking HTTP → run off the lock via spawn_blocking
-    // (mutex-guard discipline: no await is held under the guard).
-    // Reserved for the v2 upstream planner (the executor is memory-isolated, §2.5). Computed but
-    // not injected here. TODO(v1-cleanup): skip these computations until the planner consumes them.
-    let _episodic_context = {
-        let goal_for_embed = goal.clone();
-        let qvec = tokio::task::spawn_blocking(move || crate::embedding::embed(&goal_for_embed).ok())
-            .await
-            .ok()
-            .flatten();
-        let tiers = memory_tiers.lock().await;
-        match qvec {
-            Some(q) if !q.is_empty() => {
-                let slice = tiers.assemble_slice(&q, BOARD_TOP_K, &crate::board::ParkWeights::default());
-                if slice.is_empty() {
-                    chronos::log("board: empty slice — recency floor");
-                    tiers.assemble_context(2048)
-                } else {
-                    chronos::log(&format!("board: {} priors via Park slice", slice.len()));
-                    slice.iter().map(|e| format!("- {}", e.text)).collect::<Vec<_>>().join("\n")
-                }
-            }
-            _ => {
-                chronos::log("board: embedder down — recency floor");
-                tiers.assemble_context(2048)
-            }
-        }
-    };
-
-    // Visual similarity context: encode current frame → find top-3 most visually
-    // Visual similarity context: encode current frame → find top-3 past episodes with
-    // similar visual context. Runs once per invocation. No-op when encoder absent.
-    let _visual_context: String = {
-        match (&visual_encoder, std::fs::read(crate::config::FRAME_PATH)) {
-            (Some(enc), Ok(png)) => {
-                let enc2 = enc.clone();
-                let embd = tokio::task::spawn_blocking(move || enc2.encode_png(&png))
-                    .await
-                    .unwrap_or(None);
-                if let Some(embd) = embd {
-                    let tiers = memory_tiers.lock().await;
-                    let similar = tiers.find_similar_by_embedding(&embd, 3);
-                    drop(tiers);
-                    similar.join("\n- ")
-                } else {
-                    String::new()
-                }
-            }
-            _ => String::new(),
-        }
-    };
-
-    // Retrieve relevant skills as advisory depth context — top-3 by Jaccard on goal text.
-    // These are injected into the prompt as guidance, never executed verbatim.
-    let _skill_context: String = {
-        let skills = skill_library.retrieve(&goal, 3);
-        SkillLibrary::format_for_prompt(&skills)
-    };
-
+    // NOTE: the upstream-planner priors (episodic Board slice, visual-similarity context, skill
+    // context) were COMPUTED-AND-DISCARDED here every goal — a blocking embedder HTTP call, a VLM FFI
+    // encode + frame read, and a skill DB retrieve, each taking a MemoryTiers lock, all on the
+    // latency-to-first-action path, feeding nothing (the executor is memory-isolated, inv #10; nothing
+    // consumed them). Removed (optimization audit v1, Theme 3). When the v2 upstream planner lands it
+    // will compute these on its OWN path and consume them — re-add there, not here. The Board/skill
+    // infra remains live (assemble_slice / find_similar_by_embedding / skill_library.retrieve).
     chronos::log(&format!("goal_received: {goal}"));
     let _ = confirm_tx.send(envelope::make("status", envelope::StatusPayload {
         state: "goal_received".to_string(),

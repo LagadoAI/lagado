@@ -1,3 +1,13 @@
 [workspace]
 members = ["lagado-agent", "lagado-ui/src-tauri"]
 resolver = "2"
+
+# Release profile (must live at the workspace root to take effect). The shipped binary previously
+# built with cargo defaults (codegen-units=16, no LTO, no strip, full unwind tables). These cut
+# binary size (strip + abort drop unwind tables/symbols) and speed the hot glue/CV/inference paths.
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true
+panic = "abort"
