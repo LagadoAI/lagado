@@ -549,6 +549,11 @@ Steps:
 run the command touch /tmp/notes.txt
 
 Example:
+Goal: delete the file /tmp/old.log
+Steps:
+run the command rm /tmp/old.log
+
+Example:
 Goal: open the web browser
 Steps:
 Click the Applications menu
@@ -1093,6 +1098,10 @@ pub async fn agent_loop(
     // an action actually executed last turn (denied/blocked actions don't count).
     let mut prev_screen = String::new();
     let mut prev_action_executed = false;
+    // A deterministic Command/Type/Key step that ADVANCED the sequencer is PROGRESS even though it makes
+    // no SCREEN change (a command changes the filesystem, not the GUI). Without this the screen-change-
+    // based supervisor counts a successful command chain as a stall and false-escalates mid-sequence.
+    let mut prev_step_progressed = false;
 
     // Consecutive-identical-action cutoff state.
     // Invariant: last_exec_action / consecutive_exec_count are updated only when
@@ -1269,7 +1278,14 @@ pub async fn agent_loop(
         if had_prior_step {
             let screen_changed = !prev_screen.is_empty()
                 && blake3::hash(screen.as_bytes()) != blake3::hash(prev_screen.as_bytes());
-            let outcome = classify_step_outcome(prev_action_executed, screen_changed);
+            // A deterministic command/Type/Key advance is PROGRESS (verified by its own exit code /
+            // postcondition), even with no screen change — so it never reads as a supervisor stall.
+            let outcome = if prev_step_progressed {
+                crate::supervisor::StepOutcome::Progressed
+            } else {
+                classify_step_outcome(prev_action_executed, screen_changed)
+            };
+            prev_step_progressed = false;
             let step_hash = u64::from_le_bytes(
                 blake3::hash(screen.as_bytes()).as_bytes()[..8].try_into().unwrap()
             );
@@ -1420,6 +1436,7 @@ pub async fn agent_loop(
             prev_action_executed = false;
             prev_screen = perceptor.read_screen();
             if advanced {
+                prev_step_progressed = true; // a verified command advance = progress (no screen change)
                 subgoal_stuck = 0;
                 current_sub += 1;
                 if current_sub >= sub_goals.len() {
@@ -1474,6 +1491,7 @@ pub async fn agent_loop(
             };
             memory.push(Step { index: enforcer.step(), prompt: String::new(), output, action: Some(tool_call) });
             current_sub += 1;
+            prev_step_progressed = true; // a deterministic Type/Key advance = progress (no screen change)
             prev_action_executed = false; // deterministic advance below — don't double-count at loop top
             // Plain read: Type/Key fire-and-advance (no effect-confirmation needed), and typing often
             // leaves the a11y tree unchanged, so a change-from-baseline settle would just burn the ceiling.
