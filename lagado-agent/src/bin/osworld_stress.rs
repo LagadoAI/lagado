@@ -51,11 +51,28 @@ async fn main() {
         ("compress",  // depends on write-content having made the greeting
          "compress the file /tmp/osw_greeting.txt with gzip",
          "test -e /tmp/osw_greeting.txt.gz && echo OK"),
+
+        // ── BRUTAL tier: multi-tool / multi-app / data-flow / no-persistent-state ──
+        ("BRUTAL compute→write (pipe + redirect across tools)",
+         "count how many files are in /etc and save that number to /tmp/osw_count.txt",
+         "test -s /tmp/osw_count.txt && grep -qE '[0-9]' /tmp/osw_count.txt && echo OK"),
+        ("BRUTAL author+execute (write a working script, chmod, run it)",
+         "write a shell script at /tmp/osw_make.sh that creates the file /tmp/osw_out, make it executable, and run it",
+         "test -e /tmp/osw_out && echo OK"),
+        ("BRUTAL git workflow (init + add + commit; no persistent cwd)",
+         "create a git repository in /tmp/osw_repo2, add a file notes.txt to it, and make a commit",
+         "git -C /tmp/osw_repo2 log --oneline 2>/dev/null | grep -q . && echo OK"),
+        ("BRUTAL multi-app GUI (launch two applications)",
+         "open the file manager and the terminal emulator",
+         "pgrep -f thunar >/dev/null && pgrep -f xfce4-terminal >/dev/null && echo OK"),
     ];
 
-    // Clean slate.
+    // Clean slate (files + git identity so commits CAN succeed + close stray GUI apps).
     let _ = ssh("rm -rf /tmp/osw_proj /tmp/osw_a /tmp/osw_b /tmp/osw_c /tmp/osw_greeting.txt \
-                 /tmp/osw_greeting.txt.gz /tmp/osw_run.sh /tmp/osw_repo");
+                 /tmp/osw_greeting.txt.gz /tmp/osw_run.sh /tmp/osw_repo /tmp/osw_count.txt \
+                 /tmp/osw_make.sh /tmp/osw_out /tmp/osw_repo2; \
+                 git config --global user.email lagado@test.local; git config --global user.name Lagado; \
+                 DISPLAY=:0 sh -c 'pkill -9 thunar; pkill -9 xfce4-terminal' 2>/dev/null; true");
 
     let run_goal = |goal: String| {
         let cache = Arc::new(Mutex::new(PerceptionCache::new()));
