@@ -29,26 +29,28 @@ pub struct ReplayManifest {
 
 impl ReplayManifest {
     pub fn open(data_dir: &Path) -> Self {
-        Self { db_path: data_dir.join("replay_manifest.db") }
+        let db_path = data_dir.join("replay_manifest.db");
+        if let Some(p) = db_path.parent() {
+            let _ = std::fs::create_dir_all(p);
+        }
+        // Schema once, in the file (was re-run on every conn()).
+        if let Ok(conn) = rusqlite::Connection::open(&db_path) {
+            let _ = conn.execute_batch(
+                "CREATE TABLE IF NOT EXISTS replay_entries (
+                    id         TEXT PRIMARY KEY,
+                    prompt     TEXT NOT NULL,
+                    response   TEXT NOT NULL,
+                    verified   INTEGER NOT NULL DEFAULT 0,
+                    source     TEXT NOT NULL,
+                    created_at INTEGER NOT NULL
+                );"
+            );
+        }
+        Self { db_path }
     }
 
     fn conn(&self) -> Result<rusqlite::Connection, String> {
-        if let Some(p) = self.db_path.parent() {
-            let _ = std::fs::create_dir_all(p);
-        }
-        let conn = rusqlite::Connection::open(&self.db_path)
-            .map_err(|e| e.to_string())?;
-        conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS replay_entries (
-                id         TEXT PRIMARY KEY,
-                prompt     TEXT NOT NULL,
-                response   TEXT NOT NULL,
-                verified   INTEGER NOT NULL DEFAULT 0,
-                source     TEXT NOT NULL,
-                created_at INTEGER NOT NULL
-            );"
-        ).map_err(|e| e.to_string())?;
-        Ok(conn)
+        rusqlite::Connection::open(&self.db_path).map_err(|e| e.to_string())
     }
 
     /// Tag a prompt+response pair for potential training (v1 distill hook).

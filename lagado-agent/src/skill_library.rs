@@ -95,38 +95,41 @@ pub struct SkillLibrary {
 
 impl SkillLibrary {
     pub fn open(data_dir: &Path) -> Self {
-        Self { db_path: data_dir.join("skill_library.db") }
-    }
-
-    fn conn(&self) -> Result<rusqlite::Connection, String> {
-        if let Some(p) = self.db_path.parent() {
+        let db_path = data_dir.join("skill_library.db");
+        if let Some(p) = db_path.parent() {
             let _ = std::fs::create_dir_all(p);
         }
-        let conn = rusqlite::Connection::open(&self.db_path)
-            .map_err(|e| e.to_string())?;
+        // Schema + migrations run ONCE here (they live in the DB file, not the connection) — they
+        // used to re-run CREATE TABLE + 3 failing ALTERs on EVERY conn(), i.e. every retrieve on the
+        // planning path. WAL too, so reads don't block the distill writer.
+        if let Ok(conn) = rusqlite::Connection::open(&db_path) {
+            let _ = conn.pragma_update(None, "journal_mode", "WAL");
+            let _ = conn.execute_batch(
+                "CREATE TABLE IF NOT EXISTS skills (
+                    id            TEXT PRIMARY KEY,
+                    name          TEXT NOT NULL,
+                    description   TEXT NOT NULL,
+                    approach      TEXT NOT NULL DEFAULT '',
+                    steps_json    TEXT NOT NULL,
+                    success_count INTEGER NOT NULL DEFAULT 0,
+                    failure_count INTEGER NOT NULL DEFAULT 0,
+                    last_success  INTEGER NOT NULL DEFAULT 0,
+                    source        TEXT NOT NULL DEFAULT 'distilled'
+                );",
+            );
+            let _ = conn.execute_batch(
+                "ALTER TABLE skills ADD COLUMN approach      TEXT NOT NULL DEFAULT '';
+                 ALTER TABLE skills ADD COLUMN failure_count INTEGER NOT NULL DEFAULT 0;
+                 ALTER TABLE skills ADD COLUMN source        TEXT NOT NULL DEFAULT 'distilled';"
+            );
+        }
+        Self { db_path }
+    }
 
-        conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS skills (
-                id            TEXT PRIMARY KEY,
-                name          TEXT NOT NULL,
-                description   TEXT NOT NULL,
-                approach      TEXT NOT NULL DEFAULT '',
-                steps_json    TEXT NOT NULL,
-                success_count INTEGER NOT NULL DEFAULT 0,
-                failure_count INTEGER NOT NULL DEFAULT 0,
-                last_success  INTEGER NOT NULL DEFAULT 0,
-                source        TEXT NOT NULL DEFAULT 'distilled'
-            );",
-        ).map_err(|e| e.to_string())?;
-
-        // Non-destructive migrations — ignore errors if columns already exist
-        let _ = conn.execute_batch(
-            "ALTER TABLE skills ADD COLUMN approach      TEXT NOT NULL DEFAULT '';
-             ALTER TABLE skills ADD COLUMN failure_count INTEGER NOT NULL DEFAULT 0;
-             ALTER TABLE skills ADD COLUMN source        TEXT NOT NULL DEFAULT 'distilled';"
-        );
-
-        Ok(conn)
+    /// Open a connection. Schema/migrations already ran in `open()` (the table lives in the file), so
+    /// this is just the cheap file-open — no per-call DDL.
+    fn conn(&self) -> Result<rusqlite::Connection, String> {
+        rusqlite::Connection::open(&self.db_path).map_err(|e| e.to_string())
     }
 
     // ── Write ─────────────────────────────────────────────────────
