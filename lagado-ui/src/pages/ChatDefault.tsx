@@ -103,9 +103,16 @@ export default function ChatDefault() {
                 {msg.role === "assistant" ? (
                   <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
                     <img src="/lagado-mark.png" width={28} height={28} alt="Lagado" style={{ flexShrink: 0, filter: "drop-shadow(0 0 6px rgba(139,92,246,.35))" }} />
-                    <div className="lg-bubble lg-bubble--agent" style={{ paddingLeft: 20 }}>
-                      <p style={{ whiteSpace: "pre-wrap" }}>{msg.content}</p>
-                    </div>
+                    {msg.content.startsWith("$ ") ? (
+                      /* Command activity — render as a terminal block, distinct from chat */
+                      <pre style={{ flex: 1, margin: 0, padding: "8px 12px", background: "var(--surface)", border: "1px solid var(--line-700)", borderRadius: 8, fontFamily: "var(--font-mono)", fontSize: 12.5, lineHeight: 1.5, color: "var(--text-dim)", whiteSpace: "pre-wrap", overflowX: "auto" }}>
+                        {msg.content}
+                      </pre>
+                    ) : (
+                      <div className="lg-bubble lg-bubble--agent" style={{ paddingLeft: 20 }}>
+                        <p style={{ whiteSpace: "pre-wrap" }}>{msg.content}</p>
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div style={{ display: "flex", justifyContent: "flex-end" }}>
