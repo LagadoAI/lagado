@@ -96,6 +96,18 @@ impl MemoryTiers {
             [],
         );
 
+        // WAL mode: concurrent reads don't block the sleep-gate's writes (and vice-versa), and a
+        // crash/kill mid-write rolls back atomically — the shutdown path relies on this.
+        let _ = db.pragma_update(None, "journal_mode", "WAL");
+        // Index the tier column: every `WHERE tier=...` (warm count, entropy prune, similarity scan)
+        // was a full table scan — O(N) growing with the store. Now indexed. Partial index on the
+        // backfill predicate too (find rows still missing a text embedding without scanning all).
+        let _ = db.execute("CREATE INDEX IF NOT EXISTS idx_tier ON memory_entries(tier)", []);
+        let _ = db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_text_embed_null ON memory_entries(id) WHERE text_embedding IS NULL",
+            [],
+        );
+
         Ok(MemoryTiers {
             hot: Vec::new(),
             db,

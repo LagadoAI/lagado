@@ -99,12 +99,16 @@ impl Default for PerceptionCache {
 
 /// Parse `ref_N (x,y,w,h)` lines from perceive.py output into center coords.
 /// Signature and behavior are unchanged — production actuation depends on this.
+// Compiled ONCE, not on every screen read (perception runs every step). The bbox regex is shared by
+// coords + bboxes; labels use its own. Patterns are static and valid, so the LazyLock never panics.
+static RE_BBOX: std::sync::LazyLock<Regex> =
+    std::sync::LazyLock::new(|| Regex::new(r"(ref_\w+).*?\((\d+),(\d+),(\d+),(\d+)\)").unwrap());
+static RE_LABEL: std::sync::LazyLock<Regex> =
+    std::sync::LazyLock::new(|| Regex::new(r#"(ref_\w+).*?"([^"]*)""#).unwrap());
+
 pub fn parse_ref_coords(screen: &str) -> HashMap<String, (i32, i32)> {
     let mut map = HashMap::new();
-    let re = match Regex::new(r"(ref_\w+).*?\((\d+),(\d+),(\d+),(\d+)\)") {
-        Ok(r) => r,
-        Err(_) => return map,
-    };
+    let re = &*RE_BBOX;
     for line in screen.lines() {
         if let Some(caps) = re.captures(line) {
             let ref_id = caps[1].to_string();
@@ -123,10 +127,7 @@ pub fn parse_ref_coords(screen: &str) -> HashMap<String, (i32, i32)> {
 /// use `parse_ref_coords` and are unaffected by this function.
 pub fn parse_ref_bboxes(screen: &str) -> HashMap<String, (i32, i32, i32, i32)> {
     let mut map = HashMap::new();
-    let re = match Regex::new(r"(ref_\w+).*?\((\d+),(\d+),(\d+),(\d+)\)") {
-        Ok(r) => r,
-        Err(_) => return map,
-    };
+    let re = &*RE_BBOX;
     for line in screen.lines() {
         if let Some(caps) = re.captures(line) {
             let ref_id = caps[1].to_string();
@@ -146,10 +147,7 @@ pub fn parse_ref_bboxes(screen: &str) -> HashMap<String, (i32, i32, i32, i32)> {
 /// `ref_id` + bbox but not the label text).
 pub fn parse_ref_labels(screen: &str) -> HashMap<String, String> {
     let mut map = HashMap::new();
-    let re = match Regex::new(r#"(ref_\w+).*?"([^"]*)""#) {
-        Ok(r) => r,
-        Err(_) => return map,
-    };
+    let re = &*RE_LABEL;
     for line in screen.lines() {
         if let Some(caps) = re.captures(line) {
             map.insert(caps[1].to_string(), caps[2].to_string());

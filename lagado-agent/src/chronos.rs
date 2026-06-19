@@ -1,8 +1,23 @@
-use std::fs::OpenOptions;
+use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::path::PathBuf;
+use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 use rusqlite::{params, Connection};
+
+/// One persistent append handle, opened once. The previous `log()` opened+created_dir+wrote+closed
+/// the file on EVERY event — a syscall storm on a hot path (the agent loop + sleep-gate log often).
+static LOG_FILE: OnceLock<Option<Mutex<File>>> = OnceLock::new();
+
+fn log_handle() -> &'static Option<Mutex<File>> {
+    LOG_FILE.get_or_init(|| {
+        let p = path();
+        if let Some(parent) = p.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        OpenOptions::new().create(true).append(true).open(&p).ok().map(Mutex::new)
+    })
+}
 
 pub fn log(event: &str) {
     let ts = SystemTime::now()
@@ -13,12 +28,10 @@ pub fn log(event: &str) {
     // preview, would otherwise emit continuation lines with no timestamp and break the format).
     let event = event.replace(['\n', '\r'], " | ");
     let line = format!("{ts}\t{event}\n");
-    let p = path();
-    if let Some(parent) = p.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(&p) {
-        let _ = f.write_all(line.as_bytes());
+    if let Some(lock) = log_handle() {
+        if let Ok(mut f) = lock.lock() {
+            let _ = f.write_all(line.as_bytes());
+        }
     }
 }
 
