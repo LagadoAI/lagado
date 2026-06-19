@@ -13,12 +13,14 @@ export PATH="$HOME/.cargo/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
 
 export WEBKIT_DISABLE_DMABUF_RENDERER=1
 
-# Render the UI on the Intel iGPU (TigerLake), NOT the NVIDIA dGPU — the WebKitGTK webview was
-# grabbing a GL/EGL context on the 3060 (~1GB VRAM), starving the inference engine on a 6GB card.
-# Pin GLX/EGL to Mesa and disable PRIME offload so the whole dGPU stays free for llama.cpp/CUDA.
+# Keep the UI OFF the NVIDIA dGPU so the whole 6GB card is free for the 8B brain (the design: brain on
+# GPU, everything else off it). The WebKitGTK webview was grabbing a ~1GB GL context on the 3060.
+# Pinning GLX/EGL to Mesa FAILED here ("failed to create dri2 screen"), so disable WebKit's accelerated
+# compositing entirely — it then renders without a GPU context (a little more CPU, but frees ~1GB VRAM,
+# the right trade on a card this size). Belt-and-suspenders: also nudge GLX/PRIME toward the iGPU.
+export WEBKIT_DISABLE_COMPOSITING_MODE=1
 export __NV_PRIME_RENDER_OFFLOAD=0
 export __GLX_VENDOR_LIBRARY_NAME=mesa
-export __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/50_mesa.json
 
 export LAGADO_DATA_DIR="$HOME/.laputa-secure"
 export LAGADO_LLAMA_SERVER="$LLAMA_BUILD/llama-server"

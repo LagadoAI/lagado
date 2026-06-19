@@ -311,13 +311,23 @@ pub fn plan_engine(
     let free = gpu.vram_free_mb as f32;
     let weights_mb = model.file_bytes as f32 / (1024.0 * 1024.0);
 
-    // Layers: honor an override, else all REAL layers (not -ngl 99). 0 block_count
-    // (metadata missing) → fall back to the "all" sentinel so llama.cpp offloads all.
-    let ngl = prefs
-        .n_gpu_layers
-        .unwrap_or(if block_count > 0 { block_count } else { 999 })
-        .min(if block_count > 0 { block_count } else { 999 });
-    let cpu_moe = prefs.cpu_moe.unwrap_or(false);
+    // FIT-AWARE config (production fix): blindly offloading ALL layers OOM-crashed the server on any
+    // card too small for the model (cudaMalloc fail → "failed to load model" → no brain). Pick the
+    // best config that actually FITS the detected free VRAM, never one that crashes:
+    //   • weights fit (≤ free with ~10% headroom for KV+buffers) → full GPU offload (fastest).
+    //   • tight + MoE → --cpu-moe: experts stay on CPU (only ~active-params on GPU), fits ANY GPU,
+    //     medium speed — far better than CPU, never OOMs.
+    //   • tight + dense → CPU floor (slow but ALWAYS works; a working brain beats a crashed one).
+    // A user override (LAGADO_NGL / LAGADO_CPU_MOE) always wins. Calibration (below) refines ctx.
+    let all_layers = if block_count > 0 { block_count } else { 999 };
+    let weights_mb = model.file_bytes as f32 / (1024.0 * 1024.0);
+    let fits_full = weights_mb * 1.1 <= free;
+    let (ngl, cpu_moe) = match prefs.n_gpu_layers {
+        Some(n) => (n.min(all_layers), prefs.cpu_moe.unwrap_or(false)), // explicit user pin wins
+        None if fits_full => (all_layers, prefs.cpu_moe.unwrap_or(false)), // full GPU — it fits
+        None if model.is_moe() => (all_layers, true), // tight MoE → experts on CPU, fits any card
+        None => (0, false), // tight dense → CPU floor, never crashes
+    };
 
     // Context: honor an override (capped at the real model max), else recommend.
     let calibrated = predict_vram_mb(model.file_bytes, block_count.max(1), ngl, model_max_ctx, cal).is_some();
