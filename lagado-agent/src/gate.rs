@@ -111,6 +111,21 @@ pub fn evaluate_action(call: &ToolCall, registry: &ToolRegistry) -> Verdict {
     }
 }
 
+/// PLAN-LEVEL APPROVAL (Option 2). Once the user has approved the WHOLE decomposed plan up front, the
+/// individual WRITE steps inside it auto-run (no per-step tap) — but DESTRUCTIVE steps STILL hard-stop
+/// with typed-confirm, because sensitive ops are always gated regardless of plan approval (the vision's
+/// "sensitive ops ALWAYS gated"). `Read`→Allow and `Block` are untouched. No-op when `plan_approved` is
+/// false (per-step gating, the current floor). Pure.
+pub fn apply_plan_approval(verdict: Verdict, plan_approved: bool) -> Verdict {
+    if !plan_approved {
+        return verdict;
+    }
+    match verdict {
+        Verdict::ConfirmTap => Verdict::Allow,  // a write the user already approved as part of the plan
+        other => other,                          // ConfirmTyped (destructive) stays; Allow/Block unchanged
+    }
+}
+
 pub fn describe(call: &ToolCall) -> String {
     match call {
         ToolCall::Click { selector } => format!("click(selector=\"{}\")", selector),
@@ -276,5 +291,18 @@ mod tests {
         let reg = ToolRegistry::load();
         // Destructive override fires regardless of trust level.
         assert_eq!(evaluate_action(&vm_cmd("rm -rf /"), &reg), Verdict::ConfirmTyped);
+    }
+
+    #[test]
+    fn plan_approval_downgrades_writes_but_not_destructive() {
+        // Not approved → unchanged (per-step floor).
+        assert_eq!(apply_plan_approval(Verdict::ConfirmTap, false), Verdict::ConfirmTap);
+        // Approved → writes auto-run...
+        assert_eq!(apply_plan_approval(Verdict::ConfirmTap, true), Verdict::Allow);
+        // ...but destructive STILL hard-stops (sensitive ops always gated).
+        assert_eq!(apply_plan_approval(Verdict::ConfirmTyped, true), Verdict::ConfirmTyped);
+        // Allow / Block untouched.
+        assert_eq!(apply_plan_approval(Verdict::Allow, true), Verdict::Allow);
+        assert!(matches!(apply_plan_approval(Verdict::Block("x".into()), true), Verdict::Block(_)));
     }
 }

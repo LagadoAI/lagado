@@ -187,6 +187,58 @@ async fn request_and_await_approval(
     }
 }
 
+/// PLAN-LEVEL APPROVAL (Option 2). A plan needs the single up-front approval if it contains any step
+/// that would otherwise confirm — i.e. anything that is NOT a read-only command (a write/destructive
+/// command, or any Type/Key/Click). An all-read-only plan auto-runs with no preview.
+fn plan_requires_approval(sub_goals: &[SubGoal]) -> bool {
+    sub_goals.iter().any(|sg| match &sg.action {
+        SubAction::Command(cmd) => !crate::gate::is_read_only_command(cmd),
+        SubAction::Type(_) | SubAction::Key(_) | SubAction::Click => true,
+    })
+}
+
+/// Render the whole decomposed plan for the one-time preview. Destructive command steps are flagged —
+/// they STILL hard-stop individually even after the plan is approved.
+fn render_plan_preview(sub_goals: &[SubGoal]) -> String {
+    let mut lines = vec!["Here's my plan — approve to run it:".to_string()];
+    for (i, sg) in sub_goals.iter().enumerate() {
+        let danger = matches!(&sg.action, SubAction::Command(c) if crate::gate::is_destructive_text(c));
+        let mark = if danger { "   ⚠ destructive — I'll still ask before this step" } else { "" };
+        lines.push(format!("{}. {}{}", i + 1, sg.text, mark));
+    }
+    lines.join("\n")
+}
+
+/// Request ONE approval for the whole plan. Mirrors `request_and_await_approval` but the frozen
+/// permission envelope carries the plan (as `action`) instead of a single tool call.
+async fn request_plan_approval(
+    preview: &str,
+    state: &Arc<Mutex<AgentState>>,
+    approval_rx: &mut mpsc::Receiver<bool>,
+    confirm_tx: &mpsc::Sender<String>,
+) -> bool {
+    let id = uuid::Uuid::new_v4().to_string();
+    chronos::log("plan_approval_requested");
+    let _ = confirm_tx
+        .send(envelope::make(
+            "permission",
+            envelope::PermissionPayload {
+                id: id.clone(),
+                type_: "tap".to_string(),
+                tool: "plan".to_string(),
+                action: preview.to_string(),
+                reason: "Approve this plan before I run it".to_string(),
+                origin_surface: "immersive".to_string(),
+                origin_agent: "main".to_string(),
+            },
+        ))
+        .await;
+    {
+        state.lock().await.pending_id = Some(id);
+    }
+    approval_rx.recv().await.unwrap_or(false)
+}
+
 // ── Observation helpers ───────────────────────────────────────────
 
 /// Returns Some(observation text) when an executed action's screen effect should be
@@ -793,6 +845,28 @@ pub async fn agent_loop(
         chronos::log(&format!("sequencer: {} sub-goals: {:?}", sub_goals.len(), sub_goals));
     }
 
+    // PLAN-LEVEL APPROVAL (Option 2 — the for-now floor; will evolve into the tiered earned-autonomy
+    // model). If the plan has any step that would otherwise confirm, preview the WHOLE plan and get ONE
+    // approval up front (vs a per-step tap-fest that defeats "faster than typing"). Approved → write
+    // steps auto-run; destructive steps STILL hard-stop individually. Declined → run nothing.
+    let plan_approved = if plan_requires_approval(&sub_goals) {
+        let preview = render_plan_preview(&sub_goals);
+        chronos::log(&format!("plan_preview:\n{preview}"));
+        let _ = confirm_tx.send(envelope::make("action_log",
+            envelope::ActionLogPayload { text: preview.clone() })).await;
+        if !request_plan_approval(&preview, &state, &mut approval_rx, &confirm_tx).await {
+            chronos::log("plan_denied");
+            let _ = confirm_tx.send(envelope::make("status", envelope::StatusPayload {
+                state: "goal_done".to_string(),
+                detail: "Plan declined — nothing was run.".to_string(),
+            })).await;
+            return;
+        }
+        true
+    } else {
+        false
+    };
+
     // Priors slice — the Board. Park-scored top-k (relevance × recency × importance) from
     // the ColBERT embedder when it's up AND the board has embedded rows; deterministic
     // recency floor (`assemble_context`) otherwise. The spine: a model-upgrade layer over a
@@ -983,7 +1057,7 @@ pub async fn agent_loop(
             let mut args = serde_json::Map::new();
             args.insert("command".to_string(), serde_json::Value::String(cmd.clone()));
             let tool_call = ToolCall::Invoke { name: "vm_command".to_string(), args };
-            let output = match gate::confidence_escalate(gate::evaluate_action(&tool_call, &registry), 1.0) {
+            let output = match gate::apply_plan_approval(gate::confidence_escalate(gate::evaluate_action(&tool_call, &registry), 1.0), plan_approved) {
                 gate::Verdict::Allow => {
                     let out = execute_tool(&tool_call, actuator.as_ref(), perceptor.as_ref(), &memory_tiers).await;
                     chronos::log(&format!("action(command): $ {cmd} -> {out}"));
@@ -1047,7 +1121,7 @@ pub async fn agent_loop(
                 SubAction::Command(_) => unreachable!(), // handled above
             };
             // confidence = 1.0: the harness chose this deterministically, not the model.
-            let output = match gate::confidence_escalate(gate::evaluate_action(&tool_call, &registry), 1.0) {
+            let output = match gate::apply_plan_approval(gate::confidence_escalate(gate::evaluate_action(&tool_call, &registry), 1.0), plan_approved) {
                 gate::Verdict::Allow => {
                     let desc = gate::describe_redacted(&tool_call);
                     let out = execute_tool(&tool_call, actuator.as_ref(), perceptor.as_ref(), &memory_tiers).await;
@@ -1355,7 +1429,7 @@ pub async fn agent_loop(
 
                 // state mutex is NOT held from here through approval_rx.recv()
                 let base_verdict = gate::evaluate_action(&tool_call, &registry);
-                let output = match gate::confidence_escalate(base_verdict, confidence) {
+                let output = match gate::apply_plan_approval(gate::confidence_escalate(base_verdict, confidence), plan_approved) {
                     gate::Verdict::Allow => {
                         let desc = gate::describe_redacted(&tool_call);
                         let out = execute_tool(&tool_call, actuator.as_ref(), perceptor.as_ref(), &memory_tiers).await;
