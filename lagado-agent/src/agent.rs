@@ -688,6 +688,54 @@ pub fn reform_is_conservative(original: &str, candidate: &str) -> bool {
     !OPS.iter().any(|op| candidate.contains(op) && !original.contains(op))
 }
 
+// ── Deterministic-first reform for CommandNotFound (the spine floor under the weak LLM reform) ────────
+// Curated EQUIVALENCE classes: interchangeable programs / known platform renames. If the requested
+// member isn't installed, the first INSTALLED member of its class is the fix — reliable, unlike the
+// 1B-active model that can't repair even a typo. This is deliberately NOT typo-correction (ambiguous:
+// `tuch` is one edit from touch/much/such) — only intent-equivalent programs.
+const EQUIVALENCE_CLASSES: &[&[&str]] = &[
+    &["python", "python3", "python2"],
+    &["pip", "pip3"],
+    &["node", "nodejs"],
+    &["fd", "fdfind"],
+    &["bat", "batcat"],
+    &["md5", "md5sum"],
+    &["shasum", "sha256sum", "sha1sum"],
+    &["open", "xdg-open"],
+    &["gnome-terminal", "xfce4-terminal", "konsole", "xterm", "alacritty", "kitty"],
+    &["firefox", "firefox-esr", "chromium", "chromium-browser", "google-chrome", "google-chrome-stable"],
+    &["nvim", "vim", "vi"],
+];
+
+/// Equivalence-class alternatives for a program name (class order, excluding the name itself). PURE.
+pub fn equivalence_alternatives(bin: &str) -> Vec<&'static str> {
+    EQUIVALENCE_CLASSES.iter()
+        .find(|c| c.contains(&bin))
+        .map(|c| c.iter().copied().filter(|&m| m != bin).collect())
+        .unwrap_or_default()
+}
+
+/// Deterministic-first reform for CommandNotFound: if the failed program is in an equivalence class,
+/// substitute the first alternative ACTUALLY INSTALLED on the target (verified via `command -v`).
+/// Returns None when there's no class / no installed alternative → the caller falls to the LLM reform.
+/// The result is a pure program SWAP (same args) → inherently conservative (skips the LLM guard).
+fn deterministic_reform(failed_cmd: &str, failure: CommandFailure, actuator: &dyn Actuator) -> Option<String> {
+    if failure != CommandFailure::CommandNotFound {
+        return None;
+    }
+    let mut it = failed_cmd.trim().splitn(2, char::is_whitespace);
+    let bin = it.next()?;
+    let rest = it.next().unwrap_or("").trim();
+    for alt in equivalence_alternatives(bin) {
+        // Is `alt` actually installed on the target? `command -v` exits 0 iff found.
+        if parse_exit_code(&actuator.run_command(&format!("command -v {alt}"))) == Some(0) {
+            chronos::log(&format!("deterministic_reform: {bin} → {alt} (installed)"));
+            return Some(if rest.is_empty() { alt.to_string() } else { format!("{alt} {rest}") });
+        }
+    }
+    None
+}
+
 /// The focused-window label from a perception dump line `[focused: X]`, or "" if absent.
 fn screen_focus(screen: &str) -> String {
     for line in screen.lines() {
@@ -1212,12 +1260,16 @@ pub async fn agent_loop(
                     }
                 };
                 memory.push(Step { index: enforcer.step(), prompt: String::new(), output: output.clone(), action: None });
-                // Only spend an LLM reform call when the failure is reformable AND budget remains.
+                // Reform only when the failure is reformable AND budget remains. DETERMINISTIC-FIRST
+                // (the spine): an equivalence-class program swap, command-v-verified — reliable; the weak
+                // LLM reform is only the fallback for what determinism can't fix.
+                let failure = diagnose_command(&output);
                 let candidate = if parse_exit_code(&output) != Some(0)
-                    && should_reform(diagnose_command(&output))
+                    && should_reform(failure)
                     && tried.len() <= REFORM_LIMIT
                 {
-                    reform_command(&subgoal_text, &cmd, &output, &adapter)
+                    deterministic_reform(&cmd, failure, actuator.as_ref())
+                        .or_else(|| reform_command(&subgoal_text, &cmd, &output, &adapter))
                 } else {
                     None
                 };
@@ -2286,6 +2338,15 @@ mod distill_tests {
         assert!(!reform_is_conservative("cat x", "cat x; exec bash -c 'cat x'"));
         assert!(!reform_is_conservative("echo hi", "echo hi > /tmp/f"));
         assert!(!reform_is_conservative("ls", "ls $(rm -rf /tmp/z)"));
+    }
+
+    #[test]
+    fn equivalence_classes_resolve() {
+        assert!(equivalence_alternatives("python").contains(&"python3"));
+        assert!(equivalence_alternatives("gnome-terminal").contains(&"xfce4-terminal"));
+        assert_eq!(equivalence_alternatives("md5"), vec!["md5sum"]);
+        assert!(equivalence_alternatives("python3").contains(&"python")); // symmetric within the class
+        assert!(equivalence_alternatives("definitely_not_a_program").is_empty()); // no class → LLM fallback
     }
 
     #[test]

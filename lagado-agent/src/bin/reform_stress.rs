@@ -73,4 +73,15 @@ async fn main() {
     let secs = t.elapsed().as_secs_f32();
     println!("   terminated in {secs:.1}s (bound = reform≤2 + 90s backstop)");
     println!("   {}", if secs < 88.0 { "✅ bounded — reapproach did not hang" } else { "❌ hit the backstop — investigate" });
+
+    // ── Case C: DETERMINISTIC equivalence reform — 'python' (absent) must be swapped to 'python3'
+    // (installed) and the command succeed. WORLD-STATE verified: python3 writes a file the typo'd
+    // 'python' could never create. This is the recovery the weak LLM reform could NOT do. ──
+    println!("\n══════ Case C (deterministic equivalence): 'python' → 'python3' creating a file");
+    let _ = ssh("rm -f /tmp/lagado_py_c");
+    run_goal("run the command python -c \"open('/tmp/lagado_py_c','w').close()\"".to_string()).await;
+    let c = ssh("test -f /tmp/lagado_py_c && echo CREATED || echo MISSING");
+    println!("   WORLD-STATE: /tmp/lagado_py_c -> {c}");
+    println!("   {}", if c.contains("CREATED") { "✅ DETERMINISTIC reform recovered (python→python3, world-state verified)" }
+                       else { "❌ deterministic reform did not recover" });
 }
