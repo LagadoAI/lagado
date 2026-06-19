@@ -1244,6 +1244,12 @@ pub async fn agent_loop(
     // sense). 0 = a11y-only (the floor). ≥1 turns on the CV pass below — the seam where Phase-2
     // captioning plugs in. Stays 0 in production until the governor's ladder has a Sense rung.
     let mut sense_level: u8 = 0;
+    // True for one iteration after a fail-closed re-perceive (a11y had no target → looked again, did
+    // NOT act). Such an iteration is NOT a failed/stalled STEP, so it must be kept OUT of the
+    // supervisor's Failed/oscillation counters — otherwise the stall path (loop_threshold=2) escalates
+    // to Human at ~2 re-perceptions and pre-empts PerceptionBlind (which fires at SUBGOAL_STUCK_LIMIT=4),
+    // making the a11y-blindness escalation unreachable. Lets subgoal_stuck climb to the limit.
+    let mut blind_reperceive = false;
     if sub_goals.len() > 1 {
         chronos::log(&format!("sequencer: {} sub-goals: {:?}", sub_goals.len(), sub_goals));
     }
@@ -1323,7 +1329,10 @@ pub async fn agent_loop(
         // Supervisor observes the PRIOR step now that its on-screen effect is readable.
         // (An action's effect at step N isn't visible until this fresh `screen` at N+1.)
         // Acts only on terminal directives; everything else defers to the inner machinery.
-        if had_prior_step {
+        // A fail-closed re-perceive (a11y found no target → looked again, didn't act) is NOT a step
+        // outcome — skip it so it can't feed the supervisor a phantom Failed/oscillation and pre-empt
+        // the PerceptionBlind escalation (see `blind_reperceive`).
+        if had_prior_step && !blind_reperceive {
             let screen_changed = !prev_screen.is_empty()
                 && blake3::hash(screen.as_bytes()) != blake3::hash(prev_screen.as_bytes());
             // A deterministic command/Type/Key advance is PROGRESS (verified by its own exit code /
@@ -1407,6 +1416,7 @@ pub async fn agent_loop(
             }
         }
         had_prior_step = true;
+        blind_reperceive = false; // consumed for this iteration; re-armed only by a fail-closed re-perceive
 
         // ── Command channel: deterministic CLI sub-goal with EXIT-CODE verification ───────────
         // Routes a planned shell-command step through the gated command channel (run + read
@@ -1682,6 +1692,7 @@ pub async fn agent_loop(
             });
             prev_screen = screen.clone();
             prev_action_executed = false;
+            blind_reperceive = true; // keep this no-act re-perceive out of the supervisor's counters
             continue;
         }
         subgoal_stuck = 0; // a candidate matches this sub-goal → not stuck
