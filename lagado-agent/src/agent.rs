@@ -2096,6 +2096,31 @@ fn parse_skill_json(text: &str, fallback_goal: &str) -> Option<Skill> {
 mod observation_tests {
     use super::*;
 
+    // ── ACCEPTANCE GATES (pending hardware verification) ────────────────────────────────────────
+    // The smoothness claim is NOT "met" until these pass on real hardware. They are #[ignore]'d so
+    // they show as "ignored" in EVERY `cargo test` run (a permanent, un-forgettable pending marker)
+    // and FAIL if run before someone verifies them on the VM — converting a recorded caveat into a
+    // gate the system won't let silently re-inflate to "smooth". Run on hardware:
+    //   cargo test --lib -- --ignored acceptance_gate
+    // and replace the panic with the real scenario assertion once it passes.
+
+    #[test]
+    #[ignore = "ACCEPTANCE GATE — verify on hardware, then implement the assertion"]
+    fn acceptance_gate_slow_action_30s() {
+        // GATE: an injected ~30s slow action (e.g. a deliberately laggy app launch) must NOT trip a
+        // premature settle/re-action — observe_until_quiet must wait it out, the step completes once,
+        // and the runtime stays responsive throughout (spawn_blocking, not a frozen worker).
+        panic!("UNVERIFIED on hardware: inject a 30s action, assert single completion + responsive runtime");
+    }
+
+    #[test]
+    #[ignore = "ACCEPTANCE GATE — verify on hardware, then implement the assertion"]
+    fn acceptance_gate_hung_app_escalation() {
+        // GATE: a genuinely hung app (a11y-stable AND pixel-quiet, never completing) must escalate via
+        // the chain settle→no-confirm→should_cutoff→human within bounds — NOT loop, NOT hang the loop.
+        panic!("UNVERIFIED on hardware: launch a hung app, assert bounded escalation to human handback");
+    }
+
     #[test]
     fn strip_list_marker_handles_common_bullets() {
         assert_eq!(strip_list_marker("1. Open the Applications menu"), "Open the Applications menu");

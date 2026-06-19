@@ -395,6 +395,14 @@ impl MemoryTiers {
             .map(|(e, cos)| crate::board::ParkSignals {
                 recency: crate::board::recency_factor(now - e.accessed_at, BOARD_RECENCY_HALF_LIFE_SECS),
                 relevance: *cos,
+                // NOTE (plaintext-minimization consequence): importance_heuristic's `substance` term
+                // reads e.text.len(). Here cold entries' text is still CIPHERTEXT (decryption is
+                // deferred to the survivors), so substance for cold is computed on the ciphertext
+                // length — a monotonic length PROXY, not plaintext bytes (the security property holds:
+                // no plaintext is materialized in this pass). It does mean cold importance differs
+                // slightly from a plaintext-length basis. Dead-path today; revisit when the v2 planner
+                // makes assemble_slice live (e.g. store a plaintext-length column, or neutral substance
+                // for cold) so ranking isn't silently length-distorted.
                 importance: crate::board::importance_heuristic(e),
             })
             .collect();
@@ -740,6 +748,35 @@ mod tests {
             assert!(ctx.contains("open browser") || ctx.contains("opened Firefox"),
                 "episode not found in context after reopen: {ctx:?}");
         }
+
+        let _ = fs::remove_file(&db_file);
+    }
+
+    #[test]
+    fn scoring_pass_holds_no_cold_plaintext() {
+        // PIN THE SECURITY PROPERTY (not the shape): the scoring pass must NOT materialize any cold
+        // plaintext for non-survivors — only the top-k survivors returned to the caller are decrypted.
+        // Asserting "decrypt called k times" would miss a cheaper full-set plaintext touch; this asserts
+        // the actual property — the secret never appears in the scoring-pass output, only in the slice.
+        let db_file = std::env::temp_dir().join(format!("test_plaintext_min_{}.db", std::process::id()));
+        let _ = fs::remove_file(&db_file);
+        let mut mem = MemoryTiers::open(&db_file).expect("open failed");
+
+        let secret = "TOP_SECRET_VAULT_CONTENT";
+        let id = mem.push_episode_id(secret.to_string()).expect("push failed"); // cold, encrypted
+        mem.store_text_embedding(&id, &[1.0, 0.0, 0.0]).expect("embed store failed");
+        let query = [1.0_f32, 0.0, 0.0];
+
+        // The SCORING pass over ALL candidates must never hold the plaintext.
+        let scored = mem.scored_candidates(&query);
+        assert!(!scored.is_empty(), "candidate not picked up");
+        assert!(scored.iter().all(|(e, _)| !e.text.contains(secret)),
+            "scoring pass DECRYPTED cold plaintext for a non-survivor — plaintext-minimization violated");
+
+        // The SURVIVOR returned to the caller IS decrypted (the slice is usable).
+        let slice = mem.assemble_slice(&query, 5, &crate::board::ParkWeights::default());
+        assert!(slice.iter().any(|e| e.text.contains(secret)),
+            "survivor was not decrypted — the slice would be unusable");
 
         let _ = fs::remove_file(&db_file);
     }
