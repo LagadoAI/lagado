@@ -1,9 +1,14 @@
 #!/usr/bin/env bash
-# Lagado AI — dev launcher
+# Lagado AI — dev launcher (also the target of the desktop/app-icon entry; see install-desktop.sh)
 set -e
 
 REPO="$(cd "$(dirname "$0")" && pwd)"
 LLAMA_BUILD="$REPO/lagado-agent/vendored/llama.cpp-2/build/bin"
+
+# When launched from a GUI app icon (not a shell), PATH is minimal — pull cargo/node onto PATH.
+[ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"
+case ":$PATH:" in *":/usr/local/bin:"*) ;; *) PATH="/usr/local/bin:$PATH" ;; esac
+export PATH
 
 export WEBKIT_DISABLE_DMABUF_RENDERER=1
 
