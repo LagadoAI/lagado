@@ -64,8 +64,20 @@ pub fn detect_and_plan(default_ctx: usize, model_bytes: u64) -> ServerConfig {
 
     match gpu {
         Some(ref info) => {
-            let (n_gpu_layers, moe_experts_on_cpu) =
-                compute_offload(info.vram_free_mb, model_bytes);
+            // DEFER-TO-USER override (invariant #9): the conservative auto-policy (require 1.1× VRAM
+            // headroom, all-or-nothing) is safe but leaves performance on the table at the margin
+            // (e.g. a 4.7GB model on a 6GB card once the UI is off the dGPU). LAGADO_NGL lets the user
+            // / launcher pin the offload they know fits; LAGADO_CTX trims KV to make room. The auto
+            // policy stays the default when unset.
+            let (n_gpu_layers, moe_experts_on_cpu) = match std::env::var("LAGADO_NGL").ok().and_then(|v| v.parse::<u32>().ok()) {
+                Some(n) => {
+                    tracing::info!("LAGADO_NGL override: {n} GPU layers (user-pinned)");
+                    (n, std::env::var("LAGADO_CPU_MOE").is_ok())
+                }
+                None => compute_offload(info.vram_free_mb, model_bytes),
+            };
+            let default_ctx = std::env::var("LAGADO_CTX").ok()
+                .and_then(|v| v.parse::<usize>().ok()).unwrap_or(default_ctx);
 
             if n_gpu_layers > 0 {
                 tracing::info!(
