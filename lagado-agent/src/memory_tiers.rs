@@ -305,7 +305,6 @@ impl MemoryTiers {
             Ok(s) => s,
             Err(_) => return Vec::new(),
         };
-        let passphrase = crate::auth::active_key();
         let rows: Vec<(String, String, String, f32, i64, i64, u32, Vec<u8>)> = stmt
             .query_map([], |r| {
                 Ok((
@@ -331,27 +330,36 @@ impl MemoryTiers {
                 }
                 let tier = Tier::from_str(&tier_s)?;
                 let cos = crate::vision::cosine_similarity(query, &stored);
-                let text = if tier == Tier::Cold {
-                    if let Ok(bytes) = hex::decode(&raw_text) {
-                        crate::security::crypto::decrypt(&bytes, &passphrase)
-                            .ok()
-                            .and_then(|b| String::from_utf8(b).ok())
-                            .unwrap_or(raw_text)
-                    } else {
-                        raw_text
-                    }
-                } else {
-                    raw_text
-                };
+                // PLAINTEXT MINIMIZATION: do NOT decrypt cold text here. Scoring uses only the
+                // embedding (cosine) — the text isn't needed to rank. Decrypting every cold candidate
+                // before truncation materialized the whole vault in plaintext per call; decryption is
+                // now deferred to `decrypt_entry`, applied ONLY to the top-k survivors in the callers.
                 Some((
                     MemoryEntry {
-                        id, text, tier, temperature: temp,
+                        id, text: raw_text, tier, temperature: temp,
                         created_at: created, accessed_at: accessed, access_count: count,
                     },
                     cos,
                 ))
             })
             .collect()
+    }
+
+    /// Decrypt a cold entry's text IN PLACE (cold text is stored as encrypted hex; hot/warm are
+    /// plaintext → no-op). Applied to the top-k survivors AFTER truncation, so a scoring pass never
+    /// materializes the whole cold vault in plaintext. Decrypt failure leaves the (encrypted) text,
+    /// matching the prior fallback.
+    fn decrypt_entry(&self, mut e: MemoryEntry) -> MemoryEntry {
+        if e.tier == Tier::Cold {
+            if let Ok(bytes) = hex::decode(&e.text) {
+                if let Some(plain) = crate::security::crypto::decrypt(&bytes, &crate::auth::active_key())
+                    .ok().and_then(|b| String::from_utf8(b).ok())
+                {
+                    e.text = plain;
+                }
+            }
+        }
+        e
     }
 
     /// Rank persisted entries by PURE text-embedding cosine (the Board's β signal in
@@ -361,7 +369,8 @@ impl MemoryTiers {
         let mut scored = self.scored_candidates(query);
         scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         scored.truncate(top_k);
-        scored
+        // Decrypt ONLY the survivors (plaintext minimization).
+        scored.into_iter().map(|(e, c)| (self.decrypt_entry(e), c)).collect()
     }
 
     /// The Board: assemble the top-k slice by the full Park score
@@ -391,7 +400,7 @@ impl MemoryTiers {
             .collect();
         crate::board::top_k_indices(&signals, weights, top_k)
             .into_iter()
-            .map(|i| cands[i].0.clone())
+            .map(|i| self.decrypt_entry(cands[i].0.clone())) // decrypt only the top-k survivors
             .collect()
     }
 
