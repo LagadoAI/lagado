@@ -14,9 +14,6 @@ use crate::skill_library::{Skill, SkillLibrary};
 use tokio::sync::Mutex as TokioMutex;
 use blake3;
 
-/// How many Board priors to surface per goal. A retrieval-tuning constant (cf. RAG K=15),
-/// not a model/hardware value — invariant #9 does not apply.
-const BOARD_TOP_K: usize = 8;
 
 // ── State shared between WebSocket and agent ──────────────────────
 pub struct AgentState {
@@ -1003,7 +1000,8 @@ async fn read_screen_bg(perceptor: &Arc<dyn Perceptor>) -> String {
     tokio::task::spawn_blocking(move || p.read_screen()).await.unwrap_or_default()
 }
 
-/// Capture a frame (QMP screendump) on a blocking thread.
+/// Capture a frame (QMP screendump) on a blocking thread. Used by the (currently-gated-off) Phase-2
+/// CV sampled-collection hook; kept so flipping the CV toggle back on is a one-line, two-way door.
 async fn capture_frame_bg(perceptor: &Arc<dyn Perceptor>) {
     let p = perceptor.clone();
     let _ = tokio::task::spawn_blocking(move || p.capture_frame()).await;
@@ -1580,34 +1578,31 @@ pub async fn agent_loop(
         // Phase 1b — live CV sense. Read the QMP screendump, decode, propose boxes over
         // the full frame. FAIL-OPEN to a11y-only on any frame error: a dead sense must
         // degrade to the remaining senses, never crash the loop (cross-cutting invariant).
-        // Gated by LAGADO_CV_DISABLE (kill-switch + the Phase 1c pick-rate measurement knob).
-        let cv_boxes: Vec<crate::perception::cv_proposer::ScreenBox> =
-            if !crate::config::cv_enabled() {
-                vec![]
-            } else {
-                // PRODUCTION FRAME-SYNC: capture the frame NOW, on this SETTLED a11y screen, so CV
-                // reads an image in-sync with the perception the loop acts on — not a stale UI-polled
-                // frame. Reuses the manifest-settle win: `screen` above is already settled, so the
-                // frame and the a11y read describe the same instant.
-                capture_frame_bg(&perceptor).await;
-                match std::fs::read(crate::config::FRAME_PATH) {
-                    Ok(png) => match image::load_from_memory(&png) {
-                        Ok(img) => {
-                            let rgb = img.to_rgb8();
-                            let (w, h) = (rgb.width(), rgb.height());
-                            crate::perception::cv_proposer::propose_frame(rgb.as_raw(), w, h)
-                        }
-                        Err(e) => { chronos::log(&format!("cv: frame decode failed ({e}) — a11y-only")); vec![] }
-                    },
-                    Err(e) => { chronos::log(&format!("cv: no frame ({e}) — a11y-only")); vec![] }
+        // CV PASS — gated OFF by default (TWO-WAY door: `LAGADO_CV_ENABLE=1` flips it back on for the
+        // Phase-2 sampled-caption collector). Today CV has NO consumer — its output was DISCARDED — so
+        // off = zero per-step cost (no Canny/CC, no extra capture, no PNG decode). Even when ENABLED,
+        // raw CV boxes do NOT feed selection: captions (Phase 2), not label-less boxes, enter the
+        // candidate set. This block is the sampled-collection hook; cv_proposer/arbiter stay as the
+        // Phase-2 foundation. SEAM IS LIVE-BUT-IDLE BY DESIGN until captions are generated.
+        if crate::config::cv_enabled() {
+            capture_frame_bg(&perceptor).await;
+            if let Ok(png) = std::fs::read(crate::config::FRAME_PATH) {
+                if let Ok(img) = image::load_from_memory(&png) {
+                    let rgb = img.to_rgb8();
+                    let _cv_boxes = crate::perception::cv_proposer::propose_frame(rgb.as_raw(), rgb.width(), rgb.height());
+                    // TODO(Phase 2): caption `_cv_boxes` → persist for the caption pipeline → captioned
+                    // (LABELED) boxes then enter selection via `fuse`'s caption argument.
                 }
-            };
-        // Labels flow THROUGH the arbiter (provenance: a11y > caption > OCR > None); CV
-        // boxes carry no text, so they enter unlabeled but selectable. Vision stays []
-        // until Phase 2.
-        let fused = crate::perception::arbiter::fuse(&bboxes, &labels, &cv_boxes, &[]);
+            }
+        }
+        // SELECTION IS a11y-ONLY. Raw CV boxes are label-less → `goal_matches_any`/`best_match_token`
+        // can never match them. Confidence, stated honestly: removing them is PROVEN-equivalent on the
+        // Phase-1 covered screens, expected-equivalent elsewhere BY MECHANISM (inert boxes can't win),
+        // and UNVERIFIED on sparse / custom-rendered screens where a11y is thin and CV boxes are a larger
+        // fraction — an accepted, known gap, pinned by `label_less_boxes_do_not_change_selection`.
+        let fused = crate::perception::arbiter::fuse(&bboxes, &labels, &[], &[]);
         let candidates = crate::perception::selection::build_candidates(&fused);
-        chronos::log(&format!("perceive: {} a11y + {} cv → {} fused", bboxes.len(), cv_boxes.len(), fused.len()));
+        chronos::log(&format!("perceive: {} a11y → {} fused", bboxes.len(), fused.len()));
         // AUDIT: log the exact labels the agent perceives this step (not just the count) so we can
         // see what the selector/fail-closed actually had to match against.
         chronos::log(&format!("candidates[{}] for \"{active_goal}\": {}", candidates.len(),

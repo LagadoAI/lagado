@@ -54,8 +54,15 @@ pub fn qmp_socket() -> String {
 /// and doubles as an operational kill-switch if CV ever degrades perception in the field.
 /// It is also the measurement instrument for the Phase 1c pick-rate gate (same binary,
 /// same goals, CV on vs off).
+/// DEFAULT OFF (2026-06-19): CV's output is currently DISCARDED (no caption consumer exists) and its
+/// raw label-less boxes are the wrong input for selection (they can never goal-match). So the per-step
+/// CV pass is off by default — set `LAGADO_CV_ENABLE=1` to flip it back on (the TWO-WAY door for when
+/// the Phase-2 sampled-caption collector lands). `LAGADO_CV_DISABLE=1` still force-disables.
 pub fn cv_enabled() -> bool {
-    !matches!(std::env::var("LAGADO_CV_DISABLE").as_deref(), Ok("1") | Ok("true"))
+    if matches!(std::env::var("LAGADO_CV_DISABLE").as_deref(), Ok("1") | Ok("true")) {
+        return false;
+    }
+    matches!(std::env::var("LAGADO_CV_ENABLE").as_deref(), Ok("1") | Ok("true"))
 }
 
 const LLAMA_HOST: &str = "127.0.0.1";

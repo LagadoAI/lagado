@@ -283,6 +283,38 @@ mod tests {
     use super::*;
     use crate::perception::arbiter::{FusedElement, LabelSource, Sense};
 
+    fn cand(token: &str, label: &str, sense: &'static str) -> Candidate {
+        Candidate { token: token.into(), label: label.into(), center: (0, 0), sense, trusted: false }
+    }
+
+    /// TRIPWIRE for the "selection is a11y-only" change (2026-06-19): removing label-less CV boxes
+    /// from the candidate set must NOT change which element selection picks. This pins the MECHANISM
+    /// — label-less candidates can never goal-match — so the equivalence isn't just "reasoned," it's
+    /// CI-enforced: if a future change ever lets label-less boxes affect selection, this fails.
+    #[test]
+    fn label_less_boxes_do_not_change_selection() {
+        let a11y_only = vec![
+            cand("el_0", "Applications", "a11y"),
+            cand("el_1", "Terminal Emulator", "a11y"),
+            cand("el_2", "File Manager", "a11y"),
+        ];
+        // Same set + several label-less CV/vision boxes interleaved (as `fuse` would have produced).
+        let with_cv = vec![
+            cand("el_0", "Applications", "a11y"),
+            cand("el_1", "Terminal Emulator", "a11y"),
+            cand("el_2", "File Manager", "a11y"),
+            cand("el_3", "", "vision"),
+            cand("el_4", "", "vision"),
+            cand("el_5", "", "vision"),
+        ];
+        for goal in ["Terminal Emulator", "Applications", "open the file manager", "nonexistent thing"] {
+            assert_eq!(goal_matches_any(goal, &a11y_only), goal_matches_any(goal, &with_cv),
+                "goal_matches_any diverged for {goal:?} when label-less CV boxes were present");
+            assert_eq!(best_match_token(&a11y_only, goal), best_match_token(&with_cv, goal),
+                "best_match_token diverged for {goal:?} when label-less CV boxes were present");
+        }
+    }
+
     /// a11y-backed element carrying `label` (empty string = unlabeled, as the
     /// arbiter would emit when a11y has no text for the ref).
     fn a11y(ref_id: &str, bbox: (i32, i32, i32, i32), label: &str) -> FusedElement {
