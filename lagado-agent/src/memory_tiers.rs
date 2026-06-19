@@ -499,10 +499,16 @@ impl MemoryTiers {
         }
         self.hot.retain(|e| e.temperature >= 0.05);
 
-        // Decay SQLite entries
+        // Decay SQLite entries — EXCLUDING cold. This is the fix for the periodic freeze that grew
+        // with use: the old UPDATE rewrote EVERY row including the cold vault (the unbounded tier),
+        // so the per-cycle stall grew forever. Cold's temperature is meaningless — cold is never
+        // pruned by this threshold (the DELETE below already excludes it; the vault uses a 365-day
+        // half-life). So decaying it was pure waste. With `tier != 'cold'` the write is BOUNDED to
+        // hot+warm (warm is capped at MAX_WARM_ENTRIES) regardless of total store size — the stall
+        // no longer grows. (`tier` is indexed.)
         self.db
             .execute(
-                "UPDATE memory_entries SET temperature = temperature * (1.0 - ?1)",
+                "UPDATE memory_entries SET temperature = temperature * (1.0 - ?1) WHERE tier != 'cold'",
                 rusqlite::params![decay_factor],
             )
             .map_err(|e| format!("Failed to decay SQLite entries: {}", e))?;
