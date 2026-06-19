@@ -980,14 +980,49 @@ fn frame_changed_cells(delta: &mut crate::perception::delta::DeltaDetector) -> u
 /// quiet). The fixed duration survives ONLY as a far-outer safety BACKSTOP (perpetual animation / a
 /// genuine no-op) — not the primary control; a no-effect return is caught downstream by the
 /// postcondition → should_cutoff escalation.
-async fn observe_until_quiet(perceptor: &dyn Perceptor, baseline: &str) -> String {
+// ── Background-thread perception (Theme 1: never block the async runtime) ────────────────────────
+// The Perceptor calls are SYNC and blocking (read_screen = ssh+python spawn; capture_frame = QMP;
+// frame delta = fs read + PNG decode). Run them on the blocking pool via spawn_blocking so a
+// perception round-trip never starves the tokio workers driving the UI / live feed / server_guard.
+// The trait is Send+Sync, so the Arc moves into the closure cleanly.
+
+/// Read the a11y screen on a blocking thread.
+async fn read_screen_bg(perceptor: &Arc<dyn Perceptor>) -> String {
+    let p = perceptor.clone();
+    tokio::task::spawn_blocking(move || p.read_screen()).await.unwrap_or_default()
+}
+
+/// Capture a frame (QMP screendump) on a blocking thread.
+async fn capture_frame_bg(perceptor: &Arc<dyn Perceptor>) {
+    let p = perceptor.clone();
+    let _ = tokio::task::spawn_blocking(move || p.capture_frame()).await;
+}
+
+/// One settle-poll tick on a blocking thread: capture a fresh frame + count changed cells. The
+/// stateful DeltaDetector is moved in and returned out (it accumulates cell hashes across ticks).
+async fn poll_frame_bg(
+    perceptor: &Arc<dyn Perceptor>,
+    mut delta: crate::perception::delta::DeltaDetector,
+) -> (crate::perception::delta::DeltaDetector, usize) {
+    let p = perceptor.clone();
+    tokio::task::spawn_blocking(move || {
+        p.capture_frame();
+        let cells = frame_changed_cells(&mut delta);
+        (delta, cells)
+    })
+    .await
+    .unwrap_or_else(|_| (crate::perception::delta::DeltaDetector::new(), 0))
+}
+
+async fn observe_until_quiet(perceptor: &Arc<dyn Perceptor>, baseline: &str) -> String {
     const INTERVAL_MS: u64 = 120;
     const QUIET_READS: usize = 3;       // consecutive settled a11y checks → the world is quiet
     const NOISE_CELLS: usize = 2;       // frame-delta floor: ambient cursor/clock, not activity (TUNABLE)
     const BACKSTOP_POLLS: usize = 300;  // far-outer safety ONLY — not the termination control
     let mut delta = crate::perception::delta::DeltaDetector::new();
-    perceptor.capture_frame();
-    let _ = frame_changed_cells(&mut delta); // prime the frame baseline (first call flags all cells)
+    // Prime the frame baseline (first call flags all cells) — on the blocking pool.
+    let (d, _) = poll_frame_bg(perceptor, delta).await;
+    delta = d;
     // COST: a11y read is an ssh+python spawn; the frame-delta is the cheaper QMP path. So poll the
     // FRAME each interval and read a11y ONLY when the frame is quiet (the candidate settle points) —
     // while pixels are painting we already know the world is active and skip the expensive read.
@@ -996,14 +1031,14 @@ async fn observe_until_quiet(perceptor: &dyn Perceptor, baseline: &str) -> Strin
     let mut manifested = baseline.is_empty(); // no baseline → skip the manifest phase
     for _ in 0..BACKSTOP_POLLS {
         tokio::time::sleep(tokio::time::Duration::from_millis(INTERVAL_MS)).await;
-        perceptor.capture_frame();
-        let cells = frame_changed_cells(&mut delta);
+        let (d, cells) = poll_frame_bg(perceptor, delta).await;
+        delta = d;
         if settling_active(false, cells, NOISE_CELLS) {
             quiet = 0; // pixels painting → in progress → don't pay for an a11y read this tick
             continue;
         }
         // Frame quiet → read a11y to confirm the world settled, check manifest, and capture focus.
-        let curr = perceptor.read_screen();
+        let curr = read_screen_bg(perceptor).await;
         let a11y_changed = last_a11y.as_deref().is_some_and(|p| structural_change(p, &curr));
         if !manifested && (structural_change(baseline, &curr) || a11y_changed) {
             manifested = true; // the action's effect has appeared
@@ -1020,7 +1055,10 @@ async fn observe_until_quiet(perceptor: &dyn Perceptor, baseline: &str) -> Strin
         last_a11y = Some(curr);
     }
     chronos::log("settle_backstop: world never quieted — proceeding; downstream escalation decides");
-    last_a11y.unwrap_or_else(|| perceptor.read_screen())
+    match last_a11y {
+        Some(s) => s,
+        None => read_screen_bg(perceptor).await,
+    }
 }
 
 /// Structural effect class for a Click sub-goal's POSTCONDITION (§2.15). Derived DETERMINISTICALLY
@@ -1111,7 +1149,7 @@ pub async fn agent_loop(
 
     // Screen hash for action-graph state key (read once per goal, used for recovery lookup)
     let state_hash = {
-        let s = perceptor.read_screen();
+        let s = read_screen_bg(&perceptor).await;
         format!("{}", blake3::hash(s.as_bytes()))
     };
 
@@ -1254,9 +1292,9 @@ pub async fn agent_loop(
         let screen = if prev_action_executed {
             // baseline = the screen the prior action was applied to → observe until its effect
             // manifests and the world goes quiet (no fixed ceiling).
-            observe_until_quiet(perceptor.as_ref(), &prev_screen).await
+            observe_until_quiet(&perceptor, &prev_screen).await
         } else {
-            perceptor.read_screen()
+            read_screen_bg(&perceptor).await
         };
 
         // Compute and log screen-effect observation from previous turn.
@@ -1431,7 +1469,7 @@ pub async fn agent_loop(
                 }
             };
             prev_action_executed = false;
-            prev_screen = perceptor.read_screen();
+            prev_screen = read_screen_bg(&perceptor).await;
             if advanced {
                 prev_step_progressed = true; // a verified command advance = progress (no screen change)
                 subgoal_stuck = 0;
@@ -1492,7 +1530,7 @@ pub async fn agent_loop(
             prev_action_executed = false; // deterministic advance below — don't double-count at loop top
             // Plain read: Type/Key fire-and-advance (no effect-confirmation needed), and typing often
             // leaves the a11y tree unchanged, so a change-from-baseline settle would just burn the ceiling.
-            prev_screen = perceptor.read_screen();
+            prev_screen = read_screen_bg(&perceptor).await;
             if current_sub >= sub_goals.len() {
                 chronos::log("sequencer_complete: all sub-goals done (deterministic final step)");
                 complete_goal(&goal, actuator.as_ref(), &confirm_tx).await;
@@ -1540,7 +1578,7 @@ pub async fn agent_loop(
                 // reads an image in-sync with the perception the loop acts on — not a stale UI-polled
                 // frame. Reuses the manifest-settle win: `screen` above is already settled, so the
                 // frame and the a11y read describe the same instant.
-                perceptor.capture_frame();
+                capture_frame_bg(&perceptor).await;
                 match std::fs::read(crate::config::FRAME_PATH) {
                     Ok(png) => match image::load_from_memory(&png) {
                         Ok(img) => {
@@ -1842,7 +1880,7 @@ pub async fn agent_loop(
                 if let Some(structural) = FailureType::detect_structural(&recent_actions) {
                     tracing::warn!("Structural failure detected: {structural}");
                     if let Some(ref rm) = recovery_manager {
-                        let s = perceptor.read_screen();
+                        let s = read_screen_bg(&perceptor).await;
                         match rm.recover(&structural, &state_hash, &s, &recent_actions).await {
                             Some(RecoveryOutcome::PromptInjection { text, .. }) => {
                                 tracing::info!("Recovery injection: {}", &text[..text.len().min(80)]);
@@ -1920,7 +1958,7 @@ pub async fn agent_loop(
                 if matches!(e, PipelineError::MaxRetriesExceeded | PipelineError::MaxStepsExceeded) {
                     // Try recovery before aborting
                     if let Some(ref rm) = recovery_manager {
-                        let s = perceptor.read_screen();
+                        let s = read_screen_bg(&perceptor).await;
                         match rm.recover(&failure_type, &state_hash, &s, &recent_actions).await {
                             Some(RecoveryOutcome::PromptInjection { text, .. }) => {
                                 tracing::info!("Recovery: prompt injection");
