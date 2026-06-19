@@ -822,7 +822,12 @@ fn main() {
             // Start the background memory consolidation loop (5-min decay cycles). In-process tokio
             // task (NOT a subprocess — it can't orphan; it dies with the process). Stopped cleanly on
             // shutdown via state.sleep_running so a cycle isn't aborted mid-SQLite-write.
-            let _sleep_handle = sleep_gate.start();
+            // CRITICAL: start() calls tokio::spawn, which PANICS outside a runtime. setup() is a SYNC
+            // callback (no runtime), so enter it via async_runtime::spawn (the regression: calling
+            // start() directly in setup() panicked "no reactor running" → killed app startup).
+            tauri::async_runtime::spawn(async move {
+                let _sleep_handle = sleep_gate.start();
+            });
 
             // System-tray icon: Lagado lives in the tray while running, like any app. Left-click /
             // "Show" focuses the window; "Quit" runs the full shutdown (kills every subprocess).
