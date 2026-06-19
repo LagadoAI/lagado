@@ -290,12 +290,15 @@ def position_hint(bbox: list[int], win: dict) -> str:
 
 # ── Output formatters ─────────────────────────────────────────────────────────
 def format_focused(elements: list[dict], window_title: str,
-                   win_geo: Optional[dict]) -> str:
+                   win_geo: Optional[dict],
+                   cap: int = MAX_ELEMENTS_FOCUS) -> str:
     """Text format consumed by the agent loop in focused mode.
 
     Each element line:  ref_N  role  "label"  (sx,sy,w,h)  [hint]  state=...
     Bboxes in elements must already be screen-absolute when win_geo is provided.
     When win_geo is None, no coord tuple or position hint is emitted.
+    `cap` bounds how many element lines are emitted (the --focused-all coverage
+    consumer raises it past the interactive default).
     """
     lines: list[str] = []
     lines.append(f"[focused: {window_title or '(unknown)'}]")
@@ -305,7 +308,7 @@ def format_focused(elements: list[dict], window_title: str,
 
     shown = 0
     for e in elements:
-        if shown >= MAX_ELEMENTS_FOCUS:
+        if shown >= cap:
             lines.append(f"… {len(elements) - shown} more elements truncated …")
             break
 
@@ -361,9 +364,38 @@ def gather_all(app: Optional[str] = None) -> tuple[list[dict], list[str], list[d
     return (elements, apps, [])
 
 
-def mode_focused() -> str:
+def mode_focused(interactive_only: bool = True) -> str:
+    """Focused-window element dump.
+
+    interactive_only=True (default, the agent loop path): emit only INTERACTIVE_ROLES
+    leaves — the click targets. interactive_only=False (--focused-all, the coverage probe):
+    emit ALL non-noise elements of the focused window, INCLUDING containers/labels, so a
+    consumer can measure how much of the window the a11y tree represents at all. The
+    distinction is the whole point of the ax-blind probe: interactive leaves alone make
+    every app look blind; the full tree is what separates a11y-rich from a11y-absent.
+    """
+    def keep(role: str) -> bool:
+        return is_interactive(role) if interactive_only else not is_noise(role)
+    cap = MAX_ELEMENTS_FOCUS if interactive_only else 500
+
     title, win    = get_focused_window()
     classname     = _get_classname()
+
+    if not classname and win:
+        # Some windows (and some WM/xdotool combos) report an empty WM_CLASS, which would wrongly
+        # force the panel-bootstrap path. Fall back to the focused window's PROCESS name (PID →
+        # /proc/cmdline basename): GTK/Qt toolkits set the AT-SPI application name to exactly that
+        # program name, so `tine --app <prog>` scopes to the real app even with no WM_CLASS.
+        okp, pidout, _ = _run(["xdotool", "getactivewindow", "getwindowpid"], timeout=XDOTOOL_TIMEOUT)
+        pid = pidout.strip()
+        if okp and pid.isdigit():
+            try:
+                with open(f"/proc/{pid}/cmdline", "rb") as f:
+                    prog = f.read().split(b"\x00")[0].decode("utf-8", "ignore")
+                if prog:
+                    classname = os.path.basename(prog)
+            except OSError:
+                pass
 
     if not classname or not win:
         # Bootstrap fallback: nothing is focused (fresh desktop, no windows yet).
@@ -381,8 +413,8 @@ def mode_focused() -> str:
             e for e in elements
             if e.get("bbox") and not is_garbage_bbox(e["bbox"])
         ]
-        scoped = [e for e in usable if is_interactive(e.get("role", ""))]
-        return format_focused(scoped, title or "(desktop)", None)
+        scoped = [e for e in usable if keep(e.get("role", ""))]
+        return format_focused(scoped, title or "(desktop)", None, cap=cap)
 
     # Scoped run: tine filters to the active app by classname.
     raw = tine_text(app=classname)
@@ -410,8 +442,8 @@ def mode_focused() -> str:
         screen_bbox = [bbox[0] + win_x, bbox[1] + win_y, bbox[2], bbox[3]]
         screen_elements.append({**e, "bbox": screen_bbox})
 
-    scoped = [e for e in screen_elements if is_interactive(e.get("role", ""))]
-    return format_focused(scoped, title or "", win)
+    scoped = [e for e in screen_elements if keep(e.get("role", ""))]
+    return format_focused(scoped, title or "", win, cap=cap)
 
 
 def mode_print_focus() -> str:
@@ -444,6 +476,8 @@ def parse_args() -> argparse.Namespace:
     mode = ap.add_mutually_exclusive_group()
     mode.add_argument("--focused",          action="store_true",
                       help="Output focused window's interactive elements only (text format).")
+    mode.add_argument("--focused-all",      action="store_true",
+                      help="Like --focused but ALL non-noise elements incl. containers (coverage probe).")
     mode.add_argument("--interactive-only", action="store_true",
                       help="Default JSON, but filter out non-interactive elements.")
     mode.add_argument("--text",             action="store_true",
@@ -460,6 +494,8 @@ def main() -> int:
     try:
         if args.focused:
             sys.stdout.write(mode_focused())
+        elif getattr(args, "focused_all", False):
+            sys.stdout.write(mode_focused(interactive_only=False))
         elif args.interactive_only:
             sys.stdout.write(mode_default(interactive_only=True))
         elif args.text:
