@@ -170,19 +170,26 @@ pub const LATE_BAND_CAP: usize = 64;
 /// can drop are the least-relevant, label-less boxes the selection rails cannot pick in Phase 1
 /// anyway (an unlabeled box matches nothing in `goal_matches_any`/`best_match_token`). A labeled
 /// element is only ever dropped if labeled candidates alone exceed `LATE_BAND_CAP`.
-pub fn rank_late_band(mut candidates: Vec<Candidate>, goal: &str) -> Vec<Candidate> {
+pub fn rank_late_band(candidates: Vec<Candidate>, goal: &str) -> Vec<Candidate> {
     let g = content_tokens(goal);
-    if !g.is_empty() {
-        candidates.sort_by(|a, b| {
-            let ra = relevance(&g, &a.label);
-            let rb = relevance(&g, &b.label);
-            ra.0.cmp(&rb.0)
-                .then(ra.1.partial_cmp(&rb.1).unwrap_or(std::cmp::Ordering::Equal))
-                // tertiary: labeled (true) ranks above label-less (false) within a tie, so the
-                // front-drain cap below sheds inert unlabeled boxes before any labeled element.
-                .then((!a.label.is_empty()).cmp(&!b.label.is_empty()))
+    // DECORATE-SORT: compute relevance ONCE per candidate (O(n)) instead of twice per comparison
+    // (O(n log n) tokenize+lowercase allocations on the per-step candidate path). Ordering unchanged:
+    // relevance bucket, then score, then labeled-above-label-less (the front-drain cap below sheds
+    // inert unlabeled boxes first).
+    let mut candidates = if g.is_empty() {
+        candidates
+    } else {
+        let mut keyed: Vec<_> = candidates
+            .into_iter()
+            .map(|c| { let r = relevance(&g, &c.label); (r, !c.label.is_empty(), c) })
+            .collect();
+        keyed.sort_by(|a, b| {
+            a.0 .0.cmp(&b.0 .0)
+                .then(a.0 .1.partial_cmp(&b.0 .1).unwrap_or(std::cmp::Ordering::Equal))
+                .then(a.1.cmp(&b.1))
         });
-    }
+        keyed.into_iter().map(|(_, _, c)| c).collect()
+    };
     // CAP to the most-relevant tail. Ascending sort puts the highest relevance LAST, so we drain
     // the FRONT (least relevant) — `truncate` would keep the head and silently drop the matching
     // element. With no goal tokens (no sort) this bounds prompt size in spatial order.
