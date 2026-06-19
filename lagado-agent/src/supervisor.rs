@@ -30,6 +30,12 @@ pub enum StepOutcome {
     NoChange,
     /// Step errored / unparseable output / rejected action.
     Failed,
+    /// The a11y tree yields NO actionable target for the goal on this surface (the fail-closed
+    /// signal). Categorically different from Failed/NoChange: retrying the same model on the same
+    /// a11y read cannot help — only a RICHER SENSE (caption/vision) or the human can. So it escalates
+    /// IMMEDIATELY, never burning local retries. This is the semantic/outcome trigger the ax-blind
+    /// probe mandated (a11y-insufficiency, NOT a CV pre-scan). See memory lagado-axblind-probe-finding.
+    PerceptionBlind,
     /// Goal reached (Done/Task tool call).
     Done,
 }
@@ -39,6 +45,11 @@ pub enum StepOutcome {
 pub enum TierKind {
     /// An inference tier — some model, somewhere. The loop maps `label` → adapter.
     Model,
+    /// A richer PERCEPTION sense — a11y → caption/vision. The loop bumps its sense level and
+    /// re-perceives. The escalation target for `PerceptionBlind`. The caption/vision rungs are the
+    /// seam where Phase-2 captioning plugs in; until then the governor leaves them out of the ladder
+    /// and `PerceptionBlind` escalates past `Model` straight to `Human`.
+    Sense,
     /// Hand control to the human (typically the terminal fallback before Abort).
     Human,
 }
@@ -57,6 +68,10 @@ pub struct EscalationTier {
 impl EscalationTier {
     pub fn model(label: impl Into<String>) -> Self {
         Self { label: label.into(), kind: TierKind::Model }
+    }
+    /// A richer-perception rung (e.g. "caption", "vision"). The loop bumps its sense level on escalate.
+    pub fn sense(label: impl Into<String>) -> Self {
+        Self { label: label.into(), kind: TierKind::Sense }
     }
     pub fn human() -> Self {
         Self { label: "hitl".to_string(), kind: TierKind::Human }
@@ -140,6 +155,12 @@ impl Supervisor {
             return Directive::Done;
         }
 
+        // a11y is structurally blind to a target here: retrying the same model on the same a11y read
+        // cannot help, so DON'T burn local retries — escalate now to the next sense/human rung.
+        if outcome == StepOutcome::PerceptionBlind {
+            return self.escalate();
+        }
+
         // Oscillation: have we been at this exact state too many times in the window?
         // No local retry breaks a cycle, so escalate regardless of the outcome kind.
         let revisits = self.recent.iter().filter(|&&h| h == state_hash).count();
@@ -170,7 +191,7 @@ impl Supervisor {
                     Directive::ResetFromBoard
                 }
             }
-            StepOutcome::Done => unreachable!("handled above"),
+            StepOutcome::PerceptionBlind | StepOutcome::Done => unreachable!("handled above"),
         }
     }
 
@@ -249,6 +270,39 @@ mod tests {
         assert_eq!(
             s.observe(StepOutcome::NoChange, 3),
             Directive::Escalate(EscalationTier::model("heavy-8b"))
+        );
+    }
+
+    #[test]
+    fn perception_blind_escalates_immediately_without_burning_retries() {
+        // a11y yields no target → escalate NOW, even with retries available (the probe's mandate:
+        // retrying the same model on the same a11y read cannot help).
+        let mut s = Supervisor::with_limits(hybrid_ladder(), 5, 5, 5, 16);
+        assert_eq!(
+            s.observe(StepOutcome::PerceptionBlind, 1),
+            Directive::Escalate(EscalationTier::model("heavy-8b"))
+        );
+        assert_eq!(s.current_tier().unwrap().label, "heavy-8b");
+    }
+
+    #[test]
+    fn perception_blind_escalates_to_sense_rung_then_human() {
+        // When the governor puts a Sense rung in the ladder, a11y-blindness escalates to it FIRST
+        // (where captioning will live), then to human — the seam the ax-blind probe mandated.
+        let ladder = vec![
+            EscalationTier::model("local"),
+            EscalationTier::sense("caption"),
+            EscalationTier::human(),
+        ];
+        let mut s = Supervisor::new(ladder);
+        assert_eq!(
+            s.observe(StepOutcome::PerceptionBlind, 1),
+            Directive::Escalate(EscalationTier::sense("caption"))
+        );
+        assert_eq!(s.current_tier().unwrap().kind, TierKind::Sense);
+        assert_eq!(
+            s.observe(StepOutcome::PerceptionBlind, 2),
+            Directive::Escalate(EscalationTier::human())
         );
     }
 

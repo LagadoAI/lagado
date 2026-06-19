@@ -1240,6 +1240,10 @@ pub async fn agent_loop(
     // we hand back and let the human say "that's done, skip it."
     let mut subgoal_stuck: usize = 0;
     const SUBGOAL_STUCK_LIMIT: usize = 4;
+    // Perception sense level, bumped by the supervisor on a Sense-tier escalation (a11y → richer
+    // sense). 0 = a11y-only (the floor). ≥1 turns on the CV pass below — the seam where Phase-2
+    // captioning plugs in. Stays 0 in production until the governor's ladder has a Sense rung.
+    let mut sense_level: u8 = 0;
     if sub_goals.len() > 1 {
         chronos::log(&format!("sequencer: {} sub-goals: {:?}", sub_goals.len(), sub_goals));
     }
@@ -1356,6 +1360,14 @@ pub async fn agent_loop(
                         detail: reason,
                     })).await;
                     break;
+                }
+                crate::supervisor::Directive::Escalate(tier)
+                    if tier.kind == crate::supervisor::TierKind::Sense =>
+                {
+                    // Stall escalated to a richer sense — bump the sense level; the next perception
+                    // runs richer (CV pass on). Captioning's seam, same as the PerceptionBlind path.
+                    sense_level = sense_level.saturating_add(1);
+                    chronos::log(&format!("supervisor_escalate_sense: '{}' (level {sense_level})", tier.label));
                 }
                 // Continue / Done / ResetFromBoard / Escalate(Model): defer to the inner
                 // tactical machinery (recovery_manager, should_cutoff, structural detection).
@@ -1584,7 +1596,11 @@ pub async fn agent_loop(
         // raw CV boxes do NOT feed selection: captions (Phase 2), not label-less boxes, enter the
         // candidate set. This block is the sampled-collection hook; cv_proposer/arbiter stay as the
         // Phase-2 foundation. SEAM IS LIVE-BUT-IDLE BY DESIGN until captions are generated.
-        if crate::config::cv_enabled() {
+        // CV runs when configured OR when the supervisor has escalated the sense (sense_level ≥ 1)
+        // because a11y came up blind — the GOVERNED, after-a11y-failed escalation the ax-blind probe
+        // mandated (NOT a CV pre-scan). Today CV is still inert in selection (label-less); when Phase-2
+        // captioning lands, these boxes get captioned here and become selectable.
+        if crate::config::cv_enabled() || sense_level >= 1 {
             capture_frame_bg(&perceptor).await;
             if let Ok(png) = std::fs::read(crate::config::FRAME_PATH) {
                 if let Ok(img) = image::load_from_memory(&png) {
@@ -1620,19 +1636,41 @@ pub async fn agent_loop(
             // re-perceptions → the world is off-plan (or this step is already done / ambiguous).
             // The deterministic plan can't re-plan → clean handback, not an infinite re-perceive.
             if subgoal_stuck >= SUBGOAL_STUCK_LIMIT {
-                let msg = format!(
-                    "The screen doesn't match what this step needs (\"{active_goal}\") — handing back to you. \
-                     It may already be done, or the screen went somewhere I didn't plan for."
+                // a11y is structurally blind to a target for this sub-goal. Route through the
+                // supervisor as PerceptionBlind — the semantic/outcome escalation the ax-blind probe
+                // mandated (retrying the same model on the same a11y read cannot help). The governed
+                // ladder decides: a Sense rung (when captioning lands) → bump the sense level and
+                // re-perceive richer; otherwise (today: [model, human]) → clean handback to the human.
+                let blind_hash = u64::from_le_bytes(
+                    blake3::hash(screen.as_bytes()).as_bytes()[..8].try_into().unwrap()
                 );
-                chronos::log(&format!("deviation_escalate: stuck on sub-goal after {subgoal_stuck} re-perceptions"));
-                let _ = confirm_tx.send(envelope::make("action_log", envelope::ActionLogPayload {
-                    text: msg.clone(),
-                })).await;
-                let _ = confirm_tx.send(envelope::make("status", envelope::StatusPayload {
-                    state: "goal_done".to_string(),
-                    detail: msg,
-                })).await;
-                break;
+                chronos::log(&format!("perception_blind: a11y has no target for sub-goal after {subgoal_stuck} re-perceptions"));
+                match supervisor.observe(crate::supervisor::StepOutcome::PerceptionBlind, blind_hash) {
+                    crate::supervisor::Directive::Escalate(tier)
+                        if tier.kind == crate::supervisor::TierKind::Sense =>
+                    {
+                        sense_level = sense_level.saturating_add(1);
+                        chronos::log(&format!("sense_escalate: a11y-blind → sense '{}' (level {sense_level}) → re-perceive", tier.label));
+                        subgoal_stuck = 0;
+                        prev_screen = screen.clone();
+                        prev_action_executed = false;
+                        continue;
+                    }
+                    _ => {
+                        let msg = format!(
+                            "The screen doesn't match what this step needs (\"{active_goal}\") — handing back to you. \
+                             It may already be done, or the screen went somewhere I didn't plan for."
+                        );
+                        let _ = confirm_tx.send(envelope::make("action_log", envelope::ActionLogPayload {
+                            text: msg.clone(),
+                        })).await;
+                        let _ = confirm_tx.send(envelope::make("status", envelope::StatusPayload {
+                            state: "goal_done".to_string(),
+                            detail: msg,
+                        })).await;
+                        break;
+                    }
+                }
             }
             chronos::log(&format!("fail_closed: no candidate matches sub-goal → re-perceive ({subgoal_stuck}/{SUBGOAL_STUCK_LIMIT})"));
             let _ = confirm_tx.send(envelope::make("action_log", envelope::ActionLogPayload {
