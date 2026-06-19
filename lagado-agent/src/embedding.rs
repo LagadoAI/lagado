@@ -37,3 +37,42 @@ pub fn embed_at(base_url: &str, text: &str) -> Result<Vec<f32>, String> {
         .map(|x| x.as_f64().map(|f| f as f32).ok_or_else(|| "non-numeric embedding element".to_string()))
         .collect()
 }
+
+/// Embed MANY texts in ONE request (the `/v1/embeddings` API accepts an `input` array). The sleep-gate
+/// backfill previously did N sequential round-trips; this collapses them to one. Returns vectors in
+/// input order (results are reordered by the response `index` field to be safe). Empty input → empty.
+pub fn embed_batch(base_url: &str, texts: &[String]) -> Result<Vec<Vec<f32>>, String> {
+    if texts.is_empty() {
+        return Ok(Vec::new());
+    }
+    let agent = ureq::AgentBuilder::new()
+        .timeout(std::time::Duration::from_secs(30))
+        .build();
+    let resp = agent
+        .post(&format!("{}/v1/embeddings", base_url))
+        .set("Content-Type", "application/json")
+        .send_json(json!({ "input": texts }))
+        .map_err(|e| format!("embed_batch request failed: {}", e))?;
+
+    let v: serde_json::Value = resp
+        .into_json()
+        .map_err(|e| format!("embed_batch parse failed: {}", e))?;
+
+    let data = v["data"].as_array()
+        .ok_or_else(|| format!("missing data[] in response: {}", v))?;
+
+    // Place each embedding at its response `index` so order matches `texts` regardless of server order.
+    let mut out: Vec<Vec<f32>> = vec![Vec::new(); texts.len()];
+    for d in data {
+        let idx = d["index"].as_u64().unwrap_or(0) as usize;
+        let arr = d["embedding"].as_array()
+            .ok_or_else(|| "missing embedding in data element".to_string())?;
+        let vec: Vec<f32> = arr.iter()
+            .map(|x| x.as_f64().map(|f| f as f32).ok_or_else(|| "non-numeric embedding element".to_string()))
+            .collect::<Result<_, _>>()?;
+        if idx < out.len() {
+            out[idx] = vec;
+        }
+    }
+    Ok(out)
+}

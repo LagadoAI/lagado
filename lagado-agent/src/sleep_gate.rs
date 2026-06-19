@@ -117,16 +117,16 @@ async fn run_cycle(
         m
     };
     if !missing.is_empty() {
+        // ONE batched embeddings request for the whole backfill batch (was N sequential round-trips).
         let embedded: Vec<(String, Vec<f32>)> = tokio::task::spawn_blocking(move || {
-            let mut out = Vec::new();
-            for (id, text) in missing {
-                match crate::embedding::embed(&text) {
-                    Ok(v) if !v.is_empty() => out.push((id, v)),
-                    Ok(_) => {}
-                    Err(_) => break, // embedder unreachable — stop, retry next cycle
-                }
+            let ids: Vec<String>  = missing.iter().map(|(id, _)| id.clone()).collect();
+            let texts: Vec<String> = missing.into_iter().map(|(_, t)| t).collect();
+            match crate::embedding::embed_batch(&crate::config::embed_base_url(), &texts) {
+                Ok(vecs) => ids.into_iter().zip(vecs)
+                    .filter(|(_, v)| !v.is_empty()) // skip any element the server returned empty
+                    .collect(),
+                Err(_) => Vec::new(), // embedder unreachable — retry next cycle (recency floor holds)
             }
-            out
         })
         .await
         .unwrap_or_default();
