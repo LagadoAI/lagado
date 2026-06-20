@@ -35,6 +35,10 @@ pub trait Actuator: Send + Sync {
         "[command channel unavailable]".to_string()
     }
 
+    /// Reset the persistent command-shell session between goals so cwd/env from one goal don't leak
+    /// into the next. Default no-op; the VM-backed actuator drops + respawns its persistent `bash`.
+    fn reset_command_session(&self) {}
+
     /// Register synthetic-index targets (`el_N` → center coords) for the current
     /// frame so the selection grammar's tokens resolve to coordinate clicks. Works
     /// for label-less / `ref_id`-`None` elements too. Default no-op; coord-cache

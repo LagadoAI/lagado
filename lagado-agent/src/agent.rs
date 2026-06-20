@@ -871,9 +871,13 @@ pub fn goal_postconditions(goal: &str) -> Vec<String> {
         return Vec::new(); // not a create/delete intent → no checkable goal artifact
     }
     let wants_dir = lo.contains("director") || lo.contains("folder");
+    // "make it executable" / "chmod +x" → the artifact must be EXECUTABLE, not merely present. `test -e`
+    // FALSE-CLAIMS when the file was created but never chmod'd (the bench caught this). Strong: `test -x`.
+    let wants_exec = lo.contains("executable") || lo.contains("chmod +x") || lo.contains("chmod 7");
     extract_paths(goal).into_iter().map(|p| {
         if wants_absent { format!("test ! -e {p}") }
         else if wants_dir { format!("test -d {p}") }
+        else if wants_exec { format!("test -x {p}") }
         else { format!("test -e {p}") }
     }).collect()
 }
@@ -1256,6 +1260,10 @@ pub async fn agent_loop(
 
     let goal = state.lock().await.goal.clone();
     let system_prompt = config::system_prompt();
+    // Reset the persistent command shell at the start of each goal — cwd/env from a prior goal must
+    // not leak into this one (the actuator is app-lifetime). Within THIS goal, the session persists,
+    // so multi-step chains (git init → add → commit) share state. This is the cross-step-state fix.
+    actuator.reset_command_session();
 
     // DETERMINISTIC SEQUENCER (§2.14–2.15): split the goal into ordered sub-goals up front (the
     // model can't decompose — it spuriously completes; harness owns ordering). The executor runs
