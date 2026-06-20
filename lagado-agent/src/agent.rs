@@ -434,6 +434,17 @@ pub fn classify_subgoal(s: &str) -> SubGoal {
     // interpreted. Routes through the command channel as a base64-decode write → gated, verified,
     // postconditioned (a redirect `> path` → `test -e path`) like any command.
     if let Some((path, content)) = parse_write_file(t) {
+        // ACTION-TYPE GUARD (planner mis-decomposition): the weak planner emits `write to <path>: <cmd>`
+        // for what is really a RUN/MAKE step — e.g. `write to /tmp/osw_proj: mkdir /tmp/osw_proj` writes
+        // the literal text "mkdir …" into a FILE named /tmp/osw_proj, corrupting the target. Catch it
+        // deterministically: an EXTENSIONLESS target (a dir/repo name, not file.ext) whose content is a
+        // single bare shell command → run the command instead of writing it. The extension check keeps a
+        // genuine script write safe (`write to run.sh: rm -rf x` stays a write — .sh has an extension).
+        let basename = path.rsplit('/').next().unwrap_or(&path);
+        let extensionless = !basename.contains('.');
+        if extensionless && !content.contains('\n') && is_bare_shell_command(content.trim()) {
+            return SubGoal { text: t.to_string(), action: SubAction::Command(content.trim().to_string()) };
+        }
         use base64::Engine;
         let bytes = content.replace("\\n", "\n").replace("\\t", "\t");
         let b64 = base64::engine::general_purpose::STANDARD.encode(bytes.as_bytes());
@@ -629,6 +640,17 @@ Example:
 Goal: delete the file /tmp/old.log
 Steps:
 run the command rm /tmp/old.log
+
+Example:
+Goal: create a directory /tmp/proj and an empty file notes.txt inside it
+Steps:
+run the command mkdir -p /tmp/proj
+run the command touch /tmp/proj/notes.txt
+
+Example:
+Goal: create a git repository in /tmp/repo
+Steps:
+run the command git init /tmp/repo
 
 Example:
 Goal: write a script /tmp/run.sh that prints hello, then run it

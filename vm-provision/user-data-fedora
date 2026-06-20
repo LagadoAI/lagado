@@ -37,6 +37,7 @@ packages:
   - python3-gobject
   - python3-pip
   - xdotool
+  - git
 
 write_files:
   # Autologin laputa into a Cinnamon session on lightdm.
