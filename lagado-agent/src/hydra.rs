@@ -359,7 +359,15 @@ pub fn deterministic_route(message: &str, ctx: &RouteContext) -> Option<RouteOut
     if is_clear_question(message) {
         return Some(RouteOutcome::Chat);
     }
-    None // genuinely ambiguous → fall to the LLM classifier
+    // Surface active + Auto + NOT a clear question = a TASK to attempt — even a vague, non-technical
+    // one a dumb-simple user phrases without any computer-object ("play beyonce"). DEFAULT TO THE
+    // capability-aware planner: it reasons about HOW ("look at the tools → there's a browser → open
+    // YouTube → search beyonce → select → play") and reports back if it genuinely can't. The
+    // fail-closed lives at EXECUTION, not here. Do NOT fall to the weak 1.2B on this residual — it
+    // misroutes natural task goals to Chat (~6/7), the autonomy bottleneck. In agent-active mode the
+    // default is DO; chat is the exception (clear questions, already returned above). A pure
+    // acknowledgment ("thanks") simply yields an empty plan downstream — graceful, not a misroute.
+    Some(RouteOutcome::Interactive)
 }
 
 pub fn parse_intent_label(response: &str) -> Intent {
@@ -611,8 +619,18 @@ mod routing_lever_tests {
         // "do you know how to write in rust?" became a bogus write-to-file plan).
         assert_eq!(deterministic_route("what is the capital of France", &vm()), Some(RouteOutcome::Chat));
         assert_eq!(deterministic_route("do you know how to write in rust?", &vm()), Some(RouteOutcome::Chat));
-        // Genuinely ambiguous (not action-shaped, not a clear question) → LLM residual.
-        assert_eq!(deterministic_route("the files in my downloads folder", &vm()), None);
+    }
+
+    #[test]
+    fn surface_active_vague_task_goes_to_the_planner_not_chat() {
+        // THE acceptance shape (item 3): a dumb-simple, non-technical, no-computer-object goal must
+        // reach the capability-aware planner — NOT get dumped to chat by the weak 1.2B. In agent-active
+        // mode the default is DO; the planner reasons about HOW (browser → YouTube → search → play).
+        assert_eq!(deterministic_route("play beyonce", &vm()), Some(RouteOutcome::Interactive));
+        assert_eq!(deterministic_route("the files in my downloads folder", &vm()), Some(RouteOutcome::Interactive));
+        assert_eq!(deterministic_route("order me a pizza", &vm()), Some(RouteOutcome::Interactive));
+        // A clear question is still the exception → chat.
+        assert_eq!(deterministic_route("who is beyonce?", &vm()), Some(RouteOutcome::Chat));
     }
 
     #[test]
