@@ -134,6 +134,29 @@ async fn send_command(
     Ok(())
 }
 
+/// Open (or focus) the Agent work window: a SEPARATE OS window showing ONLY the bare VM the agent
+/// operates. Spawned from the already-authed main window; loads the app with `?view=agent` so the
+/// frontend renders the stripped agent surface (no sidebar, no auth flash). The control surface
+/// stays in the main window — you direct from there, you watch here.
+#[tauri::command]
+fn open_agent_window(app: tauri::AppHandle) -> Result<(), String> {
+    if let Some(w) = app.get_webview_window("agent") {
+        let _ = w.show();
+        return w.set_focus().map_err(|e| e.to_string());
+    }
+    tauri::WebviewWindowBuilder::new(
+        &app,
+        "agent",
+        tauri::WebviewUrl::App("index.html?view=agent".into()),
+    )
+    .title("Lagado — Agent")
+    .inner_size(1280.0, 800.0)
+    .resizable(true)
+    .build()
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 #[tauri::command]
 async fn send_approval(
     id: String,
@@ -913,7 +936,7 @@ fn main() {
             get_engine_status, get_system_info, get_models_detailed,
             get_chronos_recent, terminal_spawn, terminal_run, terminal_get_cwd,
             vault_list_files, get_server_status, capture_frame,
-            vm_boot, vm_stop, vm_status,
+            vm_boot, vm_stop, vm_status, open_agent_window,
             auth_check, auth_signup, auth_login, auth_recover,
             get_network_settings, save_network_settings, test_network_connection,
         ])

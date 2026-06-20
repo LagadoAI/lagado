@@ -1,8 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { invoke } from '@tauri-apps/api/core'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 import { useChatContext } from '@/hooks/use-chat-context'
 import { ChevronLeft } from 'lucide-react'
+
+// True when rendered inside the separate Agent OS window (vs the /agent route in the main window).
+const IS_AGENT_WINDOW = new URLSearchParams(window.location.search).get('view') === 'agent'
 
 // The AGENT work surface: the bare VM the agent operates. No chat, no toggles, no chrome — you
 // watch the agent work the (sovereign, sandboxed) computer here; you DIRECT it from the control
@@ -84,15 +88,16 @@ export default function ImmersiveDefault() {
         </div>
       )}
 
-      {/* The only chrome: a minimal back-to-control affordance. */}
+      {/* The only chrome: a minimal affordance back to control. In the separate Agent window it
+          closes the window (control lives in the main window); on the /agent route it navigates. */}
       <button
-        onClick={() => navigate('/chat')}
+        onClick={() => { if (IS_AGENT_WINDOW) getCurrentWindow().close(); else navigate('/chat') }}
         style={{ background: 'var(--glass-opaque)' }}
         className="fixed top-4 left-4 z-50 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-white/40 hover:text-white/80 border border-white/10 hover:border-white/20 transition-colors select-none"
         aria-label="Back to control surface"
       >
         <ChevronLeft className="w-3 h-3" />
-        Control
+        {IS_AGENT_WINDOW ? 'Close' : 'Control'}
       </button>
 
       {/* HITL approval — must surface even on the bare VM (safety). Minimal bottom overlay. */}

@@ -1,4 +1,5 @@
 import { useNavigate, useLocation } from 'react-router-dom'
+import { invoke } from '@tauri-apps/api/core'
 import { MessageSquare, Monitor, Lock, Settings, Plus, Search } from 'lucide-react'
 import { useChatContext } from '@/hooks/use-chat-context'
 
@@ -69,7 +70,11 @@ export function AppSidebar() {
         {NAV.map(({ id, label, Icon, path }) => {
           const isActive = location.pathname === path || (path === '/chat' && location.pathname === '/')
           return (
-            <button key={id} className={`nav-item ${isActive ? 'nav-item--active' : ''}`} onClick={() => navigate(path)}>
+            <button
+              key={id}
+              className={`nav-item ${isActive ? 'nav-item--active' : ''}`}
+              onClick={() => { if (id === 'agent') invoke('open_agent_window').catch(() => navigate(path)); else navigate(path) }}
+            >
               <Icon size={16} />
               {label}
             </button>
