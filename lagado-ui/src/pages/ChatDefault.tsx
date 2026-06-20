@@ -1,10 +1,11 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { invoke } from "@tauri-apps/api/core";
 import { useChatContext } from "@/hooks/use-chat-context";
 import { PermissionCard } from "@/components/PermissionCard";
 import { HyperLoader } from "../components/HyperLoader";
 import { AppSidebar } from "../components/AppSidebar";
-import { PanelLeft, Paperclip, Mic, ArrowUp, Square } from "lucide-react";
+import { PanelLeft, Paperclip, Mic, ArrowUp, Square, Monitor, Maximize2 } from "lucide-react";
 
 const surfaceRoutes: Record<string, string> = {
   immersive: "/agent",
@@ -18,6 +19,7 @@ export default function ChatDefault() {
 
   const [input, setInput] = useState("");
   const [showSidebar, setShowSidebar] = useState(true);
+  const [vmGlance, setVmGlance] = useState<string>("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const isConnected = connState === "connected";
@@ -26,6 +28,24 @@ export default function ChatDefault() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  // Live glance of the agent's VM (low rate — the full Agent window is the fast feed). Graceful:
+  // the VM not being up just leaves the placeholder; errors never throw. The single-client QMP means
+  // this contends a little with the agent window's fast poll → at worst an occasional skipped frame.
+  useEffect(() => {
+    let alive = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const tick = async () => {
+      if (!alive) return;
+      try {
+        const f = await invoke<string>("capture_frame", { source: "vm" });
+        if (alive && f && f !== "unchanged") setVmGlance(f);
+      } catch { /* VM not up — keep the placeholder */ }
+      if (alive) timer = setTimeout(tick, 2000);
+    };
+    timer = setTimeout(tick, 1200);
+    return () => { alive = false; if (timer) clearTimeout(timer); };
+  }, []);
 
   const handleSend = () => {
     if (!input.trim() || isLoading) return;
@@ -62,7 +82,7 @@ export default function ChatDefault() {
               fontFamily: "var(--font-display)", fontWeight: 600, fontSize: 16,
               background: "var(--grad-brand-h)", WebkitBackgroundClip: "text",
               backgroundClip: "text", WebkitTextFillColor: "transparent",
-            }}>Chat</span>
+            }}>Control</span>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             {isLoading && (
@@ -195,6 +215,64 @@ export default function ChatDefault() {
                 </button>
               )}
             </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Agent rail — glance + command. The full work surface (bare VM) opens in its own window. */}
+      <div style={{
+        width: 320, flexShrink: 0, borderLeft: "1px solid var(--line-700)",
+        background: "var(--glass-opaque)", display: "flex", flexDirection: "column",
+      }}>
+        <div style={{
+          height: 52, flexShrink: 0, display: "flex", alignItems: "center",
+          justifyContent: "space-between", padding: "0 16px", borderBottom: "1px solid var(--line-700)",
+        }}>
+          <span className="t-label">Agent</span>
+          <button className="lg-btn lg-btn--secondary lg-btn--sm"
+            onClick={() => invoke("open_agent_window").catch(() => navigate("/agent"))}>
+            <Maximize2 size={13} style={{ marginRight: 6 }} /> Open
+          </button>
+        </div>
+
+        {/* Live VM glance → click to open the full Agent window */}
+        <button
+          onClick={() => invoke("open_agent_window").catch(() => navigate("/agent"))}
+          aria-label="Open the Agent VM window"
+          style={{
+            margin: 16, padding: 0, border: "1px solid var(--line-700)", borderRadius: 12,
+            overflow: "hidden", background: "#000", cursor: "pointer", aspectRatio: "16 / 10", position: "relative",
+          }}
+        >
+          {vmGlance ? (
+            <img src={vmGlance} alt="Agent VM" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+          ) : (
+            <div style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8, color: "var(--text-dim)" }}>
+              <Monitor size={22} />
+              <span style={{ fontSize: 12 }}>Open the agent VM →</span>
+            </div>
+          )}
+        </button>
+
+        {/* Status + controls */}
+        <div style={{ padding: "0 16px", display: "flex", flexDirection: "column", gap: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ width: 8, height: 8, borderRadius: 999, background: isLoading ? (isPaused ? "var(--yellow-500)" : "var(--green-500)") : "var(--ink-600)" }} />
+            <span style={{ fontSize: 13, color: "var(--text-body)" }}>{isLoading ? (isPaused ? "Paused" : "Working") : "Idle"}</span>
+          </div>
+          {isLoading && (
+            <div style={{ display: "flex", gap: 8 }}>
+              <button className="lg-btn lg-btn--secondary lg-btn--sm" style={{ flex: 1 }} onClick={() => setIsPaused(!isPaused)}>{isPaused ? "Resume" : "Pause"}</button>
+              <button className="lg-btn lg-btn--secondary lg-btn--sm" style={{ flex: 1 }} onClick={stop}>Stop</button>
+            </div>
+          )}
+        </div>
+
+        {/* Plan — wires to the live planner feed (sub-goals) once the backend emits it. */}
+        <div style={{ flex: 1, minHeight: 0, padding: 16, marginTop: 4, overflowY: "auto" }}>
+          <div className="t-label" style={{ marginBottom: 8 }}>Plan</div>
+          <div style={{ fontSize: 12, color: "var(--text-dim)", lineHeight: 1.5 }}>
+            The agent's live plan appears here once it's working a goal.
           </div>
         </div>
       </div>
