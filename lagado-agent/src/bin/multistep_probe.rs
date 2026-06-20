@@ -114,11 +114,16 @@ async fn main() {
             }
             let out = match &cmd { Some(c) => ssh(&format!("{{ {c} ; }} 2>&1")), None => String::new() };
             let err: String = out.lines().filter(|l|!l.is_empty()).collect::<Vec<_>>().join(" ");
-            println!("   step {step} [reached {reached}/{n}]: {} {}",
-                line.chars().take(64).collect::<String>(),
-                if err.is_empty() {String::new()} else {format!("→ {}", err.chars().take(50).collect::<String>())});
-            hist = if hist=="(none)" { format!("- {line}") } else { format!("{hist}\n- {line}") };
-            let _ = cmd; // executed above
+            // OSCILLATION RAIL: if the action changed NOTHING in the world, it was a no-op/repeat → tell
+            // the model explicitly so it ADVANCES instead of repeating (the static prompt rule didn't take).
+            let no_effect = cmd.is_some() && err.is_empty() && observe(&ssh) == env;
+            println!("   step {step} [reached {reached}/{n}]: {} {}{}",
+                line.chars().take(60).collect::<String>(),
+                if err.is_empty() {String::new()} else {format!("→ {}", err.chars().take(40).collect::<String>())},
+                if no_effect {"  [NO EFFECT]"} else {""});
+            let mark = if no_effect { "  ← NO EFFECT (already done / matched nothing) — do a DIFFERENT next step" }
+                       else if !err.is_empty() { "  ← FAILED" } else { "" };
+            hist = if hist=="(none)" { format!("- {line}{mark}") } else { format!("{hist}\n- {line}{mark}") };
         }
         while reached < n && cp_ok(&ssh, checks[reached]) { reached += 1; }
         // record the transition that broke (reached → reached, i.e. the reached-th transition failed)
