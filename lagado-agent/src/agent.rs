@@ -1671,12 +1671,18 @@ pub async fn agent_loop(
                 gate::Verdict::Block(reason) => { chronos::log(&format!("react_blocked: {reason}")); format!("Blocked: {reason}") }
             };
             memory.push(Step { index: enforcer.step(), prompt: String::new(), output: output.clone(), action: None });
-            // FEED BACK the command's own error (the forcing function) — only on failure, so success is quiet.
+            // FEED BACK: the command's own ERROR (forcing function) on failure, OR — the OSCILLATION RAIL
+            // (multistep map: 2/7→4/7) — a successful-but-WORLD-UNCHANGED action is a no-op/repeat, so tell
+            // the model it had no effect and to ADVANCE (the static "don't repeat" prompt rule didn't take).
             let exit_ok = parse_exit_code(&output) == Some(0);
             let msg: String = output.lines().filter(|l| !l.starts_with("[exit")).collect::<Vec<_>>().join(" ");
-            let note = if exit_ok { String::new() }
-                       else if msg.trim().is_empty() { "  → (command failed)".to_string() }
-                       else { format!("  → ERROR: {}", msg.trim().chars().take(160).collect::<String>()) };
+            let no_effect = exit_ok && discover_environment(actuator.as_ref(), &goal) == env;
+            let note = if !exit_ok {
+                           if msg.trim().is_empty() { "  → (command failed)".to_string() }
+                           else { format!("  → ERROR: {}", msg.trim().chars().take(160).collect::<String>()) }
+                       } else if no_effect {
+                           "  ← NO EFFECT (already done / matched nothing) — do a DIFFERENT next step".to_string()
+                       } else { String::new() };
             hist = if hist == "(none yet)" { format!("- {cmd}{note}") } else { format!("{hist}\n- {cmd}{note}") };
         }
         if completed {
