@@ -1,1 +1,1 @@
-{"default":{"identifier":"default","description":"Default capability for the main Lagado window","local":true,"windows":["main"],"permissions":["core:default"]}}
+{"default":{"identifier":"default","description":"Default capability for the Lagado main + agent windows","local":true,"windows":["main","agent"],"permissions":["core:default"]}}

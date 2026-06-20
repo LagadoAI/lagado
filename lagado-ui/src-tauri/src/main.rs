@@ -923,11 +923,15 @@ fn main() {
         })
         .manage(state)
         .on_window_event(|window, event| {
-            // Closing the window = shut EVERYTHING down (no orphan processes), as requested — not
-            // hide-to-tray. The subprocess kill runs synchronously before the process tears down.
             if let WindowEvent::CloseRequested { .. } = event {
-                shutdown_everything(window.app_handle());
-                window.app_handle().exit(0);
+                // Only the MAIN window closing shuts EVERYTHING down (no orphan processes). The
+                // separate "agent" window (the bare VM work surface) just closes itself — the app,
+                // control surface, and the running VM all stay alive, so closing the VM view never
+                // tears down the whole app (and the agent's work isn't interrupted; reopen to watch).
+                if window.label() == "main" {
+                    shutdown_everything(window.app_handle());
+                    window.app_handle().exit(0);
+                }
             }
         })
         .invoke_handler(tauri::generate_handler![
