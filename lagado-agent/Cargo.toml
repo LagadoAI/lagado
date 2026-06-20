@@ -82,3 +82,8 @@ test = false
 name = "reason_emit_probe"
 path = "src/bin/reason_emit_probe.rs"
 test = false
+
+[[bin]]
+name = "multistep_probe"
+path = "src/bin/multistep_probe.rs"
+test = false
