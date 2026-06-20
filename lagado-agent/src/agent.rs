@@ -1103,10 +1103,21 @@ pub fn goal_completion_checks(goal: &str) -> Vec<String> {
     // Leaf tokens only (ancestors like `/tmp` would always pass and mask a real miss). Without this the
     // agent acts on the right /tmp path but, finding no check, hands back even on success.
     let deleting = ["delete", "remove", "trash", "rm "].iter().any(|k| lo.contains(k));
+    // CONSERVATIVE-OR-SILENT: a goal that demands the target be RUNNABLE needs `test -x`, NOT `test -e`.
+    // `test -e` (mere existence) lets "create X and mark it runnable" claim success when the chmod step
+    // was dropped — a FALSE SUCCESS (the held-out runnable-mark miss). A stronger check can only turn a
+    // false claim into an honest handback, never the reverse. Scope to the SCRIPT path so an unrelated
+    // named file isn't wrongly required to be executable.
+    let wants_exec = ["runnable", "executable", "chmod +x", "make it executable", "mark it exec"]
+        .iter().any(|k| lo.contains(k));
+    let is_scriptish = |p: &str| [".sh", ".py", ".pl", ".rb", ".bash"].iter().any(|e| p.ends_with(e));
     for tok in goal.split(|c: char| c.is_whitespace() || c == '"' || c == '\'' || c == '`') {
         let t = tok.trim_matches(|c: char| !c.is_alphanumeric() && !"/_-.".contains(c));
         if t.starts_with('/') && t.len() > 1 && !t.contains("..") {
-            checks.push(format!("test {} {t}", if deleting { "! -e" } else { "-e" }));
+            let op = if deleting { "! -e" }
+                     else if wants_exec && is_scriptish(t) { "-x" } // executable ⇒ existence too
+                     else { "-e" };
+            checks.push(format!("test {op} {t}"));
         }
     }
     let words: Vec<&str> = goal.split_whitespace().collect();
@@ -1210,13 +1221,17 @@ pub fn goal_postconditions(goal: &str) -> Vec<String> {
         return Vec::new(); // not a create/delete intent → no checkable goal artifact
     }
     let wants_dir = lo.contains("director") || lo.contains("folder");
-    // "make it executable" / "chmod +x" → the artifact must be EXECUTABLE, not merely present. `test -e`
-    // FALSE-CLAIMS when the file was created but never chmod'd (the bench caught this). Strong: `test -x`.
-    let wants_exec = lo.contains("executable") || lo.contains("chmod +x") || lo.contains("chmod 7");
+    // EXECUTABLE intent → the artifact must be EXECUTABLE, not merely present. `test -e` FALSE-CLAIMS when
+    // the file was created but never chmod'd (the held-out runnable-mark miss — "mark it runnable" is a
+    // synonym the old list "executable"/"chmod" missed). Broadened synonyms; SCOPED to script files so an
+    // unrelated output path in the same goal (e.g. /tmp/status) isn't wrongly required to be executable.
+    let wants_exec = ["executable", "runnable", "chmod +x", "chmod 7", "make it run", "mark it run",
+                      "execute it", "run it"].iter().any(|k| lo.contains(k));
+    let is_scriptish = |p: &str| [".sh", ".py", ".pl", ".rb", ".bash"].iter().any(|e| p.ends_with(e));
     extract_paths(goal).into_iter().map(|p| {
         if wants_absent { format!("test ! -e {p}") }
         else if wants_dir { format!("test -d {p}") }
-        else if wants_exec { format!("test -x {p}") }
+        else if wants_exec && is_scriptish(&p) { format!("test -x {p}") }
         else { format!("test -e {p}") }
     }).collect()
 }
