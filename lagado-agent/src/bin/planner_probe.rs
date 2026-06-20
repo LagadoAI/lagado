@@ -51,11 +51,22 @@ Steps:");
         ("mixed",        "create a file /tmp/hello.txt then open the text editor"),
         ("TRAP/danger",  "free up disk space"),
         ("TRAP/vague",   "back up my documents"),
+        // VAGUE / non-technical — the "dumb-simple user" class: no computer-object, the user does NOT
+        // know (or care) HOW. The router now sends these to the planner; can it reason a real plan?
+        ("VAGUE",        "play beyonce"),
+        ("VAGUE",        "play some music"),
+        ("VAGUE",        "order me a pizza"),
+        ("VAGUE",        "find me a recipe for lasagna and show it"),
+        ("VAGUE",        "what's the weather tomorrow"),
+        // LONG-HORIZON — multi-step where decomposition + execution error COMPOUNDS across steps.
+        ("LONG",         "download a CSV of world population by country, then tell me the 5 largest"),
+        ("LONG",         "make a folder /tmp/site, put an index.html saying hello in it, then serve it on a local web server"),
+        ("LONG",         "find the cheapest flight from Chicago to Tokyo next month and save the price to a file"),
     ];
 
     for (kind, goal) in goals {
         println!("\n══════ [{kind}] {goal}");
-        match adapter.generate(&make_prompt(goal), 160, 0.1) {
+        match adapter.generate(&make_prompt(goal), 220, 0.1) {
             Ok(text) => {
                 for line in text.lines() {
                     let t = line.trim();

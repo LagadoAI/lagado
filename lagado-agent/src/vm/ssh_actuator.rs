@@ -112,7 +112,7 @@ impl SshActuator {
 
     /// Construct with a SHARED persistent shell session — used by `DynamicActuator`, which builds an
     /// ephemeral `SshActuator` per call; the shared session is what makes cross-step state survive that.
-    pub fn with_session(
+    pub(crate) fn with_session(
         host: &str, port: u16, user: &str,
         cache: Arc<Mutex<PerceptionCache>>,
         session: Arc<Mutex<Option<ShellSession>>>,

@@ -25,9 +25,9 @@ impl Default for VmConfig {
         let data_dir = std::env::var("LAGADO_DATA_DIR").unwrap_or_else(|_| {
             format!("{}/.laputa-secure", std::env::var("HOME").unwrap_or_default())
         });
-        let seed = format!("{data_dir}/vm-images/seed.iso");
+        let seed = format!("{data_dir}/vm-images/seed-fedora.iso");
         Self {
-            disk_image: format!("{data_dir}/vm-images/lagado-guest.qcow2"),
+            disk_image: format!("{data_dir}/vm-images/lagado-guest-fedora.qcow2"),
             seed_iso: if std::path::Path::new(&seed).exists() { Some(seed) } else { None },
             mem_mib: 4096,
             vcpus: 4,

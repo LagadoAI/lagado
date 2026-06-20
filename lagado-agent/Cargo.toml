@@ -47,6 +47,21 @@ name = "axblind_probe"
 path = "src/bin/axblind_probe.rs"
 test = false
 
+[[bin]]
+name = "user_stress"
+path = "src/bin/user_stress.rs"
+test = false
+
+[[bin]]
+name = "hard_stress"
+path = "src/bin/hard_stress.rs"
+test = false
+
+[[bin]]
+name = "osworld_real"
+path = "src/bin/osworld_real.rs"
+test = false
+
 [build-dependencies]
 cc = "1"
 
@@ -57,3 +72,8 @@ test = false   # CLI entry point has no unit tests; lib tests cover the crate
 
 [dev-dependencies]
 tempfile = "3"
+
+[[bin]]
+name = "capability_probe"
+path = "src/bin/capability_probe.rs"
+test = false

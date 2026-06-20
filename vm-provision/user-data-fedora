@@ -1,0 +1,84 @@
+#cloud-config
+# Lagado guest provisioning — FEDORA 44 + CINNAMON (cloud-init first boot).
+# Cinnamon is chosen as the "closest to a Windows experience" desktop that KEEPS the GTK/AT-SPI2
+# accessibility stack perceive.py/tine already reads (vs KDE's Qt). Builds the agent's working surface:
+# Cinnamon desktop + autologin + SSH (host key auth) + AT-SPI2 + xdotool + tine.
+#
+# Design choices for a DISPOSABLE sandbox VM (the security boundary is the VM itself, not the guest OS):
+#   - SELinux -> permissive: avoids first-boot contexts breaking the SSH key-auth / a11y control channel.
+#   - firewalld off: the host port-forwards 2222->22; one less variable.
+#   - Desktop install lives in runcmd with `|| true` so the SSH CONTROL CHANNEL comes up even if the
+#     desktop transaction hiccups — that leaves a way in to repair the desktop live. sshd is enabled in
+#     the Fedora cloud image by default, so SSH is the safety net.
+# Prove the control channel after boot with:  cargo run --bin harness_proof
+hostname: lagado-vm
+
+users:
+  - name: laputa
+    plain_text_passwd: laputa
+    lock_passwd: false
+    shell: /bin/bash
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    groups: [wheel, adm]
+    ssh_authorized_keys:
+      - __HOST_PUBKEY__
+
+ssh_pwauth: true
+chpasswd:
+  expire: false
+
+# Only the CONTROL-CHANNEL-critical packages here (must succeed). The heavy desktop goes in runcmd,
+# tolerant, so a desktop hiccup never costs us SSH access.
+package_update: true
+package_upgrade: false
+packages:
+  - openssh-server
+  - at-spi2-core
+  - python3-gobject
+  - python3-pip
+  - xdotool
+
+write_files:
+  # Autologin laputa into a Cinnamon session on lightdm.
+  - path: /etc/lightdm/lightdm.conf.d/50-lagado-autologin.conf
+    content: |
+      [Seat:*]
+      autologin-user=laputa
+      autologin-user-timeout=0
+      user-session=cinnamon
+  # Turn on the GTK accessibility bridge for the whole session so AT-SPI2 sees apps.
+  - path: /etc/profile.d/lagado-a11y.sh
+    content: |
+      export GTK_MODULES=gail:atk-bridge
+      export QT_ACCESSIBILITY=1
+      export NO_AT_BRIDGE=0
+
+runcmd:
+  # ── SELinux + firewall: sandbox pragmatism (see header) ──
+  - setenforce 0 || true
+  - sed -i 's/^SELINUX=enforcing/SELINUX=permissive/' /etc/selinux/config || true
+  - systemctl disable --now firewalld || true
+  # ── SSH control channel (the must-have) ──
+  - systemctl enable sshd
+  - systemctl restart sshd
+  # ── Desktop: Cinnamon + display manager + apps. Tolerant — SSH already up if this stumbles. ──
+  - dnf -y install xorg-x11-server-Xorg lightdm lightdm-gtk-greeter dbus-x11 cinnamon nemo gnome-terminal firefox pipx || true
+  # lightdm autologin on Fedora needs the user in an 'autologin' group.
+  - groupadd -r autologin || true
+  - gpasswd -a laputa autologin || true
+  # AT-SPI2: enable toolkit accessibility for the session default (Cinnamon honours the GNOME schema).
+  - su - laputa -c 'gsettings set org.gnome.desktop.interface toolkit-accessibility true' || true
+  # tine (the AT-SPI2 tree reader perceive.py drives). MUST be system-installed, not pipx-isolated:
+  # perceive.py invokes `python3 -m tine.cli tree` with the system python, which can't import a pipx
+  # venv → silent zero elements. --break-system-packages puts tine.cli on the system path.
+  # Build deps FIRST: tine's evdev dep has no prebuilt wheel for Fedora 44's Python 3.14, so pip
+  # compiles it from source — needs gcc + python3-devel + kernel-headers (linux/input.h). Without
+  # these the wheel build fails and tine is silently absent (the perception channel goes blind).
+  - dnf -y install gcc python3-devel kernel-headers || true
+  - su - laputa -c 'pip3 install --break-system-packages tine-cli' || true
+  # ── Bring the desktop up now so the first proof run doesn't wait on a reboot. ──
+  - systemctl set-default graphical.target
+  - systemctl enable lightdm || true
+  - systemctl start lightdm || true
+
+final_message: "lagado fedora/cinnamon guest ready after $UPTIME seconds"

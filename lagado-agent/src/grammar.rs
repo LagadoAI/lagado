@@ -48,6 +48,58 @@ pub fn selector_grammar(n: usize) -> String {
     g
 }
 
+/// GBNF for the file-ops CAPABILITY layer — constrains output to LFM2's native PYTHONIC call format
+/// (`[move(source_dir="…", selector="*.pdf", dest="…")]`), well-formed by construction: valid verb, the
+/// required params in order, enum-constrained `mode`/`filter`/`recursive`, and — the load-bearing part —
+/// every SOURCE path slot bound to a path that actually appears in the current observe listing (the model
+/// cannot emit an off-screen source). Dest/selector/new_name/content stay freeform (they may be new).
+/// `observed` empty → source slots fall back to freeform (no path enumeration possible).
+pub fn capability_grammar(observed: &[String]) -> String {
+    use std::fmt::Write;
+    // Alternation = the bound source vocabulary. ONLY GBNF-safe paths (no chars that could break a
+    // string literal) — an odd path must NEVER silently invalidate the whole grammar and drop the
+    // constraint (the failure that contaminated the 1.2B A/B). Unsafe paths are skipped, not escaped.
+    let pathalt: String = observed.iter()
+        .filter(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_alphanumeric() || "/._- ".contains(c)))
+        .map(|p| format!("\"{p}\""))
+        .collect::<Vec<_>>().join(" | ");
+    // SOURCE slots bind to an EXACT observed path; DEST slots bind to an observed path OR a new child
+    // under one (`<observed>/<seg>` — e.g. a new Scans/ folder or total.txt file). Binding dest too was
+    // the fix for unbound-slot hallucination (gen2.5 emitted dest="documents" / "C:/Users/…").
+    let srcq = if pathalt.is_empty() { "strq".to_string() } else { "src".to_string() };
+    let dstq = if pathalt.is_empty() { "strq".to_string() } else { "dst".to_string() };
+
+    let mut g = String::new();
+    let _ = writeln!(g, "root ::= \"[\" call \"]\"");
+    // INLINE alternatives — each `call` alternative MUST be terminal-leading. llama.cpp's GBNF SILENTLY
+    // DROPS a grammar whose top alternation is bare rule references (`call ::= c_move | c_copy | …`) →
+    // the constraint vanishes and the model runs free (this dead grammar made every prior capability run
+    // unconstrained). Verified by bisection: terminal-leading alternatives enforce; bare references don't.
+    let _ = writeln!(g, "{}", concat!(
+        r#"call ::= "move(source_dir=" {S} ", selector=" strq ", dest=" {D} new_opt ")""#,
+        r#" | "copy(source_dir=" {S} ", selector=" strq ", dest=" {D} rec_opt new_opt ")""#,
+        r#" | "rename(path=" {S} ", new_name=" strq ")""#,
+        r#" | "make_folder(path=" {D} ")""#,
+        r#" | "write_file(path=" {D} content_opt ")""#,
+        r#" | "delete(source_dir=" {S} ", selector=" strq filter_opt ")""#,
+        r#" | "extract_to_file(mode=\"value\", source=" {S} ", pattern=" strq ", dest_file=" {D} ")""#,
+        r#" | "extract_to_file(mode=\"count\", source_dir=" {S} ", selector=" strq ", dest_file=" {D} ")""#,
+        r#" | "extract_to_file(mode=\"list\", source_dir=" {S} ", selector=" strq ", dest_file=" {D} ")""#,
+    ).replace("{S}", &srcq).replace("{D}", &dstq));
+    let _ = writeln!(g, r#"new_opt ::= ( ", new_name=" strq )?"#);
+    let _ = writeln!(g, r#"rec_opt ::= ( ", recursive=true" )?"#);
+    let _ = writeln!(g, r#"content_opt ::= ( ", content=" strq )?"#);
+    let _ = writeln!(g, r#"filter_opt ::= ( ", filter=\"empty\"" | ", filter=\"larger_than_1k\"" )?"#);
+    if !pathalt.is_empty() {
+        let _ = writeln!(g, r#"dpath ::= {pathalt}"#);
+        let _ = writeln!(g, r#"dst ::= "\"" dpath ( "/" seg )? "\"""#);
+        let _ = writeln!(g, r#"seg ::= [A-Za-z0-9._/-]+"#);
+        let _ = writeln!(g, r#"src ::= "\"" dpath "\"""#);
+    }
+    let _ = writeln!(g, r#"strq ::= "\"" [^"\\]* "\"""#);
+    g
+}
+
 /// GBNF that forces the intent classifier to emit exactly one label token.
 /// Eliminates the silent "unparseable output → CHAT default" failure mode:
 /// without this, the 1.2B echoes message words ("Escape", "Search") that parse

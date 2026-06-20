@@ -793,6 +793,215 @@ fn reform_hint(failure: CommandFailure) -> &'static str {
 
 /// Derive a deterministic WORLD-STATE postcondition for a command — a shell `test` that exits 0 iff the
 /// command's stated file-effect actually HOLDS in the world. This closes the "exit 0 ≠ effect" gap for
+// ── ReAct command loop (validated 6/6, react_loop_probe) ─────────────────────────────────────────────
+// The user's architecture: reflexive DOING (one move, single-turn-fresh, resets each step) + a SEPARATE
+// planning/verify attention. We DON'T trust the 8B to author a full plan upfront (discover_probe: it
+// hallucinates paths/ops). Instead, per step: observe the real filesystem → reason ONE next command →
+// run it (capture the OS error) → VERIFY against a DERIVED expected end-state (deterministic `test`, the
+// judge + stop) → feed back {expected + error}. Three forcing functions took it 4/6→6/6: deterministic
+// verify, absolute-path rule, and feeding the command's own error back.
+
+/// OBSERVE: a read-only, GOAL-RELEVANT, RECURSIVE listing = the "current environment" the reflex step
+/// reasons over. Roots = the user's standard folders + /tmp + ANY absolute path named in the goal;
+/// `find -maxdepth 4` so nested files (OSWorld trees, /tmp fixtures) are VISIBLE; sorted (stable for the
+/// no-progress compare) and capped (bounded prompt). Deterministic; read-only.
+pub fn discover_environment(actuator: &dyn Actuator, goal: &str) -> String {
+    // FOCUSED roots: the three work dirs (nested files visible) + any ABSOLUTE path named in the goal.
+    // NOT $HOME-root or /tmp — recursing those is a firehose (tine/, system temp) that drowns the signal
+    // (measured: it HALVED the pass rate vs a focused listing). Files+dirs, depth 4, sorted, capped.
+    let mut roots = vec!["$HOME/Desktop".to_string(),
+        "$HOME/Documents".to_string(), "$HOME/Downloads".to_string()];
+    for tok in goal.split_whitespace() {
+        let t = tok.trim_matches(|c: char| !c.is_alphanumeric() && !"/_-.".contains(c));
+        if t.starts_with('/') && t.len() > 1 { roots.push(t.to_string()); }
+    }
+    roots.sort(); roots.dedup();
+    let script = format!(
+        "for r in {}; do [ -e \"$r\" ] && find \"$r\" -maxdepth 4 -not -path '*/.*' 2>/dev/null; done \
+         | sort -u | head -80", roots.join(" "));
+    actuator.run_command(&script).lines().filter(|l| !l.starts_with("[exit")).collect::<Vec<_>>().join("\n")
+}
+
+/// PLAN (separate attention): derive the EXPECTED end-state as a list of absolute paths that must exist
+/// when the goal is done — grounded in the current environment. A NARROW step (LIST paths, never author
+/// shell — the weak model can't write a check, react_loop_probe v2). The harness wraps each in `test -e`
+/// → deterministic, side-effect-free. Returns (checks, human-hint). Empty checks ⇒ caller fail-closed.
+pub fn derive_expected(goal: &str, env: &str, adapter: &Arc<dyn InferenceAdapter>) -> (Vec<String>, String) {
+    let prompt = format!(
+"List the absolute path of EVERY file or folder that must EXIST when this goal is fully done. One path
+per line, starting with /home/laputa/. Use the exact filenames from 'Current files'. No narration, no commands.
+
+Goal: {goal}
+Current files:
+{env}
+Expected paths:");
+    let text = adapter.generate(&prompt, 96, 0.1).unwrap_or_default();
+    let paths: Vec<String> = text.lines().map(str::trim)
+        .filter(|l| l.starts_with("/home/laputa/"))
+        .map(|l| l.split_whitespace().next().unwrap_or(l).trim_end_matches([',', '.', ';']).to_string())
+        .filter(|p| p.len() > "/home/laputa/".len())
+        .collect();
+    let hint = if paths.is_empty() { goal.to_string() } else { paths.join(", ") };
+    let checks = paths.into_iter().map(|p| format!("test -e {p}")).collect();
+    (checks, hint)
+}
+
+/// REASON (reflex): single-turn-fresh — {goal, expected, current env, history+errors} → ONE next shell
+/// command. Resets every step (no memory of prior reasoning). The expected target + the last command's
+/// ERROR are the forcing functions. Rejects hang-prone commands (sudo/interactive). None ⇒ stop.
+pub fn react_next_command(goal: &str, expected: &str, env: &str, hist: &str, adapter: &Arc<dyn InferenceAdapter>) -> Option<String> {
+    let prompt = format!(
+"You are doing ONE step of a file task on Linux (home is /home/laputa). Output ONLY the single next
+shell command that moves toward the EXPECTED RESULT. No narration.
+- use mv to move/rename, cp to copy (KEEP THE SAME FILENAME), mkdir -p for a folder, rm to delete
+- ALWAYS write the FULL absolute path (/home/laputa/...) for BOTH source and destination — copy the
+  exact source path from 'Current files', never a bare filename. Never invent files/contents. One command.
+
+Goal: {goal}
+EXPECTED RESULT (not yet satisfied — make it true): {expected}
+Current files:
+{env}
+Steps already done:
+{hist}
+Next single command:");
+    let text = adapter.generate(&prompt, 96, 0.1).ok()?;
+    let line = text.lines().map(str::trim).find(|l| !l.is_empty())?;
+    let cmd = line.strip_prefix("run the command ").unwrap_or(line).trim().trim_start_matches('$').trim();
+    if cmd.is_empty() || command_would_hang(&format!("run the command {cmd}")) { return None; }
+    Some(cmd.to_string())
+}
+
+// ── CAPABILITY layer (App-Intents equivalent; validated ~2× free-form, capability_probe) ─────────────
+// The model SELECTS a typed verb via the Pythonic GBNF (`grammar::capability_grammar`, source paths bound
+// to observe) instead of authoring free-form shell. parse → `capability_to_command` builds ONE
+// deterministic shell command (resolve happens inside it via `find`), which runs through the SAME
+// gate+execute path as the free-form channel — so HITL/destructive gating is inherited unchanged.
+
+/// The capability menu prompt (the model emits ONE Pythonic call; the grammar enforces well-formedness).
+pub fn capability_prompt(goal: &str, env: &str, hist: &str) -> String {
+    format!(
+"You operate a computer by choosing ONE typed action (a Pythonic call) that moves toward the goal.
+ACTIONS — emit EXACTLY ONE call. Use ONLY absolute paths from 'Current files'.
+- make_folder(path=\"/abs/folder\")
+- write_file(path=\"/abs/file\", content=\"TEXT\")
+- move(source_dir=\"/abs/folder\", selector=\"*.pdf\", dest=\"/abs/folder\")   (selector = a GLOB for all matches, or one filename; new_name optional)
+- copy(source_dir=\"/abs/folder\", selector=\"*.jpg\", dest=\"/abs/folder\")   (recursive=true to recurse)
+- rename(path=\"/abs/file\", new_name=\"newname.ext\")
+- delete(source_dir=\"/abs/folder\", selector=\"*.jpg\")                       (filter=\"empty\" or \"larger_than_1k\")
+- extract_to_file(mode=\"value\", source=\"/abs/file\", pattern=\"REGEX\", dest_file=\"/abs/file\")
+- extract_to_file(mode=\"count\", source_dir=\"/abs/folder\", selector=\"*.log\", dest_file=\"/abs/file\")
+To affect ALL matching files use a GLOB selector (e.g. *.pdf), NOT a single filename. home is /home/laputa.
+
+Goal: {goal}
+Current files:
+{env}
+Actions so far:
+{hist}
+Next single action:")
+}
+
+/// Parse a Pythonic call `[move(source_dir="/x", selector="*.pdf", dest="/y")]` → (verb, kwargs).
+pub fn parse_capability_call(line: &str) -> Option<(String, std::collections::HashMap<String, String>)> {
+    let s = line.trim().trim_start_matches('[').trim_end_matches(']').trim();
+    let open = s.find('(')?; let close = s.rfind(')')?; if close < open { return None; }
+    let verb = s[..open].trim().trim_end_matches(':').to_lowercase();
+    let (mut parts, mut cur, mut q) = (Vec::new(), String::new(), false);
+    for c in s[open+1..close].chars() { match c {
+        '"' => { q = !q; cur.push(c); }
+        ',' if !q => parts.push(std::mem::take(&mut cur)),
+        c => cur.push(c) } }
+    if !cur.trim().is_empty() { parts.push(cur); }
+    let mut m = std::collections::HashMap::new();
+    for part in parts { if let Some((k, v)) = part.split_once('=') {
+        let v = v.trim().trim_matches('"').trim_matches(|c| c == '<' || c == '>');
+        m.insert(k.trim().to_lowercase(), v.to_string()); } }
+    Some((verb, m))
+}
+
+/// Build ONE deterministic shell command for a capability call. Resolve (the `find`) happens inside the
+/// command, so this is pure. Handles file-OR-folder sources and glob OR single-filename selectors. The
+/// model NEVER writes shell or a check — it only filled typed slots. None ⇒ malformed/incomplete call.
+pub fn capability_to_command(verb: &str, p: &std::collections::HashMap<String, String>) -> Option<String> {
+    let g = |k: &str| p.get(k).cloned().unwrap_or_default();
+    let q = |s: &str| format!("\"{}\"", s.replace('"', ""));
+    match verb {
+        "make_folder" => { let path = g("path"); if path.is_empty() { return None; } Some(format!("mkdir -p {}", q(&path))) }
+        "write_file" => { let path = g("path"); if path.is_empty() { return None; }
+            Some(format!("mkdir -p \"$(dirname {p})\"; printf '%s' {c} > {p}", p = q(&path), c = q(&g("content")))) }
+        "move" | "copy" => {
+            let (sd, sel, dest) = (g("source_dir"), g("selector"), g("dest"));
+            if sd.is_empty() || dest.is_empty() { return None; }
+            let op = if verb == "move" { "mv" } else { "cp" };
+            let cf = if verb == "copy" && g("recursive") == "true" { "-r" } else { "" };
+            let nn = g("new_name");
+            if !nn.is_empty() && !sel.contains('*') {   // single-file rename-on-move/copy
+                let src = if sel.is_empty() { sd.clone() } else { format!("{sd}/{sel}") };
+                return Some(format!("mkdir -p {d} && {op} {cf} {} {}", q(&src), q(&format!("{dest}/{nn}")), d = q(&dest)));
+            }
+            let depth = if g("recursive") == "true" { "" } else { "-maxdepth 1" };
+            if sel.is_empty() {
+                Some(format!("mkdir -p {d} && {op} {cf} {s} {d}/", s = q(&sd), d = q(&dest)))
+            } else {   // source_dir may be a FILE or a folder+selector
+                Some(format!("mkdir -p {d} && if [ -f {s} ]; then {op} {cf} {s} {d}/; else find {s} {depth} -name {sel} -type f -exec {op} {cf} -t {d}/ {{}} +; fi",
+                    s = q(&sd), d = q(&dest), sel = q(&sel)))
+            }
+        }
+        "rename" => { let (path, nn) = (g("path"), g("new_name")); if path.is_empty() || nn.is_empty() { return None; }
+            Some(format!("mv {p} \"$(dirname {p})\"/{n}", p = q(&path), n = q(&nn))) }
+        "delete" => { let (sd, sel) = (g("source_dir"), g("selector")); if sd.is_empty() || sel.is_empty() { return None; }
+            let filt = match g("filter").as_str() { "empty" => "-empty", "larger_than_1k" => "-size +1k", _ => "" };
+            Some(format!("find {s} -maxdepth 1 -name {sel} -type f {filt} -exec rm -f {{}} +", s = q(&sd), sel = q(&sel))) }
+        "extract_to_file" => {
+            let mode = g("mode");
+            let dest = if g("dest_file").is_empty() { g("dest") } else { g("dest_file") };
+            if dest.is_empty() { return None; }
+            let inner = match mode.as_str() {
+                "value" => { let (src, pat) = (g("source"), g("pattern")); if src.is_empty() || pat.is_empty() { return None; } format!("grep -oE {} {} | head -1", q(&pat), q(&src)) }
+                "count" => { let (sd, sel) = (g("source_dir"), g("selector")); if sd.is_empty() { return None; } format!("find {} -maxdepth 1 -name {} -type f | wc -l", q(&sd), q(&sel)) }
+                "list"  => { let (sd, sel) = (g("source_dir"), g("selector")); if sd.is_empty() { return None; } format!("find {} -maxdepth 1 -name {} -type f -printf '%f\\n'", q(&sd), q(&sel)) }
+                _ => return None,
+            };
+            Some(format!("mkdir -p \"$(dirname {d})\"; printf '%s\\n' \"$({inner})\" > {d}", d = q(&dest)))
+        }
+        _ => None,
+    }
+}
+
+/// DETERMINISTIC completion check for the ReAct loop (NOT model-derived — the weak model can't author a
+/// check, react_loop_probe v2 + the production false-success). Extracts the goal's NAMED target artifact:
+/// a `x.ext` filename after a target preposition (to/into/called/named) → `test -e <dir>/<file>`; a
+/// "folder called/named X" → that dir must be a NON-EMPTY dir (catches the empty-folder false success).
+/// Resolves a folder word (Documents/Downloads/Desktop), default ~. Conservative: no derivable named
+/// target ⇒ empty ⇒ caller hands back honestly (never a false claim). The judge; the model only acts.
+pub fn goal_completion_checks(goal: &str) -> Vec<String> {
+    let lo = goal.to_lowercase();
+    let dir = if lo.contains("documents") { "~/Documents" }
+              else if lo.contains("downloads") { "~/Downloads" }
+              else if lo.contains("desktop") { "~/Desktop" } else { "~" };
+    let mut checks = Vec::new();
+    let words: Vec<&str> = goal.split_whitespace().collect();
+    for (i, w) in words.iter().enumerate() {
+        let prev = if i > 0 { words[i-1].to_lowercase() } else { String::new() };
+        let tok = w.trim_matches(|c: char| !c.is_alphanumeric() && c != '.' && c != '_' && c != '-');
+        let is_file = tok.contains('.') && tok.rsplit('.').next()
+            .map_or(false, |e| (1..=5).contains(&e.len()) && e.chars().all(|c| c.is_ascii_alphanumeric()));
+        if is_file && matches!(prev.as_str(), "to" | "into" | "called" | "named") {
+            checks.push(format!("test -e {dir}/{tok}"));
+        }
+    }
+    for kw in ["folder called ", "folder named ", "called ", "named "] {
+        if let Some(p) = lo.find(kw) {
+            let name = goal[p + kw.len()..].split_whitespace().next().unwrap_or("")
+                .trim_matches(|c: char| !c.is_alphanumeric() && c != '_' && c != '-');
+            if !name.is_empty() && name.chars().next().map_or(false, |c| c.is_uppercase()) {
+                checks.push(format!("test -d {dir}/{name} && [ -n \"$(ls -A {dir}/{name} 2>/dev/null)\" ]"));
+                break;
+            }
+        }
+    }
+    checks
+}
+
 /// file operations: a command (or reform) that exits cleanly without creating/removing the file is
 /// caught. Returns None for commands whose effect isn't a checkable file-state (queries/compute — exit
 /// code is the only signal we have there). DETERMINISTIC parse of the command — NOT the model asserting
@@ -1351,6 +1560,77 @@ pub async fn agent_loop(
         detail: goal.clone(),
     })).await;
 
+    // ── ReAct COMMAND LOOP ────────────────────────────────────────────────────────────────────────
+    // When plan_goal chose an ALL-COMMAND surface (a CLI/file goal), DON'T walk the untrusted upfront
+    // plan. Run the validated reflex+verify loop: observe → reason ONE command toward a DERIVED expected
+    // → run (gated, capture the OS error) → VERIFY against the real world (deterministic, the judge+stop)
+    // → feed back {expected + error}. Completion is the real-world check, never the model's say-so.
+    if !sub_goals.is_empty() && sub_goals.iter().all(|sg| matches!(sg.action, SubAction::Command(_))) {
+        chronos::log("react_capability_loop: engaging (all-command goal)");
+        // CAPABILITY layer: each step the model SELECTS a typed verb (Pythonic GBNF); the harness builds
+        // the deterministic command. DETERMINISTIC goal completion check (the judge); empty ⇒ no derivable
+        // named target ⇒ honest handback.
+        let checks = goal_completion_checks(&goal);
+        chronos::log(&format!("react_capability_loop checks={checks:?}"));
+        const REACT_MAX_STEPS: usize = 8;
+        let verify_now = |act: &dyn Actuator| -> bool {
+            !checks.is_empty() && checks.iter().all(|c| parse_exit_code(&act.run_command(c)) == Some(0))
+        };
+        let mut hist = String::from("(none yet)");
+        let mut completed = false;
+        let mut prev_env = String::new();
+        let mut stale = 0u8;
+        for _step in 1..=REACT_MAX_STEPS {
+            if verify_now(actuator.as_ref()) { completed = true; break; }
+            let env = discover_environment(actuator.as_ref(), &goal);
+            // No-progress guard: world unchanged across 2 consecutive steps ⇒ stop (honest handback).
+            if env == prev_env { stale += 1; if stale >= 2 { break; } } else { stale = 0; prev_env = env.clone(); }
+            // CAPABILITY SELECT: Pythonic GBNF, source paths bound to observe → parse → build the command.
+            let paths: Vec<String> = env.lines().map(|l| l.trim().to_string()).filter(|p| p.starts_with('/')).collect();
+            let cmd = {
+                let prompt = capability_prompt(&goal, &env, &hist);
+                let grammar = crate::grammar::capability_grammar(&paths);
+                let ad = adapter.clone();
+                tokio::task::spawn_blocking(move || ad.generate_constrained(&prompt, 128, 0.1, &grammar).ok().map(|(t, _)| t))
+                    .await.ok().flatten()
+                    .and_then(|raw| raw.lines().map(str::trim).find(|l| !l.is_empty()).map(|s| s.to_string()))
+                    .and_then(|line| parse_capability_call(&line))
+                    .and_then(|(verb, params)| capability_to_command(&verb, &params))
+            };
+            let Some(cmd) = cmd else { break; };
+            let mut args = serde_json::Map::new();
+            args.insert("command".to_string(), serde_json::Value::String(cmd.clone()));
+            let tool_call = ToolCall::Invoke { name: "vm_command".to_string(), args };
+            let output = match gate::apply_plan_approval(gate::confidence_escalate(gate::evaluate_action(&tool_call, &registry), 1.0), plan_approved) {
+                gate::Verdict::Allow => {
+                    let out = execute_tool(&tool_call, &actuator, perceptor.as_ref(), &memory_tiers).await;
+                    chronos::log(&format!("react_action: $ {cmd} -> {out}"));
+                    let _ = confirm_tx.send(envelope::make("action_log", envelope::ActionLogPayload { text: format!("$ {cmd}\n{out}") })).await;
+                    out
+                }
+                gate::Verdict::ConfirmTap => request_and_await_approval("tap", &tool_call, &state, &actuator, perceptor.as_ref(), &memory_tiers, &mut approval_rx, &confirm_tx).await,
+                gate::Verdict::ConfirmTyped => request_and_await_approval("typed", &tool_call, &state, &actuator, perceptor.as_ref(), &memory_tiers, &mut approval_rx, &confirm_tx).await,
+                gate::Verdict::Block(reason) => { chronos::log(&format!("react_blocked: {reason}")); format!("Blocked: {reason}") }
+            };
+            memory.push(Step { index: enforcer.step(), prompt: String::new(), output: output.clone(), action: None });
+            // FEED BACK the command's own error (the forcing function) — only on failure, so success is quiet.
+            let exit_ok = parse_exit_code(&output) == Some(0);
+            let msg: String = output.lines().filter(|l| !l.starts_with("[exit")).collect::<Vec<_>>().join(" ");
+            let note = if exit_ok { String::new() }
+                       else if msg.trim().is_empty() { "  → (command failed)".to_string() }
+                       else { format!("  → ERROR: {}", msg.trim().chars().take(160).collect::<String>()) };
+            hist = if hist == "(none yet)" { format!("- {cmd}{note}") } else { format!("{hist}\n- {cmd}{note}") };
+        }
+        if completed {
+            chronos::log("react_command_loop: expected end-state verified → complete");
+            complete_goal(&goal, actuator.as_ref(), &confirm_tx).await;
+        } else {
+            verify_or_handback(&goal, actuator.as_ref(), &confirm_tx,
+                "I worked through the steps but couldn't verify the goal was achieved — handing back.").await;
+        }
+        return;
+    }
+
     loop {
         {
             let s = state.lock().await;
@@ -1460,7 +1740,12 @@ pub async fn agent_loop(
                 subgoal_stuck = 0; // fresh sub-goal — reset the deviation counter
                 if current_sub >= sub_goals.len() {
                     chronos::log("sequencer_complete: all sub-goals done");
-                    complete_goal(&goal, actuator.as_ref(), &confirm_tx).await;
+                    // GATE the claim on WORLD-STATE, not plan-exhaustion: finishing the planned steps is
+                    // NOT the same as achieving the goal (an over-broad action can "complete" yet leave
+                    // the world wrong). verify_or_handback claims only if goal_satisfied, else hands back
+                    // honestly (conservative-or-silent — a plan-exhaustion claim is the false-success hole).
+                    verify_or_handback(&goal, actuator.as_ref(), &confirm_tx,
+                        "I finished the planned steps but couldn't verify the goal was achieved — handing back.").await;
                     break;
                 }
                 chronos::log(&format!("sequencer_advance: → sub-goal {}/{}: {}",
@@ -1559,7 +1844,11 @@ pub async fn agent_loop(
                 current_sub += 1;
                 if current_sub >= sub_goals.len() {
                     chronos::log("sequencer_complete: all sub-goals done (command verified)");
-                    complete_goal(&goal, actuator.as_ref(), &confirm_tx).await;
+                    // EXIT-0 verifies the COMMAND ran, NOT that the GOAL holds (a successful `mv` can
+                    // still move the wrong set — the bench's lone false success). Gate the claim on the
+                    // goal-level world-state check; unverifiable → honest handback, never a false success.
+                    verify_or_handback(&goal, actuator.as_ref(), &confirm_tx,
+                        "I ran the planned commands but couldn't verify the goal was achieved — handing back.").await;
                     break;
                 }
                 chronos::log(&format!("sequencer_advance(command ok): → sub-goal {}/{}: {}",
@@ -1615,7 +1904,10 @@ pub async fn agent_loop(
             prev_screen = read_screen_bg(&perceptor).await;
             if current_sub >= sub_goals.len() {
                 chronos::log("sequencer_complete: all sub-goals done (deterministic final step)");
-                complete_goal(&goal, actuator.as_ref(), &confirm_tx).await;
+                // Same gate: a Type/Key plan that "finished" is not a verified goal. Claim only on a
+                // passing world-state check; else honest handback (conservative-or-silent).
+                verify_or_handback(&goal, actuator.as_ref(), &confirm_tx,
+                    "I finished the planned steps but couldn't verify the goal was achieved — handing back.").await;
                 break;
             }
             chronos::log(&format!("sequencer_advance(deterministic): → sub-goal {}/{}: {}",
