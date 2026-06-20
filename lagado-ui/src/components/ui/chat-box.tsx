@@ -147,8 +147,8 @@ export function ChatBox({
         'transition-all duration-500 ease-out',
         isDragging ? 'cursor-grabbing transition-none' : 'cursor-grab',
         isActive
-          ? 'bg-card/95 backdrop-blur-2xl shadow-2xl shadow-black/30 ring-1 ring-white/10'
-          : 'backdrop-blur-md ring-1 ring-white/[0.04] hover:ring-white/[0.08]',
+          ? 'bg-[var(--surface-raised)] shadow-2xl shadow-black/30 ring-1 ring-white/10'
+          : 'bg-[var(--surface)] ring-1 ring-white/[0.06] hover:ring-white/[0.10]',
         className
       )}
     >

@@ -52,7 +52,7 @@ export default function ChatDefault() {
           height: 52, flexShrink: 0, display: "flex", alignItems: "center",
           justifyContent: "space-between", padding: "0 16px",
           borderBottom: "1px solid var(--line-700)",
-          background: "rgba(13,18,32,0.6)", backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)",
+          background: "var(--glass-opaque)",
         }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <button className="lg-iconbtn lg-iconbtn--md" onClick={() => setShowSidebar(s => !s)}>

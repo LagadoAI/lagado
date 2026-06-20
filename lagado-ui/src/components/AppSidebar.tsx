@@ -28,9 +28,7 @@ export function AppSidebar() {
   return (
     <div style={{
       width: 256, flexShrink: 0,
-      background: 'rgba(13,18,32,0.55)',
-      backdropFilter: 'blur(12px)',
-      WebkitBackdropFilter: 'blur(12px)',
+      background: 'var(--glass-opaque)',
       borderRight: '1px solid var(--line-700)',
       display: 'flex', flexDirection: 'column',
     }}>

@@ -119,7 +119,7 @@
   --bg:             var(--navy-900);
   --surface:        var(--navy-800);
   --surface-raised: var(--navy-700);
-  --surface-glass:  var(--glass-trans);
+  --surface-glass:  var(--glass-opaque); /* de-glassed: solid Lagado navy, not frosted (legibility) */
   --border-strong:  var(--line-600);
   --border-glass:   var(--hairline-white);
   --text-strong:    var(--ink-100);
@@ -223,13 +223,13 @@
 .lg-card__body   { padding: var(--space-5); }
 .lg-card__footer { padding: var(--space-4) var(--space-5); border-top: 1px solid var(--line-700); background: var(--surface-raised); border-radius: 0 0 var(--radius-xl) var(--radius-xl); }
 
-/* Glass panel */
+/* Panel (de-glassed: solid surface, no backdrop blur — kept the class names for compatibility). */
 .lg-glasspanel {
-  background: var(--glass-trans); backdrop-filter: var(--blur-md); -webkit-backdrop-filter: var(--blur-md);
-  border: 1px solid var(--hairline-white); border-radius: var(--radius-3xl); box-shadow: var(--shadow-lg);
+  background: var(--glass-opaque);
+  border: 1px solid var(--line-700); border-radius: var(--radius-3xl); box-shadow: var(--shadow-lg);
 }
 .lg-glass {
-  background: var(--glass-trans); backdrop-filter: var(--blur-md); -webkit-backdrop-filter: var(--blur-md);
+  background: var(--glass-opaque);
   border: 1px solid var(--line-700);
 }
 
@@ -270,7 +270,7 @@ textarea.lg-field { height: auto; min-height: 80px; padding: 10px 12px; resize: 
 .lg-bubble--agent {
   background: var(--surface-glass); color: var(--text-body);
   border: 1px solid var(--line-700); border-radius: var(--radius-2xl); border-top-left-radius: var(--radius-sm);
-  position: relative; backdrop-filter: var(--blur-md);
+  position: relative;
 }
 .lg-bubble--agent::before {
   content: ""; position: absolute; left: 0; top: 14px; bottom: 14px; width: 2px;

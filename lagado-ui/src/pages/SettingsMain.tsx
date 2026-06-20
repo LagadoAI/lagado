@@ -50,7 +50,7 @@ export default function SettingsMain() {
         <div style={{
           height: 52, flexShrink: 0, display: "flex", alignItems: "center", gap: 12, padding: "0 16px",
           borderBottom: "1px solid var(--line-700)",
-          background: "rgba(13,18,32,0.6)", backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)",
+          background: "var(--glass-opaque)",
         }}>
           <Settings size={18} style={{ color: "var(--text-dim)" }} />
           <span style={{ fontFamily: "var(--font-display)", fontWeight: 600, fontSize: 16, color: "var(--text-strong)" }}>Settings</span>

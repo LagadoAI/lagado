@@ -91,7 +91,7 @@ export function SidePane({ children, className }: SidePaneProps) {
         style={{ top: `${arrowY}px`, backgroundColor: `rgba(255,255,255,${idleOpacity * 3})` }}
         className={cn(
           'fixed right-8 z-50 p-3 rounded-xl transition-all duration-300',
-          'backdrop-blur-lg ring-1 ring-white/[0.06] shadow-lg shadow-black/20',
+          'ring-1 ring-white/[0.06] shadow-lg shadow-black/20',
           'hover:ring-white/15',
           isDraggingArrow ? 'cursor-grabbing' : 'cursor-grab',
           isOpen && 'translate-x-[-320px]'
@@ -102,10 +102,10 @@ export function SidePane({ children, className }: SidePaneProps) {
       </button>
 
       <div
-        style={{ backgroundColor: `rgba(20, 20, 28, ${Math.min(0.95, 0.6 + idleOpacity * 8)})` }}
+        style={{ backgroundColor: 'var(--glass-opaque)' }}
         className={cn(
           'fixed top-0 right-0 h-full w-[360px] z-50 transition-transform duration-500 ease-out',
-          'backdrop-blur-2xl ring-1 ring-white/10 shadow-2xl shadow-black/30',
+          'ring-1 ring-white/10 shadow-2xl shadow-black/30',
           isOpen ? 'translate-x-0' : 'translate-x-full',
           className
         )}
