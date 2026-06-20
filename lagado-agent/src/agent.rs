@@ -887,21 +887,23 @@ Next single command:");
 pub fn capability_prompt(goal: &str, env: &str, hist: &str) -> String {
     format!(
 "You operate a computer by choosing ONE typed action (a Pythonic call) that moves toward the goal.
-ACTIONS — emit EXACTLY ONE call. Use ONLY absolute paths from 'Current files'.
-- make_folder(path=\"/abs/folder\")
-- write_file(path=\"/abs/file\", content=\"TEXT\")
-- move(source_dir=\"/abs/folder\", selector=\"*.pdf\", dest=\"/abs/folder\")   (selector = a GLOB for all matches, or one filename; new_name optional)
-- copy(source_dir=\"/abs/folder\", selector=\"*.jpg\", dest=\"/abs/folder\")   (recursive=true to recurse)
-- rename(path=\"/abs/file\", new_name=\"newname.ext\")
-- delete(source_dir=\"/abs/folder\", selector=\"*.jpg\")                       (filter=\"empty\" or \"larger_than_1k\")
-- extract_to_file(mode=\"value\", source=\"/abs/file\", pattern=\"REGEX\", dest_file=\"/abs/file\")
-- extract_to_file(mode=\"count\", source_dir=\"/abs/folder\", selector=\"*.log\", dest_file=\"/abs/file\")
-To affect ALL matching files use a GLOB selector (e.g. *.pdf), NOT a single filename. home is /home/laputa.
+ACTIONS — emit EXACTLY ONE call. Use ONLY absolute paths under /home/laputa (from 'Current files').
+- make_folder(path=\"/home/laputa/Documents/NewFolder\")
+- write_file(path=\"/home/laputa/Documents/file.txt\", content=\"TEXT\")
+- move(source_dir=\"/home/laputa/Downloads\", selector=\"*.pdf\", dest=\"/home/laputa/Documents\")
+- copy(source_dir=\"/home/laputa/Downloads\", selector=\"*.jpg\", dest=\"/home/laputa/Documents\", recursive=true)
+- rename(path=\"/home/laputa/Downloads/old.txt\", new_name=\"new.txt\")
+- delete(source_dir=\"/home/laputa/Downloads\", selector=\"*.jpg\", filter=\"empty\")
+- extract_to_file(mode=\"value\", source=\"/home/laputa/Documents/report.txt\", pattern=\"[0-9]+\", dest_file=\"/home/laputa/Documents/out.txt\")
+- extract_to_file(mode=\"count\", source_dir=\"/home/laputa/Downloads\", selector=\"*.log\", dest_file=\"/home/laputa/Documents/count.txt\")
+RULES: source_dir and dest are FOLDERS — NEVER a file or a glob (the glob goes in selector). A NEW folder =
+an EXISTING folder path + /Name. Anything ALREADY in 'Current files' is DONE — do the NEXT needed action,
+NEVER repeat a completed one. Use a GLOB selector (e.g. *.pdf) to affect ALL matches. home is /home/laputa.
 
 Goal: {goal}
 Current files:
 {env}
-Actions so far:
+Actions already done (do the NEXT step, do not repeat these):
 {hist}
 Next single action:")
 }
@@ -930,12 +932,22 @@ pub fn parse_capability_call(line: &str) -> Option<(String, std::collections::Ha
 pub fn capability_to_command(verb: &str, p: &std::collections::HashMap<String, String>) -> Option<String> {
     let g = |k: &str| p.get(k).cloned().unwrap_or_default();
     let q = |s: &str| format!("\"{}\"", s.replace('"', ""));
+    // Tolerate the model putting a glob/file IN source_dir (a common slip the break-point map exposed):
+    // split "/dir/*.ext" → (source_dir="/dir", selector="*.ext"). source_dir must be a FOLDER.
+    let dirsel = |sd: String, sel: String| -> (String, String) {
+        if sd.contains('*') || sd.contains('?') || sd.contains('[') {
+            if let Some((d, pat)) = sd.rsplit_once('/') {
+                return (d.to_string(), if sel.is_empty() { pat.to_string() } else { sel });
+            }
+        }
+        (sd, sel)
+    };
     match verb {
         "make_folder" => { let path = g("path"); if path.is_empty() { return None; } Some(format!("mkdir -p {}", q(&path))) }
         "write_file" => { let path = g("path"); if path.is_empty() { return None; }
             Some(format!("mkdir -p \"$(dirname {p})\"; printf '%s' {c} > {p}", p = q(&path), c = q(&g("content")))) }
         "move" | "copy" => {
-            let (sd, sel, dest) = (g("source_dir"), g("selector"), g("dest"));
+            let (sd, sel) = dirsel(g("source_dir"), g("selector")); let dest = g("dest");
             if sd.is_empty() || dest.is_empty() { return None; }
             let op = if verb == "move" { "mv" } else { "cp" };
             let cf = if verb == "copy" && g("recursive") == "true" { "-r" } else { "" };
@@ -954,7 +966,7 @@ pub fn capability_to_command(verb: &str, p: &std::collections::HashMap<String, S
         }
         "rename" => { let (path, nn) = (g("path"), g("new_name")); if path.is_empty() || nn.is_empty() { return None; }
             Some(format!("mv {p} \"$(dirname {p})\"/{n}", p = q(&path), n = q(&nn))) }
-        "delete" => { let (sd, sel) = (g("source_dir"), g("selector")); if sd.is_empty() || sel.is_empty() { return None; }
+        "delete" => { let (sd, sel) = dirsel(g("source_dir"), g("selector")); if sd.is_empty() || sel.is_empty() { return None; }
             let filt = match g("filter").as_str() { "empty" => "-empty", "larger_than_1k" => "-size +1k", _ => "" };
             Some(format!("find {s} -maxdepth 1 -name {sel} -type f {filt} -exec rm -f {{}} +", s = q(&sd), sel = q(&sel))) }
         "extract_to_file" => {
