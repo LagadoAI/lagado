@@ -653,10 +653,19 @@ Steps:
 run the command git init /tmp/repo
 
 Example:
-Goal: write a script /tmp/run.sh that prints hello, then run it
+Goal: write a script /tmp/run.sh that creates /tmp/out, make it executable, and run it
 Steps:
-write to /tmp/run.sh: #!/bin/sh\\necho hello
+write to /tmp/run.sh: #!/bin/sh\\ntouch /tmp/out
+run the command chmod +x /tmp/run.sh
 run the command sh /tmp/run.sh
+
+Example:
+Goal: create a git repository in /tmp/repo, add a file notes.txt to it, and make a commit
+Steps:
+run the command git init /tmp/repo
+run the command touch /tmp/repo/notes.txt
+run the command git -C /tmp/repo add notes.txt
+run the command git -C /tmp/repo commit -m \"add notes.txt\"
 
 Example:
 Goal: open the web browser

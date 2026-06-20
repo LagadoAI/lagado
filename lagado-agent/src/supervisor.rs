@@ -109,6 +109,9 @@ pub struct Supervisor {
     recent: VecDeque<u64>,
     window: usize,
     loop_threshold: usize,
+    /// The previous step's state hash — oscillation counts only TRANSITIONS (hash changed), so a
+    /// constant-hash command chain doesn't read as a loop. None until the first observe().
+    last_hash: Option<u64>,
 }
 
 impl Supervisor {
@@ -141,6 +144,7 @@ impl Supervisor {
             recent: VecDeque::with_capacity(window),
             window,
             loop_threshold,
+            last_hash: None,
         }
     }
 
@@ -161,12 +165,20 @@ impl Supervisor {
             return self.escalate();
         }
 
-        // Oscillation: have we been at this exact state too many times in the window?
-        // No local retry breaks a cycle, so escalate regardless of the outcome kind.
-        let revisits = self.recent.iter().filter(|&&h| h == state_hash).count();
-        self.record(state_hash);
-        if revisits >= self.loop_threshold {
-            return self.escalate();
+        // Oscillation = CYCLING through states (A→B→A→B…), detected only on a state TRANSITION (the hash
+        // CHANGED from the previous step). A run of CONSECUTIVE-IDENTICAL hashes is NOT a cycle: it's
+        // either a verified command/Type/Key chain (the CLI doesn't touch the desktop, so the GUI hash is
+        // constant while real progress happens — mkdir→touch→git init→add→commit) or a genuine stall
+        // (handled by the NoChange/Failed arms below). Counting same-state non-transitions made a working
+        // command chain false-escalate to Human after step 3 (loop_threshold=2 on one shared desktop hash).
+        let is_transition = Some(state_hash) != self.last_hash;
+        self.last_hash = Some(state_hash);
+        if is_transition {
+            let revisits = self.recent.iter().filter(|&&h| h == state_hash).count();
+            self.record(state_hash);
+            if revisits >= self.loop_threshold {
+                return self.escalate();
+            }
         }
 
         match outcome {
