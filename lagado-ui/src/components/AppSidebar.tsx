@@ -1,12 +1,11 @@
 import { useNavigate, useLocation } from 'react-router-dom'
-import { MessageSquare, Monitor, Lock, SquareTerminal, Settings, Plus, Search } from 'lucide-react'
+import { MessageSquare, Monitor, Lock, Settings, Plus, Search } from 'lucide-react'
 import { useChatContext } from '@/hooks/use-chat-context'
 
 const NAV = [
-  { id: 'chat',      label: 'Chat',      Icon: MessageSquare, path: '/chat' },
-  { id: 'immersive', label: 'Immersive', Icon: Monitor,       path: '/immersive' },
+  { id: 'chat',      label: 'Control',   Icon: MessageSquare, path: '/chat' },
+  { id: 'agent',     label: 'Agent',     Icon: Monitor,       path: '/agent' },
   { id: 'vault',     label: 'Vault',     Icon: Lock,          path: '/vault' },
-  { id: 'terminal',  label: 'Terminal',  Icon: SquareTerminal,path: '/terminal' },
   { id: 'settings',  label: 'Settings',  Icon: Settings,      path: '/settings' },
 ]
 

@@ -16,15 +16,9 @@ import ImmersiveTyping from './pages/ImmersiveTyping';
 import ImmersiveAgentRunning from './pages/ImmersiveAgentRunning';
 import ImmersiveAgentPaused from './pages/ImmersiveAgentPaused';
 import ImmersiveWithSidebar from './pages/ImmersiveWithSidebar';
-import CodePage from './pages/CodePage';
-import CodeWithSandboxOutput from './pages/CodeWithSandboxOutput';
-import CodeWithTerminal from './pages/CodeWithTerminal';
 import VaultDefault from './pages/VaultDefault';
 import VaultFilePreview from './pages/VaultFilePreview';
 import VaultStorageWarning from './pages/VaultStorageWarning';
-import TerminalDefault from './pages/TerminalDefault';
-import TerminalMultipleTabs from './pages/TerminalMultipleTabs';
-import TerminalAgentRunning from './pages/TerminalAgentRunning';
 import SettingsMain from './pages/SettingsMain';
 import MCPManager from './pages/MCPManager';
 import MCPAddTool from './pages/MCPAddTool';
@@ -90,20 +84,14 @@ function AppRoutes() {
         <Route path="/setup/permissions" element={<FirstLaunchPermissionsSetup onComplete={() => navigate('/chat')} />} />
         <Route path="/chat" element={<ChatDefault />} />
         <Route path="/design" element={<DesignSystem />} />
-        <Route path="/immersive" element={<ImmersiveDefault />} />
-        <Route path="/immersive/typing" element={<ImmersiveTyping />} />
-        <Route path="/immersive/running" element={<ImmersiveAgentRunning />} />
-        <Route path="/immersive/paused" element={<ImmersiveAgentPaused />} />
-        <Route path="/immersive/sidebar" element={<ImmersiveWithSidebar />} />
-        <Route path="/code" element={<CodePage />} />
-        <Route path="/code/sandbox" element={<CodeWithSandboxOutput />} />
-        <Route path="/code/terminal" element={<CodeWithTerminal />} />
+        <Route path="/agent" element={<ImmersiveDefault />} />
+        <Route path="/agent/typing" element={<ImmersiveTyping />} />
+        <Route path="/agent/running" element={<ImmersiveAgentRunning />} />
+        <Route path="/agent/paused" element={<ImmersiveAgentPaused />} />
+        <Route path="/agent/sidebar" element={<ImmersiveWithSidebar />} />
         <Route path="/vault" element={<VaultDefault />} />
         <Route path="/vault/preview" element={<VaultFilePreview />} />
         <Route path="/vault/warning" element={<VaultStorageWarning />} />
-        <Route path="/terminal" element={<TerminalDefault />} />
-        <Route path="/terminal/multi" element={<TerminalMultipleTabs />} />
-        <Route path="/terminal/agent" element={<TerminalAgentRunning />} />
         <Route path="/settings" element={<SettingsMain />} />
         <Route path="/mcp" element={<MCPManager />} />
         <Route path="/mcp/add" element={<MCPAddTool />} />

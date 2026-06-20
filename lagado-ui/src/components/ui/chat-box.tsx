@@ -30,9 +30,9 @@ export function ChatBox({
   const { messages, sendMessage, status, isPaused, idleOpacity, pendingPermission, approve, deny } = useChatContext()
 
   const surfaceRoutes: Record<string, string> = {
-    immersive: '/immersive',
+    immersive: '/agent',
+    agent: '/agent',
     chat: '/chat',
-    code: '/code',
   }
   const handleSwitch = (surface: string) => navigate(surfaceRoutes[surface] ?? '/')
 

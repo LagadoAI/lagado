@@ -7,9 +7,9 @@ import { AppSidebar } from "../components/AppSidebar";
 import { PanelLeft, Paperclip, Mic, ArrowUp, Square } from "lucide-react";
 
 const surfaceRoutes: Record<string, string> = {
-  immersive: "/immersive",
+  immersive: "/agent",
+  agent: "/agent",
   chat: "/chat",
-  code: "/code",
 };
 
 export default function ChatDefault() {

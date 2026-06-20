@@ -110,7 +110,7 @@ export default function VMManager() {
             ) : (
               <>
                 <button
-                  onClick={() => navigate('/immersive')}
+                  onClick={() => navigate('/agent')}
                   className="flex-1 py-2 bg-lagado-purple/20 border border-lagado-purple/40 text-lagado-purple rounded-lg text-sm font-semibold hover:bg-lagado-purple/30 transition-all"
                 >
                   Open Immersive
