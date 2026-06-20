@@ -268,6 +268,33 @@ async fn complete_goal(goal: &str, actuator: &dyn Actuator, confirm_tx: &mpsc::S
         state: "goal_done".to_string(), detail: "Goal accomplished — all steps completed.".to_string() })).await;
 }
 
+/// The VERIFICATION CONTRACT (the golden line, at the goal level): does the goal's expected end-state
+/// already hold in the world? Runs the goal-derived postcondition checks deterministically. No
+/// derivable check → false (can't verify ⇒ don't claim — fail-closed). All checks pass → true.
+async fn goal_satisfied(goal: &str, actuator: &dyn Actuator) -> bool {
+    let checks = goal_postconditions(goal);
+    if checks.is_empty() { return false; }
+    for check in &checks {
+        if parse_exit_code(&actuator.run_command(check)) != Some(0) { return false; }
+    }
+    true
+}
+
+/// At a handback decision, FIRST verify the goal isn't ALREADY satisfied. The benchmark exposed
+/// "under-claims": the agent DID the work (world-state ✅) but handed back because the sequencer/
+/// supervisor didn't recognize completion. So check the world before giving up — if the goal holds,
+/// claim success (expectation==observation); otherwise hand back as before.
+async fn verify_or_handback(goal: &str, actuator: &dyn Actuator, confirm_tx: &mpsc::Sender<String>, handback_detail: &str) {
+    if goal_satisfied(goal, actuator).await {
+        chronos::log("verified_on_handback: goal already satisfied → claim success, not handback");
+        complete_goal(goal, actuator, confirm_tx).await;
+        return;
+    }
+    let _ = confirm_tx.send(envelope::make("status", envelope::StatusPayload {
+        state: "goal_done".to_string(), detail: handback_detail.to_string(),
+    })).await;
+}
+
 // ── Observation helpers ───────────────────────────────────────────
 
 /// Returns Some(observation text) when an executed action's screen effect should be
@@ -814,6 +841,29 @@ pub fn goal_postconditions(goal: &str) -> Vec<String> {
     if ["move ", "rename", "copy ", " mv ", " cp ", " to /", "from /"].iter().any(|v| lo.contains(v)) {
         return Vec::new(); // a path moves between two locations — which one "counts" is ambiguous
     }
+    // Git goals: a mere directory passes `test -e`, so the weak check FALSE-CLAIMS when `git init`
+    // failed (it made the dir but not the repo). The REAL artifact is `.git`, and a committed repo's
+    // is a reachable HEAD. Strong-check or it lies.
+    if lo.contains("git repo") || lo.contains("git repository") {
+        return extract_paths(goal).into_iter().map(|p| {
+            let p = p.trim_end_matches('/').to_string();
+            if lo.contains("commit") { format!("git -C {p} rev-parse HEAD") } // a commit must exist
+            else { format!("test -d {p}/.git") }                              // a real repo, not a dir
+        }).collect();
+    }
+    // GUI app-launch goals ("open the file manager and the terminal emulator") have no file artifact;
+    // verify the PROCESS is up via pgrep. Best-effort synonym map for the curated VM environment;
+    // fail-closed (empty → no claim) when nothing matches, so it can never false-claim success.
+    if ["open ", "launch", "start the", "start a"].iter().any(|v| lo.contains(v)) {
+        let mut procs: Vec<String> = [
+            ("file manager", "thunar"), ("thunar", "thunar"),
+            ("terminal", "xfce4-terminal"), ("web browser", "firefox"), ("browser", "firefox"),
+            ("firefox", "firefox"), ("text editor", "mousepad"), ("mousepad", "mousepad"),
+            ("application finder", "xfce4-appfinder"), ("app finder", "xfce4-appfinder"),
+        ].iter().filter(|(kw, _)| lo.contains(kw)).map(|(_, p)| format!("pgrep -f {p}")).collect();
+        procs.sort(); procs.dedup();
+        if !procs.is_empty() { return procs; }
+    }
     let wants_absent = ["delete", "remove", "get rid of", "erase"].iter().any(|v| lo.contains(v));
     let wants_create = ["create", "make ", "write", "touch", "save", "generate", "new file",
                         "new folder", "new director"].iter().any(|v| lo.contains(v));
@@ -1353,13 +1403,7 @@ pub async fn agent_loop(
                     let msg = "I've stalled on this and can't make progress on my own — \
                                handing back to you for direction.";
                     chronos::log("supervisor_escalate_human");
-                    let _ = confirm_tx.send(envelope::make("action_log", envelope::ActionLogPayload {
-                        text: msg.to_string(),
-                    })).await;
-                    let _ = confirm_tx.send(envelope::make("status", envelope::StatusPayload {
-                        state: "goal_done".to_string(),
-                        detail: msg.to_string(),
-                    })).await;
+                    verify_or_handback(&goal, actuator.as_ref(), &confirm_tx, msg).await;
                     break;
                 }
                 crate::supervisor::Directive::Abort(reason) => {
@@ -1514,8 +1558,7 @@ pub async fn agent_loop(
                     current_sub + 1, sub_goals.len(), sub_goals[current_sub].text));
             } else {
                 let msg = format!("A command step failed and I couldn't fix it (\"{subgoal_text}\") — handing back to you.");
-                let _ = confirm_tx.send(envelope::make("status", envelope::StatusPayload {
-                    state: "goal_done".to_string(), detail: msg })).await;
+                verify_or_handback(&goal, actuator.as_ref(), &confirm_tx, &msg).await;
                 break;
             }
             continue;
@@ -1671,13 +1714,8 @@ pub async fn agent_loop(
                             "The screen doesn't match what this step needs (\"{active_goal}\") — handing back to you. \
                              It may already be done, or the screen went somewhere I didn't plan for."
                         );
-                        let _ = confirm_tx.send(envelope::make("action_log", envelope::ActionLogPayload {
-                            text: msg.clone(),
-                        })).await;
-                        let _ = confirm_tx.send(envelope::make("status", envelope::StatusPayload {
-                            state: "goal_done".to_string(),
-                            detail: msg,
-                        })).await;
+                        // "It may already be done" → CHECK before giving up (the under-claim fix).
+                        verify_or_handback(&goal, actuator.as_ref(), &confirm_tx, &msg).await;
                         break;
                     }
                 }
@@ -1797,10 +1835,7 @@ pub async fn agent_loop(
                                     "I keep selecting the wrong on-screen element for this step (\"{active_goal}\") — handing back to you."
                                 );
                                 chronos::log("selection_divergence_escalate");
-                                let _ = confirm_tx.send(envelope::make("action_log", envelope::ActionLogPayload { text: msg.clone() })).await;
-                                let _ = confirm_tx.send(envelope::make("status", envelope::StatusPayload {
-                                    state: "goal_done".to_string(), detail: msg,
-                                })).await;
+                                verify_or_handback(&goal, actuator.as_ref(), &confirm_tx, &msg).await;
                                 break;
                             }
                             let _ = confirm_tx.send(envelope::make("action_log", envelope::ActionLogPayload {
@@ -2605,8 +2640,19 @@ mod distill_tests {
         // Not a create/delete intent, or no path → nothing to check.
         assert!(goal_postconditions("show the contents of /etc/hosts").is_empty());
         assert!(goal_postconditions("what is using port 8080").is_empty());
-        assert!(goal_postconditions("open the web browser").is_empty());
         assert!(goal_postconditions("create a poem about the sea").is_empty()); // create, but no path
+        // GUI app-launch → verify the process is up (the verification-contract addition).
+        assert_eq!(goal_postconditions("open the web browser"), vec!["pgrep -f firefox"]);
+        assert_eq!(goal_postconditions("open the file manager and the terminal emulator"),
+                   vec!["pgrep -f thunar", "pgrep -f xfce4-terminal"]);
+        // …but a GUI verb with no known app → still empty (fail-closed, never false-claims).
+        assert!(goal_postconditions("open the pod bay doors").is_empty());
+        // Git: STRONG check or it lies — a bare dir passes `test -e`, so verify `.git` (or a HEAD when
+        // a commit is asked for). This is the false-success the benchmark caught.
+        assert_eq!(goal_postconditions("create a git repository in /tmp/osw_repo"),
+                   vec!["test -d /tmp/osw_repo/.git"]);
+        assert_eq!(goal_postconditions("create a git repository in /tmp/r2, add notes.txt, and make a commit"),
+                   vec!["git -C /tmp/r2 rev-parse HEAD"]);
     }
 
     #[test]
