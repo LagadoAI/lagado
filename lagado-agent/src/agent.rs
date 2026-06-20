@@ -819,7 +819,13 @@ pub fn discover_environment(actuator: &dyn Actuator, goal: &str) -> String {
     let script = format!(
         "for r in {}; do [ -e \"$r\" ] && find \"$r\" -maxdepth 4 -not -path '*/.*' 2>/dev/null; done \
          | sort -u | head -80", roots.join(" "));
-    actuator.run_command(&script).lines().filter(|l| !l.starts_with("[exit")).collect::<Vec<_>>().join("\n")
+    // RETRY: an empty observe (transient SSH/actuator hiccup) collapses the grammar's path-binding → the
+    // model runs unconstrained → garbage. Retry before giving up; the caller fail-closes on a true empty.
+    for _ in 0..3 {
+        let out = actuator.run_command(&script).lines().filter(|l| !l.starts_with("[exit")).collect::<Vec<_>>().join("\n");
+        if !out.trim().is_empty() { return out; }
+    }
+    String::new()
 }
 
 /// PLAN (separate attention): derive the EXPECTED end-state as a list of absolute paths that must exist
@@ -965,6 +971,26 @@ pub fn capability_to_command(verb: &str, p: &std::collections::HashMap<String, S
         }
         _ => None,
     }
+}
+
+/// FAIL-SAFE validator (the keystone for multi-step reliability): a capability call must have a KNOWN
+/// verb and every path slot must be GROUNDED (absolute, under a user home, no `..` traversal). This
+/// REJECTS the garbage that intermittent grammar non-enforcement produces — `/abs/…` placeholders echoed
+/// from the prompt, unknown verbs like `create_folder` — BEFORE it ever executes. The harness must NEVER
+/// propagate a model/infra flake into an action; if a call can't be validated, re-emit or hand back, never
+/// run it. Multi-step break-point map showed THIS (not cross-step coherence) is the dominant break.
+pub fn validate_capability_call(verb: &str, params: &std::collections::HashMap<String, String>) -> Result<(), String> {
+    const VERBS: &[&str] = &["make_folder", "write_file", "move", "copy", "rename", "delete", "extract_to_file"];
+    if !VERBS.contains(&verb) { return Err(format!("unknown verb '{verb}'")); }
+    const PATH_KEYS: &[&str] = &["path", "source_dir", "source", "dest", "dest_file"];
+    for k in PATH_KEYS {
+        if let Some(v) = params.get(*k) {
+            if v.is_empty() || !v.starts_with("/home/") || v.contains("..") {
+                return Err(format!("ungrounded path {k}={v:?}"));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// DETERMINISTIC completion check for the ReAct loop (NOT model-derived — the weak model can't author a
@@ -1585,19 +1611,39 @@ pub async fn agent_loop(
             let env = discover_environment(actuator.as_ref(), &goal);
             // No-progress guard: world unchanged across 2 consecutive steps ⇒ stop (honest handback).
             if env == prev_env { stale += 1; if stale >= 2 { break; } } else { stale = 0; prev_env = env.clone(); }
-            // CAPABILITY SELECT: Pythonic GBNF, source paths bound to observe → parse → build the command.
+            // CAPABILITY SELECT (FAIL-SAFE): GBNF Pythonic, source/dest bound to observe → parse →
+            // VALIDATE (known verb + grounded paths) → build cmd. REJECT the garbage that intermittent
+            // grammar non-enforcement produces (`/abs/` placeholders, invalid verbs); re-emit up to 3×;
+            // NEVER run an unvalidated call. Empty observe ⇒ no grounding ⇒ fail-closed (not unconstrained).
             let paths: Vec<String> = env.lines().map(|l| l.trim().to_string()).filter(|p| p.starts_with('/')).collect();
-            let cmd = {
+            if paths.is_empty() {
+                chronos::log("capability: observe empty (no grounding) → handback");
+                verify_or_handback(&goal, actuator.as_ref(), &confirm_tx,
+                    "I couldn't read the workspace state — handing back.").await;
+                return;
+            }
+            let mut cmd: Option<String> = None;
+            for _try in 0..3 {
                 let prompt = capability_prompt(&goal, &env, &hist);
                 let grammar = crate::grammar::capability_grammar(&paths);
                 let ad = adapter.clone();
-                tokio::task::spawn_blocking(move || ad.generate_constrained(&prompt, 128, 0.1, &grammar).ok().map(|(t, _)| t))
+                let parsed = tokio::task::spawn_blocking(move || ad.generate_constrained(&prompt, 128, 0.1, &grammar).ok().map(|(t, _)| t))
                     .await.ok().flatten()
                     .and_then(|raw| raw.lines().map(str::trim).find(|l| !l.is_empty()).map(|s| s.to_string()))
-                    .and_then(|line| parse_capability_call(&line))
-                    .and_then(|(verb, params)| capability_to_command(&verb, &params))
+                    .and_then(|line| parse_capability_call(&line));
+                if let Some((verb, params)) = parsed {
+                    match validate_capability_call(&verb, &params) {
+                        Ok(()) => { cmd = capability_to_command(&verb, &params); if cmd.is_some() { break; } }
+                        Err(reason) => chronos::log(&format!("capability_rejected (re-emit): {reason}")),
+                    }
+                }
+            }
+            let Some(cmd) = cmd else {
+                chronos::log("capability: no valid grounded call after 3 tries → handback");
+                verify_or_handback(&goal, actuator.as_ref(), &confirm_tx,
+                    "I couldn't form a valid grounded action — handing back.").await;
+                return;
             };
-            let Some(cmd) = cmd else { break; };
             let mut args = serde_json::Map::new();
             args.insert("command".to_string(), serde_json::Value::String(cmd.clone()));
             let tool_call = ToolCall::Invoke { name: "vm_command".to_string(), args };
