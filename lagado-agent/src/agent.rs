@@ -828,6 +828,50 @@ pub fn discover_environment(actuator: &dyn Actuator, goal: &str) -> String {
     String::new()
 }
 
+/// ROUTING gate (user-chosen posture 2026-06-20): declared file-ops verbs run AUTONOMOUSLY through the
+/// typed-capability loop; ANYTHING undeclared (git/gzip/chmod/compile…) or any explicit NON-home target
+/// falls through to the human-GATED raw-command sequencer (the pre-ffd9ce9 path). This is the safety story
+/// for regulated buyers: a constrained autonomous surface + a gated escape, NOT a blanket shell hatch.
+/// The capability layer was built+validated on HOME-dir file management; osworld's /tmp + dev tasks belong
+/// on the raw path. Word-level match (not substring — "transcript" must not trip "script").
+pub fn capability_expressible(goal: &str) -> bool {
+    let lo = goal.to_lowercase();
+    // verbs/objects the typed vocab does NOT declare → gated raw-command path
+    const RAW: &[&str] = &["git","gzip","gunzip","tar","zip","unzip","chmod","chown","compress",
+        "commit","repository","executable","compile","make","npm","pip","curl","wget","ssh","gpg","mount"];
+    let toks: Vec<&str> = lo.split(|c: char| !c.is_alphanumeric()).filter(|s| !s.is_empty()).collect();
+    if toks.iter().any(|t| RAW.contains(t)) { return false; }
+    // an explicit absolute path OUTSIDE /home → gated raw-command path
+    for tok in goal.split(|c: char| c.is_whitespace() || c == '"' || c == '\'' || c == '`') {
+        let t = tok.trim_matches(|c: char| !c.is_alphanumeric() && !"/_-.".contains(c));
+        if t.starts_with('/') && t.len() > 1 && !t.starts_with("/home/") { return false; }
+    }
+    true
+}
+
+/// GROUNDING anchors named directly in the goal: every absolute path token + ALL its ancestor dirs.
+/// The observe listing only surfaces paths that ALREADY EXIST under the home work-dirs — it can never
+/// surface a NOT-YET-CREATED target (`/tmp/osw_proj`) or a path outside those dirs (`/etc`, `/mnt/...`).
+/// Without these anchors the capability grammar can't represent the goal's own path, so the model is
+/// forced to the nearest observed home path (measured: `/tmp/osw_proj` → `mkdir /home/laputa/osw_proj`).
+/// Ancestors included so a NEW child (`write_file /tmp/osw_proj/README.md`) binds to its parent + a seg.
+/// Path-AGNOSTIC by design (a file-ops agent must honour a path the user names, home or not) — NOT a
+/// shell hatch; the typed-verb + grammar + validate discipline is unchanged.
+pub fn goal_path_anchors(goal: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for tok in goal.split(|c: char| c.is_whitespace() || c == '"' || c == '\'' || c == '`') {
+        let t = tok.trim_matches(|c: char| !c.is_alphanumeric() && !"/_-.".contains(c));
+        if !t.starts_with('/') || t.len() < 2 || t.contains("..") { continue; }
+        // the path itself + every ancestor down to (not including) "/"
+        let mut p = t.trim_end_matches('/').to_string();
+        while p.len() > 1 {
+            if !out.contains(&p) { out.push(p.clone()); }
+            match p.rfind('/') { Some(0) | None => break, Some(i) => p.truncate(i) }
+        }
+    }
+    out
+}
+
 /// PLAN (separate attention): derive the EXPECTED end-state as a list of absolute paths that must exist
 /// when the goal is done — grounded in the current environment. A NARROW step (LIST paths, never author
 /// shell — the weak model can't write a check, react_loop_probe v2). The harness wraps each in `test -e`
@@ -991,13 +1035,19 @@ pub fn capability_to_command(verb: &str, p: &std::collections::HashMap<String, S
 /// from the prompt, unknown verbs like `create_folder` — BEFORE it ever executes. The harness must NEVER
 /// propagate a model/infra flake into an action; if a call can't be validated, re-emit or hand back, never
 /// run it. Multi-step break-point map showed THIS (not cross-step coherence) is the dominant break.
-pub fn validate_capability_call(verb: &str, params: &std::collections::HashMap<String, String>) -> Result<(), String> {
+pub fn validate_capability_call(verb: &str, params: &std::collections::HashMap<String, String>, grounded: &[String]) -> Result<(), String> {
     const VERBS: &[&str] = &["make_folder", "write_file", "move", "copy", "rename", "delete", "extract_to_file"];
     if !VERBS.contains(&verb) { return Err(format!("unknown verb '{verb}'")); }
     const PATH_KEYS: &[&str] = &["path", "source_dir", "source", "dest", "dest_file"];
+    // GROUNDED (not home-hardcoded): absolute, no traversal, AND the value sits WITHIN or CONTAINS a path
+    // we actually grounded (observe listing ∪ goal anchors). This rejects the hallucinated `/abs/...`
+    // placeholder (intermittent grammar drop) while accepting any real target the user named — `/tmp`,
+    // `/etc`, `/mnt/...` — not just `/home`. The grammar already constrains emission; this is the backstop.
+    let in_grounded = |v: &str| grounded.iter().any(|g|
+        v == g || v.starts_with(&format!("{g}/")) || g.starts_with(&format!("{v}/")));
     for k in PATH_KEYS {
         if let Some(v) = params.get(*k) {
-            if v.is_empty() || !v.starts_with("/home/") || v.contains("..") {
+            if v.is_empty() || !v.starts_with('/') || v.contains("..") || !in_grounded(v) {
                 return Err(format!("ungrounded path {k}={v:?}"));
             }
         }
@@ -1017,6 +1067,17 @@ pub fn goal_completion_checks(goal: &str) -> Vec<String> {
               else if lo.contains("downloads") { "~/Downloads" }
               else if lo.contains("desktop") { "~/Desktop" } else { "~" };
     let mut checks = Vec::new();
+    // ABSOLUTE targets named in the goal (`/tmp/osw_proj`, `/etc`, `/mnt/...`) — the home-dir resolver
+    // below can't see them. A delete/remove goal wants the path GONE; everything else wants it to EXIST.
+    // Leaf tokens only (ancestors like `/tmp` would always pass and mask a real miss). Without this the
+    // agent acts on the right /tmp path but, finding no check, hands back even on success.
+    let deleting = ["delete", "remove", "trash", "rm "].iter().any(|k| lo.contains(k));
+    for tok in goal.split(|c: char| c.is_whitespace() || c == '"' || c == '\'' || c == '`') {
+        let t = tok.trim_matches(|c: char| !c.is_alphanumeric() && !"/_-.".contains(c));
+        if t.starts_with('/') && t.len() > 1 && !t.contains("..") {
+            checks.push(format!("test {} {t}", if deleting { "! -e" } else { "-e" }));
+        }
+    }
     let words: Vec<&str> = goal.split_whitespace().collect();
     for (i, w) in words.iter().enumerate() {
         let prev = if i > 0 { words[i-1].to_lowercase() } else { String::new() };
@@ -1603,8 +1664,9 @@ pub async fn agent_loop(
     // plan. Run the validated reflex+verify loop: observe → reason ONE command toward a DERIVED expected
     // → run (gated, capture the OS error) → VERIFY against the real world (deterministic, the judge+stop)
     // → feed back {expected + error}. Completion is the real-world check, never the model's say-so.
-    if !sub_goals.is_empty() && sub_goals.iter().all(|sg| matches!(sg.action, SubAction::Command(_))) {
-        chronos::log("react_capability_loop: engaging (all-command goal)");
+    if !sub_goals.is_empty() && sub_goals.iter().all(|sg| matches!(sg.action, SubAction::Command(_)))
+        && capability_expressible(&goal) {
+        chronos::log("react_capability_loop: engaging (home file-ops goal)");
         // CAPABILITY layer: each step the model SELECTS a typed verb (Pythonic GBNF); the harness builds
         // the deterministic command. DETERMINISTIC goal completion check (the judge); empty ⇒ no derivable
         // named target ⇒ honest handback.
@@ -1627,7 +1689,10 @@ pub async fn agent_loop(
             // VALIDATE (known verb + grounded paths) → build cmd. REJECT the garbage that intermittent
             // grammar non-enforcement produces (`/abs/` placeholders, invalid verbs); re-emit up to 3×;
             // NEVER run an unvalidated call. Empty observe ⇒ no grounding ⇒ fail-closed (not unconstrained).
-            let paths: Vec<String> = env.lines().map(|l| l.trim().to_string()).filter(|p| p.starts_with('/')).collect();
+            let mut paths: Vec<String> = env.lines().map(|l| l.trim().to_string()).filter(|p| p.starts_with('/')).collect();
+            // Anchor the goal's OWN named paths (+ ancestors) so the grammar can represent a not-yet-created
+            // or non-home target — else `/tmp/osw_proj` is silently rewritten to the nearest observed path.
+            for a in goal_path_anchors(&goal) { if !paths.contains(&a) { paths.push(a); } }
             if paths.is_empty() {
                 chronos::log("capability: observe empty (no grounding) → handback");
                 verify_or_handback(&goal, actuator.as_ref(), &confirm_tx,
@@ -1644,7 +1709,7 @@ pub async fn agent_loop(
                     .and_then(|raw| raw.lines().map(str::trim).find(|l| !l.is_empty()).map(|s| s.to_string()))
                     .and_then(|line| parse_capability_call(&line));
                 if let Some((verb, params)) = parsed {
-                    match validate_capability_call(&verb, &params) {
+                    match validate_capability_call(&verb, &params, &paths) {
                         Ok(()) => { cmd = capability_to_command(&verb, &params); if cmd.is_some() { break; } }
                         Err(reason) => chronos::log(&format!("capability_rejected (re-emit): {reason}")),
                     }

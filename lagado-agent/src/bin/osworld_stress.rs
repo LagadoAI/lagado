@@ -93,6 +93,9 @@ async fn main() {
                 while let Some(env) = confirm_rx.recv().await {
                     if env.contains("\"permission\"") { let _ = approver.send(true).await; }
                     if env.contains("\"status\"") { last = env.chars().take(160).collect(); }
+                    if std::env::var("OSW_TRACE").is_ok() && (env.contains("action_log") || env.contains("\"status\"")) {
+                        eprintln!("   · {}", env.chars().take(300).collect::<String>());
+                    }
                 }
                 last
             });

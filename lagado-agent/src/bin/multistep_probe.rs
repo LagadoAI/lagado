@@ -101,7 +101,8 @@ async fn main() {
             while reached < n && cp_ok(&ssh, checks[reached]) { reached += 1; plateau_step = step; }
             if reached == n { break; }
             let env = observe(&ssh);
-            let paths: Vec<String> = env.lines().map(|l| l.trim().to_string()).filter(|p| p.starts_with('/')).collect();
+            let mut paths: Vec<String> = env.lines().map(|l| l.trim().to_string()).filter(|p| p.starts_with('/')).collect();
+            for a in agent::goal_path_anchors(goal) { if !paths.contains(&a) { paths.push(a); } }
             // FAIL-SAFE: validate (known verb + grounded paths); reject garbage (/abs, invalid verbs); re-emit up to 3×.
             let mut cmd: Option<String> = None; let mut line = String::new();
             for _try in 0..3 {
@@ -109,7 +110,7 @@ async fn main() {
                 let (raw, _) = adapter.generate_constrained(&agent::capability_prompt(goal, &env, &hist), 128, 0.1, &g).unwrap_or_default();
                 line = raw.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("").to_string();
                 if let Some((v,p)) = agent::parse_capability_call(&line) {
-                    if agent::validate_capability_call(&v,&p).is_ok() { cmd = agent::capability_to_command(&v,&p); if cmd.is_some() { break; } }
+                    if agent::validate_capability_call(&v,&p,&paths).is_ok() { cmd = agent::capability_to_command(&v,&p); if cmd.is_some() { break; } }
                 }
             }
             let out = match &cmd { Some(c) => ssh(&format!("{{ {c} ; }} 2>&1")), None => String::new() };
