@@ -77,3 +77,8 @@ tempfile = "3"
 name = "capability_probe"
 path = "src/bin/capability_probe.rs"
 test = false
+
+[[bin]]
+name = "reason_emit_probe"
+path = "src/bin/reason_emit_probe.rs"
+test = false
