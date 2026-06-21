@@ -297,6 +297,19 @@ reality, deterministic code reconciles. "You can't fake the balance."
   to Alpha — the loop HUNTS the solution space. Separates 'the action fired' from 'the work-product moved'.
   Open: re-plan model quality (some hallucinated items) + reaching a real op within budget (MAX_GUI 16→28).
 
+### F17 — broad multi-task run surfaced a STATE-LEAK reset bug (the value of the broad test)
+First broad re-run after the verification-spine build (gimp:3 chrome:3 os:3): scores 2/9 (os copy+volume
+PASS; all 7 GUI tasks 0.0). But the per-task TRACES were MISLABELED — a chrome task's recorded trace showed
+a GIMP `Layer > Transparency` path; os/terminal showed a chrome natural-products trace. Root cause:
+`agent.reset()` cleared only `_done` + the lists, NOT the GUI/plane/plan/path/verify/re-plan/reporting state
+(`_mode`, `_menu_path`, `_path_planned`, `last_trace`, `_instruction`, `_tried_paths`, `_doc_baseline`…). So
+every task after the first INHERITED the previous task's state — worst case it leaked into the runs, not just
+the reporting, making the gimp/chrome GUI results UNRELIABLE. **A single-task run starts fresh, so ONLY a
+broad/multi-task run exposes this** — exactly the user's reason for demanding the broad test. Fixed:
+`reset()` now fully clears per-task state. The os CLI passes are unaffected (don't touch GUI state). VALID
+re-run in progress. LESSON: multi-task contamination is invisible to single-task iteration — run broad
+periodically to catch it. Standing baseline (2026-06-20): os 3/4, gimp 0/3, chrome 0/3.
+
 ## Build order (data-driven)
 1. **R1a — goal-level effect-verify** (the spine's trigger; cheap; unlocks F1 + is prerequisite for F2/F3).
 2. **R1b — config-apply/app-reload** (finishes the running-app class on the CLI plane).
