@@ -72,6 +72,7 @@ NOTE: `calc` recorded 0 — the domain dir is `libreoffice_calc` not `calc` (run
 | date | commit | os | gimp | chrome | calc | notes |
 |---|---|---|---|---|---|---|
 | 2026-06-20 | 5b021a8 | 3/4 | 0/3 | 0/3 | (bug) | first broad map; GUI plane is the spec |
+| 2026-06-20 | 51807fb | 3/4 | 0/3 | 0/3 | (bug) | GUI plane wired: engages+selects top-level menus, fail-closes; wall = reactive menu navigation (R7) |
 
 ## Failure-category taxonomy (the narrow-in keys)
 - **PASS** — covered by the current harness.

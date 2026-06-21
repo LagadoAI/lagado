@@ -72,6 +72,21 @@ build a DISCOVERY ESCALATION LADDER (feeds the reground):**
 The escalation: introspection → local docs → (if profile allows) web. Search ≠ a special mode; it's the
 top rung of the SAME discover-then-operate ladder.
 
+
+### F7 — GUI plane first-contact (2026-06-20): selection works, menu NAVIGATION is the wall
+Wired our perception-fusion selection behind the switch (a11y candidates → el_N pick → click). Result on
+gimp:3+chrome:3 = 0/6 BUT the plane ENGAGES: it selects correct top-level elements (File/Image/Edit/Select
+menus, Show-Applications) and FAIL-CLOSES (`none`→escape, no hallucinated clicks). The wall is reactive
+navigation: after clicking a menu, the next a11y obs lacks the opened submenu items → every submenu target
+escapes (Open/Mode/Transparency/Export As). **Tells us to build:**
+- **R7a — settle-after-click + re-observe:** confirm the click's effect (menu opened / dialog appeared) in a
+  fresh a11y read BEFORE picking the next element (our observe-until-quiet, ported to the GUI plane).
+- **R7b — REACTIVE GUI loop:** plan ONE GUI step from the LIVE screen, not a fixed upfront click-list — the
+  planner's upfront GUI plans are long + partly hallucinated ("In the Export dialog select CMYK" as a click
+  target). Observe→pick→act→observe.
+- **R7c — CV/pixel fallback:** when a11y yields no candidate for a real target, fall to CV-detected boxes
+  then pixel (the a11y→CV→pixel ladder; CV/pixel still TBD).
+
 ## Build order (data-driven)
 1. **R1a — goal-level effect-verify** (the spine's trigger; cheap; unlocks F1 + is prerequisite for F2/F3).
 2. **R1b — config-apply/app-reload** (finishes the running-app class on the CLI plane).
