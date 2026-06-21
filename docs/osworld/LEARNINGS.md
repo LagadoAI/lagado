@@ -87,6 +87,21 @@ escapes (Open/Mode/Transparency/Export As). **Tells us to build:**
 - **R7c — CV/pixel fallback:** when a11y yields no candidate for a real target, fall to CV-detected boxes
   then pixel (the a11y→CV→pixel ladder; CV/pixel still TBD).
 
+
+### F8 — R7 reactive loop WORKS; the wall is now menubar-menu OPENING (2026-06-20)
+Reactive GUI loop + settle/no-progress retest (gimp:3+chrome:3 = 0/6). The LOOP IS SOUND: it reasons to the
+right menu (Colors/Image for color-mode tasks), re-observes each step, and the no-progress detector stops
+cleanly when a click has no effect (no flailing). And it DROVE REAL WEB NAVIGATION on chrome/0d8b7de3
+(link→combo-box→menu-item) — clicks DO register and change the screen. **The isolated wall:** clicking a
+GIMP MENUBAR menu (`menu: Colors` @(372,76)) does NOT open it — the submenu items never enter the a11y
+candidate set, so the loop re-picks the same menu → no-progress stop. Menubar popups specifically (web
+elements work). **Tells us to build R8 — menu-open interaction:**
+- **R8a — diagnose:** does the click open the menu but a11y miss the transient popup (timing/focus), or does
+  the click not register on the menubar at all? (focused probe: click menu, dump a11y, check for submenu).
+- **R8b — likely fix: KEYBOARD menu nav** (Alt+<mnemonic> / arrow keys) — robust for menubars where
+  click-popups are flaky; OR window-focus-first + move-then-click + longer settle while the popup is open.
+- This is a narrow GTK-actuation fix, NOT a loop-logic problem (R7 logic verified).
+
 ## Build order (data-driven)
 1. **R1a — goal-level effect-verify** (the spine's trigger; cheap; unlocks F1 + is prerequisite for F2/F3).
 2. **R1b — config-apply/app-reload** (finishes the running-app class on the CLI plane).
