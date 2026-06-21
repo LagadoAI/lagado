@@ -76,6 +76,7 @@ NOTE: `calc` recorded 0 — the domain dir is `libreoffice_calc` not `calc` (run
 | 2026-06-20 | d76c331 | 3/4 | 0/3 | 0/3 | (bug) | R7 reactive loop works (reasons to right menu, drove web nav, no-progress stops clean); wall = menubar-menu OPEN (R8) |
 | 2026-06-20 | (diag) | 3/4 | 0/3 | 0/3 | (bug) | R8a: GIMP menu items INVISIBLE to a11y (4 interactions, 0 menu-items) → CV/pixel plane REQUIRED (F9), not a click fix |
 | 2026-06-20 | a77aebc | 3/4 | 0/3 | 0/3 | (bug) | R7c CV ladder MECHANISM works (a11y-stuck→OCR→pixel-click verified) but native-menu nav loops: menu transience + spatial ambiguity = grounding-model frontier (F10) |
+| 2026-06-20 | (R11+) | 3/4 | ? | — | (bug) | BREAKTHROUGH: modal-first (R11) + moveTo+click → GIMP menu OPENS, a11y=0 items but CV/OCR reads them; a11y→CV ladder VALIDATED (F12). retest running |
 
 ## Failure-category taxonomy (the narrow-in keys)
 - **PASS** — covered by the current harness.

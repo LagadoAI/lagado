@@ -392,4 +392,6 @@ class LagadoAgent:
         self._last_pick = label
         self._gui_log.append(f"[{plane}] {label} @({cx},{cy})")
         print(f"[GUI][{plane}] step {self._gui_count}: '{label}' @({cx},{cy})", file=sys.stderr, flush=True)
-        return f"gui[{plane}] '{label}'", [f"pyautogui.click({cx}, {cy})"]
+        # moveTo BEFORE click — a bare click(x,y) didn't reliably open GIMP menus (the diagnostic: moveTo+
+        # click opens the menu, exposing items to CV; bare click does not). Same fix as the modal rung.
+        return f"gui[{plane}] '{label}'", [f"pyautogui.moveTo({cx}, {cy}); pyautogui.click({cx}, {cy})"]

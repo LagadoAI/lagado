@@ -152,6 +152,20 @@ the CV/a11y mechanisms work; the immediate wall is a startup MODAL.** Tells us t
   mid-task). Then RE-DIAGNOSE menu nav (it may just work once nothing blocks; or reveal the next real layer).
 - LESSON: diagnose with the actual SCREENSHOT before concluding 'frontier'. The wall was mundane + fixable.
 
+
+### F12 — BREAKTHROUGH: F9 was ALSO confounded by the modal; the a11y→CV ladder is VALIDATED
+Clean re-diagnosis (dismiss modal FIRST, then moveTo+click Image): the Image menu OPENS (screenshot
+gimp_menu_OPEN_2026-06-20.png — Duplicate/Mode/Canvas Size/Scale Image/Merge Visible Layers/Image
+Properties all visible, no modal). **F9's 'GIMP menus a11y-invisible' was right about a11y (a11y STILL shows
+0 menu-items even with the menu open) but the menu never OPENED before because the MODAL was blocking +
+bare-click didn't open it.** With modal cleared + moveTo+click: menu opens, a11y=0 items, but **CV/OCR reads
+ALL the items** (Merge Visible Layers, Flatten Image, Image Properties…). **The a11y→CV ladder is exactly
+right and empirically proven:** a11y for the menubar (in a11y), CV/OCR for the menu ITEMS (a11y-blind).
+Two-line fix: (1) R11 modal-first clears blockers; (2) **moveTo+click** (not bare click) so menus actually
+open. THE WALL IS BROKEN — the chain is modal-clear → moveTo-open → a11y/CV-select → click. Lesson
+(third time): SCREENSHOT FIRST. 'grounding frontier'(F10) and 'a11y-blind-unfixable'(F9) were BOTH the same
+unhandled modal + a bare-click. The hard wall was two mundane bugs.
+
 ## Build order (data-driven)
 1. **R1a — goal-level effect-verify** (the spine's trigger; cheap; unlocks F1 + is prerequisite for F2/F3).
 2. **R1b — config-apply/app-reload** (finishes the running-app class on the CLI plane).
