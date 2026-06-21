@@ -425,3 +425,51 @@ empty plan) to fix; provision ImageMagick or commit to gimp-headless.
 4. **R2a — empirical infeasibility** (falls out once both planes can exhaust → FAIL) — +8% of the bench.
 
 Update this ledger as new runs surface new finding-classes. Every measured failure is a line item here.
+
+---
+
+## F20 — M1: reliable reload→evaluator-reconciliation, BOTH legs at real env.evaluate()==1.0 (2026-06-21)
+
+**RESULT: gimp/06ca5602 = 1.0 AND libreoffice_calc/01b269ae = 1.0** (real `env.evaluate()`, not a self-check).
+**DETERMINISM: each leg 1.0 across 3 independent cold boots** (gimp 1.0/1.0/1.0; calc 1.0/1.0/1.0, identical
+46-cells/4924-byte artifact each run). `windows@eval` showed exactly ONE `gimp.Gimp` window every run (the
+attach-race the first N=1 pass masked is closed by the hardened `kill_app` = process-count AND window-gone).
+The PROVEN blocker (operate-on-file produces the right disk file but the evaluator reconciles from the LIVE app)
+is now beaten by reusable machinery. Scripts: `m1_reconcile.py` (the machinery) + `m1_gimp.py` + `m1_calc.py`
+(committed copies in docs/osworld/).
+
+**The two evaluators have DIFFERENT cruxes (advisor's key call — do NOT build one machine for both):**
+- **GIMP = blind-hotkey.** Postconfig fires `shift+ctrl+e` at WHATEVER window is focused → FOCUS is the crux,
+  unavoidable. Fix = relaunch the converted file + raise/activate that window + VERIFY it's active.
+- **CALC = self-activating-by-title.** Postconfig does `activate_window(strict, exact title)` then `ctrl+s` → it
+  focuses ITSELF; the crux is CLOBBER-AVOIDANCE: the original GUI instance holds STALE content; if its ctrl+s
+  lands it overwrites the correct disk file. Fix = KILL the original first; then the correct disk file survives
+  even if the live re-save no-ops.
+
+**Three concrete walls hit + fixed (each only visible by RUNNING — none were predictable):**
+1. **`xdotool` is ABSENT in the guest; `wmctrl` + `xprop` ARE present.** All window ops must be wmctrl/xprop-based.
+   The first proof's `sleep 14` + xdotool guess silently no-op'd. Lesson: poll-for-readiness, never sleep-guess.
+2. **GIMP window title carries NO filename** (it's `[computer] (imported)... – GIMP`, and during load just
+   `GNU Image Manipulation Program`). Match by **window CLASS via `wmctrl -lx`** (`gimp.Gimp`), not title. (The
+   persistent desktop window is `gjs.Gjs` `@!0,0;BDHF` — falls away under class match.)
+3. **Reloading an indexed PNG popped a modal `Convert to RGB Working Space?` dialog** that stole focus and blocked
+   the export → the export file was never created. ROOT CAUSE = the original PNG's embedded **3144-byte ICC
+   profile**, which PIL's `quantize().save()` preserves. FIX = strip it (`q.info.pop('icc_profile', None)`);
+   stripping does NOT change pixel values so SSIM (threshold 0.9) is unaffected. (Confirmed offline first:
+   256-color `dither=NONE` scores SSIM 1.0 — so the prior `0` was NEVER conversion-params, purely focus/dialog.)
+
+**operate-on-file backends used:** gimp = PIL `quantize(256, dither=NONE)` IN-GUEST (PIL present; gimp-headless
+Script-Fu w/ `CONVERT-DITHER-NONE` is the committed fallback). calc = **HOST-SHUTTLE** (guest LACKS openpyxl):
+pull file bytes via base64 → transform with the HOST's openpyxl → push back. The host-shuttle is the better
+harness architecture anyway (Lagado runs host-side with full Python; the guest needs zero data libs).
+
+**REUSABLE MACHINERY (`m1_reconcile.py`) — the M1 deliverable, validated across both apps:**
+`make_helpers(env)`→(gpy,sh); `list_windows`(wmctrl -lx → (wid,class,title)); `find_window`(class OR title);
+`active_window_title`(xprop); `kill_app`(pkill + poll-until-WINDOW-gone — robust to pgrep self-match because it
+checks the window not the process count); `reload_into_focus`(relaunch → poll-for-window → wmctrl -ia → verify
+active via xprop). Spine = **kill original → operate-on-file → relaunch → wait-for-window → raise+activate+verify.**
+
+**NEXT = M2** (model SEMANTIC-AUTHORING via typed verbs — UNO calc gross-profit; the open risk is whether the
+model authors the RIGHT call, not just reaches the channel). The reload machinery from M1 is the reconciliation
+backend M2 builds on. Also still OPEN: provision openpyxl + ImageMagick into the guest image (or keep
+host-shuttle / gimp-headless), and the 1 EXC multi_apps/0c825995 crash.

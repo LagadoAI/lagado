@@ -77,6 +77,7 @@ NOTE: `calc` recorded 0 — the domain dir is `libreoffice_calc` not `calc` (run
 | 2026-06-20 | (diag) | 3/4 | 0/3 | 0/3 | (bug) | R8a: GIMP menu items INVISIBLE to a11y (4 interactions, 0 menu-items) → CV/pixel plane REQUIRED (F9), not a click fix |
 | 2026-06-20 | a77aebc | 3/4 | 0/3 | 0/3 | (bug) | R7c CV ladder MECHANISM works (a11y-stuck→OCR→pixel-click verified) but native-menu nav loops: menu transience + spatial ambiguity = grounding-model frontier (F10) |
 | 2026-06-20 | (R11+) | 3/4 | ? | — | (bug) | BREAKTHROUGH: modal-first (R11) + moveTo+click → GIMP menu OPENS, a11y=0 items but CV/OCR reads them; a11y→CV ladder VALIDATED (F12). retest running |
+| 2026-06-21 | (M1) | — | **1/1** | — | **1/1** | **M1 reconciliation: gimp/06ca5602 + calc/01b269ae each driven to real env.evaluate()==1.0, deterministic ×3 cold boots.** operate-on-file → reload-into-focus. Reusable machinery `m1_reconcile.py`. NOT the broad harness yet — proves the reconciliation BACKEND (F20). |
 
 ## Failure-category taxonomy (the narrow-in keys)
 - **PASS** — covered by the current harness.
@@ -93,3 +94,8 @@ NOTE: `calc` recorded 0 — the domain dir is `libreoffice_calc` not `calc` (run
    long tail; the harness must generalize.
 4. The terminal is the base it works FROM; it transitions to a11y/CV/pixel AS NEEDED (memory
    `lagado-osworld-real-bench`). The GUI plane is the next big build.
+5. **Evaluators reconcile from the LIVE app instance** (gimp shift+ctrl+e; calc activate_window+ctrl+s), so
+   "produce the right file" is not enough — the reconciliation BACKEND is `operate-on-file → reload-into-focus`
+   (F20, `m1_reconcile.py`). Two distinct cruxes: gimp = blind-hotkey → FOCUS (raise+activate+verify); calc =
+   self-activates-by-title → CLOBBER-AVOIDANCE (kill the original so its stale ctrl+s can't overwrite). Guest
+   has wmctrl+xprop but NOT xdotool; match windows by CLASS (`wmctrl -lx`), poll-for-readiness never sleep-guess.
