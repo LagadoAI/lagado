@@ -285,6 +285,17 @@ reality, deterministic code reconciles. "You can't fake the balance."
   no-op on a planned step often means it's ALREADY SATISFIED (alpha exists) → move on, don't fail (the banked
   Option-2 idea, now grounded in observation not a model guess); (2) RE-PLAN toward the next sub-goal when an
   op is moot/exhausted. The floor is the trigger both need. No leaf-locus fix needed — the floor is correct.
+- **BOTH BUILT + validated.** Precondition-skip: settle → re-attempt (rule out a transient miss) → persistent
+  no-op on a LEAF = already satisfied → skip; a nav HOP with no submenu = real failure → fail-closed.
+  RE-PLAN (document-changed proxy, NON-fragile per the user's "easy ≠ narrow ≠ fragile" check): when a path
+  completes, compare WHOLE-APP **pixels** (no guessed canvas region) between two MENU-CLOSED states — the
+  path-start baseline and now, after a double-Escape closes both menu levels — so chrome can't pollute it.
+  Changed → progress → done; no change → RE-PLAN a DIFFERENT op (`--menupath` told the tried paths), budget 3.
+  PIXEL-only is deliberate: the work-product is visual, the whole-app a11y set churns on any UI interaction
+  (it false-positived 'progress' on a no-op → caught + fixed). Live: Add Alpha (skip) → RE-PLAN Make
+  Background Transparent (LANDED but doc unchanged → progress check is the honest backstop) → RE-PLAN Color
+  to Alpha — the loop HUNTS the solution space. Separates 'the action fired' from 'the work-product moved'.
+  Open: re-plan model quality (some hallucinated items) + reaching a real op within budget (MAX_GUI 16→28).
 
 ## Build order (data-driven)
 1. **R1a — goal-level effect-verify** (the spine's trigger; cheap; unlocks F1 + is prerequisite for F2/F3).
