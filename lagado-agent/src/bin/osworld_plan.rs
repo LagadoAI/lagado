@@ -70,6 +70,33 @@ Answer:", cands.len() - 1);
         return;
     }
 
+    // NEXT mode (REACTIVE GUI loop, R7b): given the GOAL + the elements ON SCREEN RIGHT NOW, pick the ONE
+    // element to click NEXT to make progress — or `done` (goal looks achieved) or `none` (nothing useful
+    // visible → settle/re-observe). One step from the live screen, NOT a fixed upfront click-list (the
+    // planner's upfront GUI plans don't survive contact). Grammar-constrained el_N | done | none.
+    if args.first().map(|s| s.as_str()) == Some("--next") {
+        let goal = args.get(1).cloned().unwrap_or_default();
+        let cands: Vec<String> = args.get(2..).unwrap_or(&[]).to_vec();
+        if cands.is_empty() { println!("{}", serde_json::json!({"token": "none", "index": -1})); return; }
+        let list = cands.iter().enumerate().map(|(i, c)| format!("el_{i}: {c}")).collect::<Vec<_>>().join("\n");
+        let prompt = format!(
+"You are operating a GUI one step at a time. Pick the ONE element to click NEXT to make progress toward the
+goal. Output ONLY: an element token (el_0..el_{}), or `done` if the goal already appears achieved, or `none`
+if no useful element is visible (so the screen should be re-observed). Think about the menu path the goal
+needs (e.g. Image→Mode, File→Export).
+Goal: {goal}
+Elements on screen now:
+{list}
+Next:", cands.len() - 1);
+        let alts = (0..cands.len()).map(|i| format!("\"el_{i}\"")).collect::<Vec<_>>().join(" | ");
+        let grammar = format!("root ::= {alts} | \"done\" | \"none\"");
+        let out = adapter.generate_constrained(&prompt, 8, 0.2, &grammar).map(|(t, _)| t).unwrap_or_default();
+        let tok = out.trim().to_string();
+        let idx = tok.strip_prefix("el_").and_then(|n| n.parse::<i64>().ok()).unwrap_or(-1);
+        println!("{}", serde_json::json!({"token": tok, "index": idx}));
+        return;
+    }
+
     let instruction: String = args.join(" ");
     if instruction.trim().is_empty() {
         eprintln!("usage: osworld_plan \"<task instruction>\"  |  osworld_plan --reground GOAL FAILED ERR DISCOVERY");

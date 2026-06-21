@@ -239,39 +239,62 @@ class LagadoAgent:
             self._done = True
             return f"terminal one-shot: {len(cmds)} cmd(s)", [_guest_command_action(c) for c in cmds] + ["DONE"]
 
-        # ── SWITCH TRIGGER → GUI PLANE (a11y selection; CV/pixel are later fallback rungs) ──
+        # ── SWITCH TRIGGER → GUI PLANE (reactive a11y loop; CV/pixel are later fallback rungs) ──
         if gui_steps:
             self.last_category = "GUI_NEEDED"
-            self._gui_targets = [_click_target(s) for s in gui_steps]
-            self._gui_idx = 0
             self._instruction = instruction
             self._mode = "gui"
+            self._gui_count = 0
+            self._stuck = 0
+            self._last_hash = None
+            self._gui_log = []
             return self._gui_step(obs)
 
         self._done = True
         return "no actionable plan", ["FAIL"]
 
     def _gui_step(self, obs):
-        """One GUI-plane step: read the current a11y tree → rank candidates → SELECT (our grammar-
-        constrained el_N | none discipline) → click. Fail-closed: `none` ⇒ re-observe (don't hallucinate a
-        click). a11y is rung 1; CV/pixel fallback (when a11y yields nothing) is the next build."""
+        """REACTIVE GUI step (R7): read the LIVE a11y tree → pick the ONE next element toward the GOAL
+        (grammar-constrained el_N | done | none) → click. SETTLE/no-progress: if the candidate set is
+        unchanged for several steps (a click had no effect — e.g. a menu didn't open) → stop. Fail-closed:
+        `none` ⇒ WAIT (re-observe). a11y is rung 1; CV/pixel fallback when a11y is empty is the next build."""
         import sys
-        if self._gui_idx >= len(self._gui_targets):
+        MAX_GUI, STUCK_LIMIT = 12, 3
+        if self._gui_count >= MAX_GUI:
             self._mode = "done"; self._done = True
-            return "gui plan exhausted", ["DONE"]
-        target = self._gui_targets[self._gui_idx]
+            self.last_trace = "gui (reactive) | " + " | ".join(self._gui_log)[:400]
+            return "gui step budget reached", ["DONE"]
+        self._gui_count += 1
+
         cands = _parse_a11y(obs)
-        ranked = _rank_for(target, cands)
-        if not ranked:
-            self._gui_idx += 1
-            print(f"[GUI] '{target}': no a11y candidates → (CV/pixel fallback TBD)", file=sys.stderr, flush=True)
-            return f"gui '{target}': no a11y elements", ["WAIT"]
+        chash = hash(tuple(sorted(c[0] for c in cands)))
+        if chash == self._last_hash:
+            self._stuck += 1
+        else:
+            self._stuck = 0
+            self._last_hash = chash
+        if self._stuck >= STUCK_LIMIT:                 # clicks aren't changing the screen → give up cleanly
+            self._mode = "done"; self._done = True
+            print(f"[GUI] no-progress x{self._stuck} → stop", file=sys.stderr, flush=True)
+            self.last_trace = "gui (reactive, stuck) | " + " | ".join(self._gui_log)[:400]
+            return "gui no-progress", ["DONE"]
+        if not cands:
+            print("[GUI] no a11y candidates → WAIT (CV/pixel fallback TBD)", file=sys.stderr, flush=True)
+            return "gui: no a11y elements", ["WAIT"]
+
+        ranked = _rank_for(self._instruction, cands, cap=50)
         labels = [c[0] for c in ranked]
-        idx = _plan_bin("--select", target, *labels).get("index", -1)
-        self._gui_idx += 1
-        if idx is None or idx < 0 or idx >= len(ranked):
-            print(f"[GUI] '{target}': no match among {len(ranked)} (escape)", file=sys.stderr, flush=True)
-            return f"gui '{target}': no match (escape)", ["WAIT"]
+        res = _plan_bin("--next", self._instruction, *labels)
+        tok, idx = res.get("token", "none"), res.get("index", -1)
+        if tok == "done":
+            self._mode = "done"; self._done = True
+            print("[GUI] model says done", file=sys.stderr, flush=True)
+            self.last_trace = "gui (reactive, done) | " + " | ".join(self._gui_log)[:400]
+            return "gui done", ["DONE"]
+        if tok == "none" or idx is None or idx < 0 or idx >= len(ranked):
+            print(f"[GUI] none among {len(ranked)} → WAIT", file=sys.stderr, flush=True)
+            return "gui: none (settle)", ["WAIT"]
         label, cx, cy = ranked[idx]
-        print(f"[GUI] '{target}' → el_{idx} '{label}' @({cx},{cy})", file=sys.stderr, flush=True)
-        return f"gui click el_{idx} '{label}' @({cx},{cy})", [f"pyautogui.click({cx}, {cy})"]
+        self._gui_log.append(f"el_{idx} {label} @({cx},{cy})")
+        print(f"[GUI] step {self._gui_count}: el_{idx} '{label}' @({cx},{cy})", file=sys.stderr, flush=True)
+        return f"gui click '{label}' @({cx},{cy})", [f"pyautogui.click({cx}, {cy})"]
