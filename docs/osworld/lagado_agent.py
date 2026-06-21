@@ -166,6 +166,16 @@ def _match_token(token, cands):
     return best if bestn >= 1 else None
 
 
+def _is_desktop_config(cmd):
+    """A DESKTOP/system-config command (gsettings/dconf on the desktop or settings-daemon schemas) — it
+    changes the environment, so it CANNOT accomplish a goal that operates inside an open application's
+    document. Used to catch a planner mis-route (e.g. 'set the image to Palette-Based' → a color-scheme
+    gsettings) when a content app is focused. NOT an app-config like org.gnome.Terminal (that's legitimate)."""
+    c = cmd.lower()
+    return ("gsettings" in c or "dconf" in c) and any(
+        s in c for s in ("org.gnome.desktop", "settings-daemon", "/org/gnome/desktop"))
+
+
 def _guest_command_action(cmd: str) -> str:
     """Legacy one-shot path: a guest action string that runs a shell command from ~/Desktop (OSWorld's
     working surface) so the planner's relative names resolve; absolute/~ paths unaffected."""
@@ -417,6 +427,14 @@ class LagadoAgent:
         gui_steps = [s for s in steps if s.get("kind") != "command"]
         self.last_plan = steps                 # per-task map (narrow-in preserved)
         self.last_category = None
+
+        # ROUTING CORRECTION (observation-grounded, not a keyword hack): a DESKTOP/system-config command can't
+        # accomplish a goal that operates INSIDE a focused application. If the whole plan is desktop-config yet
+        # a real app is focused (e.g. 'set the image to Palette-Based' → a color-scheme gsettings while GIMP is
+        # focused), the planner mis-decomposed an in-app goal → use the GUI plane (do it in the app).
+        if cmds and all(_is_desktop_config(c) for c in cmds) and _app_name(obs):
+            print(f"[ROUTE] desktop-config plan but '{_app_name(obs)}' focused → GUI plane", file=__import__("sys").stderr, flush=True)
+            return self._enter_gui(instruction, obs)
 
         # CLI plane FIRST (our home base) — run any command steps via the guest runner
         if cmds and self.runner is not None:
