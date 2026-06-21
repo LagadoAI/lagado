@@ -344,16 +344,21 @@ class LagadoAgent:
         a11y = _parse_a11y(obs)
 
         # rung 0 — CLEAR THE WAY: a blocking modal (e.g. GIMP 'Convert to RGB?') grabs input → dismiss it
-        # FIRST, before pursuing the goal. Re-checked every step (modals appear mid-task). Don't re-click
-        # the same dismiss button twice (a persistent/chained dialog → let no-progress catch it).
+        # FIRST. Clearing a blocker is MANDATORY, so ALLOW re-clicking a persistent modal (capped at 3 —
+        # don't let the same-button guard strand us behind it). moveTo before click so it registers.
         modal = _find_modal_dismiss(a11y)
-        if modal and modal[1] != last:
-            _, label, cx, cy = modal
-            self._last_pick = label
-            self._stuck = 0
-            self._gui_log.append(f"[modal] {label} @({cx},{cy})")
-            print(f"[GUI][modal] dismiss '{label}' @({cx},{cy})", file=sys.stderr, flush=True)
-            return f"gui[modal] dismiss '{label}'", [f"pyautogui.click({cx}, {cy})"]
+        if modal:
+            self._modal_tries = (getattr(self, "_modal_tries", 0) + 1) if modal[1] == last else 1
+            if self._modal_tries <= 3:
+                _, label, cx, cy = modal
+                self._last_pick = label
+                self._stuck = 0
+                self._gui_log.append(f"[modal:{self._modal_tries}] {label} @({cx},{cy})")
+                print(f"[GUI][modal] dismiss '{label}' @({cx},{cy}) try {self._modal_tries}", file=sys.stderr, flush=True)
+                return f"gui[modal] dismiss '{label}'", [f"pyautogui.moveTo({cx}, {cy}); pyautogui.click({cx}, {cy})"]
+            # modal won't clear after 3 → fall through (may be non-blocking or unhandleable)
+        else:
+            self._modal_tries = 0
 
         # rung 1 — a11y
         sel, plane = self._next_pick(a11y), "a11y"
