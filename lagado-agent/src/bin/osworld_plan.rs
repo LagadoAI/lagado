@@ -80,10 +80,13 @@ Answer:", cands.len() - 1);
         if cands.is_empty() { println!("{}", serde_json::json!({"token": "none", "index": -1})); return; }
         let list = cands.iter().enumerate().map(|(i, c)| format!("el_{i}: {c}")).collect::<Vec<_>>().join("\n");
         let prompt = format!(
-"You are operating a GUI one step at a time. Pick the ONE element to click NEXT to make progress toward the
-goal. Output ONLY: an element token (el_0..el_{}), or `done` if the goal already appears achieved, or `none`
-if no useful element is visible (so the screen should be re-observed). Think about the menu path the goal
-needs (e.g. Image→Mode, File→Export).
+"You are operating a GUI one step at a time. The target application is ALREADY OPEN and focused. Pick the
+ONE element to click NEXT to make progress toward the goal. Output ONLY: an element token (el_0..el_{}), or
+`done` if the goal already appears achieved, or `none` if no useful element is visible (so the screen should
+be re-observed).
+RULES: Do NOT click application-launcher / dock / taskbar icons (the app is already open — clicking them
+disrupts it). Work INSIDE the window: the menu bar (File/Edit/Image/…), toolbars, dialogs, canvas. Think
+about the menu PATH the goal needs (e.g. Image→Mode→Indexed, Layer→Transparency→Add Alpha Channel).
 Goal: {goal}
 Elements on screen now:
 {list}
