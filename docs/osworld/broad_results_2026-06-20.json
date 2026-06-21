@@ -1,0 +1,131 @@
+[
+ {
+  "domain": "os",
+  "id": "13584542",
+  "instruction": "I click in terminal: terminal->132x43 to change terminal size but after each reboot terminal size is set to default setting and I have to change it again. Help me set it permanently",
+  "score": 0.0,
+  "category": "CMD_WRONG",
+  "plan_kinds": [
+   "command"
+  ],
+  "trace": "discover-then-operate | $ cd ~/Desktop 2>/dev/null || cd ~; gsettings set org.gnome.Terminal.Legacy.Profile:/org/gnome/terminal/legacy/profiles:/:$(gsettings get org.gnome.Terminal.ProfilesList default | tr -d \\') 'window-size' '132,43'\n  rc=1 err=Path must end with a slash (/)"
+ },
+ {
+  "domain": "os",
+  "id": "23393935",
+  "instruction": "Recursively go through the folders of the 'photos' directory and copy any .jpg files found into another directory named 'cpjpg'.",
+  "score": 1,
+  "category": "PASS",
+  "plan_kinds": [
+   "command",
+   "command"
+  ],
+  "trace": "discover-then-operate | $ cd ~/Desktop 2>/dev/null || cd ~; mkdir -p cpjpg\n  rc=0 ok | $ cd ~/Desktop 2>/dev/null || cd ~; find photos -name \"*.jpg\" -exec cp {} cpjpg \\;\n  rc=0 ok"
+ },
+ {
+  "domain": "os",
+  "id": "28cc3b7e",
+  "instruction": "The volume of my system is too small. Can you help me turn up to the max volume?",
+  "score": 1.0,
+  "category": "PASS",
+  "plan_kinds": [
+   "command"
+  ],
+  "trace": "discover-then-operate | $ cd ~/Desktop 2>/dev/null || cd ~; amixer set Master 100%\n  rc=1 err=ALSA lib confmisc.c:855:(parse_card) cannot find card '0'\nALSA lib conf.c:5178:( |   \u21b3 discover:\n$ find ~ -iname 'Desktop' 2>/dev/null | head\n/home/user/Desktop |   \u21b3 regrounded: $ amixer set Master 100%\n  rc=1 ALSA lib confmisc.c:855:(parse_card) cannot find card '0'\nALSA lib conf.c:5178:("
+ },
+ {
+  "domain": "os",
+  "id": "37887e8c",
+  "instruction": "Compress all files under \"/tmp/test_files\" that were last modified 30 days ago and put them in \"/tmp/test_files/old_files\". Move all other files to \"/tmp/test_files/new_files.",
+  "score": 1.0,
+  "category": "PASS",
+  "plan_kinds": [
+   "command",
+   "command",
+   "command"
+  ],
+  "trace": "discover-then-operate | $ cd ~/Desktop 2>/dev/null || cd ~; mkdir -p /tmp/test_files/old_files /tmp/test_files/new_files\n  rc=0 ok | $ cd ~/Desktop 2>/dev/null || cd ~; find /tmp/test_files -type f -mtime +30 -exec mv {} /tmp/test_files/old_files \\;\n  rc=0 ok | $ cd ~/Desktop 2>/dev/null || cd ~; mv /tmp/test_files/* /tmp/test_files/new_files\n  rc=1 err=mv: cannot move '/tmp/test_files/new_files' to a subdirectory of itself, '/tmp/t"
+ },
+ {
+  "domain": "gimp",
+  "id": "045bf3ff",
+  "instruction": "Could you turn my image into CYMK mode within GIMP ?",
+  "score": 0.0,
+  "category": "CMD_WRONG",
+  "plan_kinds": [
+   "click",
+   "click",
+   "command"
+  ],
+  "trace": "discover-then-operate | $ cd ~/Desktop 2>/dev/null || cd ~; gimp --batch '(gimp-file-load \"/path/to/your/image.jpg\") (gimp-image-colorspace-set 5) (gimp-file-save RUN-NONINTERACTIVE \"/path/to/your/image_cmyk.jpg\" \"/path/to/your/image_cmyk.jpg\" \"JPEG\" \"\") (gimp-quit)'\n  rc=0 err=Gtk-Message: 10:32:49.537: Failed to load module \"canberra-gtk-module\""
+ },
+ {
+  "domain": "gimp",
+  "id": "06ca5602",
+  "instruction": "Could you help me set the image to Palette-Based?",
+  "score": 0.0,
+  "category": "GUI_NEEDED",
+  "plan_kinds": [
+   "click",
+   "click",
+   "click",
+   "click",
+   "click"
+  ],
+  "trace": "plan needs GUI plane (5 non-command steps): Click the Settings menu; Click Appearance; Click the Background tab; Click the Image option; Click the \"Palette-Based\" radio button"
+ },
+ {
+  "domain": "gimp",
+  "id": "2a729ded",
+  "instruction": "Could you make the background of this image transparent for me?",
+  "score": 0.0,
+  "category": "GUI_NEEDED",
+  "plan_kinds": [
+   "click",
+   "click",
+   "click",
+   "click",
+   "click",
+   "click",
+   "click",
+   "click",
+   "click"
+  ],
+  "trace": "plan needs GUI plane (9 non-command steps): Click the Applications menu; Click GIMP; Click File > Open and select the image; Click Image > Mode > Indexed; Click Image > Mode > RGB; Click Layer > Transparency > Add Alpha Channel; Click Select > All; Click Edit > Clear; Click File > Save As and choose a transparent format like PNG"
+ },
+ {
+  "domain": "chrome",
+  "id": "030eeff7",
+  "instruction": "Can you enable the 'Do Not Track' feature in Chrome to enhance my online privacy?",
+  "score": 0.0,
+  "category": "CMD_WRONG",
+  "plan_kinds": [
+   "command"
+  ],
+  "trace": "discover-then-operate | $ cd ~/Desktop 2>/dev/null || cd ~; gsettings set org.chromium.settings.privacy do-not-track-enabled true\n  rc=1 err=No such schema \u201corg.chromium.settings.privacy\u201d |   \u21b3 discover:\n$ gsettings list-schemas 2>/dev/null | grep -iE 'settings'\ncom.ubuntu.notifications.settings.applications\norg.gnome.Terminal.Legacy.Settings\norg.gnome.settings-daemon.peripherals\norg.gnome.settings-daemon.peripherals.keyboard\norg.gnome.settings-daemon.peripherals.smartcard\norg.gnome.settings-daemon. |   \u21b3 regrounded: $ dconf write /org/gnome/settings-daemon/plugins/power/do-not-track-enabled true\n  rc=0 "
+ },
+ {
+  "domain": "chrome",
+  "id": "06fe7178",
+  "instruction": "Can you make my computer bring back the last tab I shut down?",
+  "score": 0.0,
+  "category": "GUI_NEEDED",
+  "plan_kinds": [
+   "click",
+   "click"
+  ],
+  "trace": "plan needs GUI plane (2 non-command steps): Click the Applications menu; Click Web Browser"
+ },
+ {
+  "domain": "chrome",
+  "id": "0d8b7de3",
+  "instruction": "Browse the natural products database.",
+  "score": 0.0,
+  "category": "GUI_NEEDED",
+  "plan_kinds": [
+   "click",
+   "click"
+  ],
+  "trace": "plan needs GUI plane (2 non-command steps): Click the Applications menu; Click Natural Products Database"
+ }
+]

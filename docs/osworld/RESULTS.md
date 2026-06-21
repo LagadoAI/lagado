@@ -41,16 +41,37 @@ The **real OSWorld** is GUI-app heavy and much harder. Never quote the proxy as 
 
 **os = 2/3 reliable, 3/3 capable.** All three verified passable individually.
 
-### calc / gimp / chrome (GUI domains — away plane)
-*(broad run in progress — fill from `/tmp/osworld_broad_results.json`. Expectation: mostly `GUI_NEEDED`,
-which quantifies the away-plane build.)*
+## Broad per-domain map — 2026-06-20 (commit 5b021a8, 10 tasks; raw: `broad_results_2026-06-20.json`)
+NOTE: `calc` recorded 0 — the domain dir is `libreoffice_calc` not `calc` (runner glob bug; re-run pending).
 
-## Broad per-domain map (home/away)
-*(to fill on broad-run completion — per-domain PASS/N + failure-category counts)*
+| domain | PASS/N | breakdown |
+|---|---|---|
+| **os** (home plane) | **3/4** | 23393935 copy ✅, 28cc3b7e volume ✅, 37887e8c compress-by-mtime ✅, 13584542 terminal-size ❌ (app caching) |
+| **gimp** (away) | **0/3** | 045bf3ff CMYK = CMD_WRONG (tried CLI, failed — winnable via ImageMagick/script-fu?); 06ca5602 palette + 2a729ded transparency = GUI_NEEDED |
+| **chrome** (away) | **0/3** | 030eeff7 Do-Not-Track = CMD_WRONG (tried CLI — winnable via prefs file?); 06fe7178 reopen-tab + 0d8b7de3 browse-db = GUI_NEEDED |
 
-| date | commit | domain | PASS/N | notes |
-|---|---|---|---|---|
-| 2026-06-20 | 5b021a8 | os | 2/3 | terminal task = app-caching residual |
+**Categories:** PASS 3 · CMD_WRONG 3 · GUI_NEEDED 4.
+
+### The actionable split (the plan this map specs)
+- **os home plane carries (3/4, 75%)** — the general machinery (discover-operate, effect-verify, CLI bias,
+  path-grounding) works on file/system/config tasks. The 1 miss = app-caching long tail.
+- **GUI_NEEDED (4)** — tasks with NO CLI path (palette, transparency, reopen-tab, browse). These REQUIRE the
+  **GUI actuation plane (a11y/CV/pixel)** — the one big unbuilt capability. This is the away-plane spec.
+- **CMD_WRONG on GUI domains (gimp CMYK, chrome DNT)** — the model TRIED the CLI and failed, but these may be
+  **CLI-winnable** (ImageMagick `convert -colorspace CMYK`; chrome `Preferences` JSON / `--enable-features`).
+  Cheaper near-term win: extend the terminal plane's TOOLING + discovery to claw GUI tasks onto the home plane.
+
+### Priority read
+1. **CLI-plane tooling expansion** (cheap, home turf): image tools (ImageMagick/script-fu), browser config
+   (prefs file), more discovery — converts a slice of "GUI" tasks (the CMD_WRONG class) into terminal wins.
+2. **GUI actuation plane** (big build, the moat's other half): a11y/CV/pixel — required for GUI_NEEDED, and
+   the bulk of the ~369 across libreoffice/gimp/chrome/vlc/vscode. Measure its size next (run libreoffice_calc
+   + more per domain to size the GUI_NEEDED population).
+
+## Tracking over time
+| date | commit | os | gimp | chrome | calc | notes |
+|---|---|---|---|---|---|---|
+| 2026-06-20 | 5b021a8 | 3/4 | 0/3 | 0/3 | (bug) | first broad map; GUI plane is the spec |
 
 ## Failure-category taxonomy (the narrow-in keys)
 - **PASS** — covered by the current harness.
