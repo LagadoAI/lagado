@@ -131,6 +131,39 @@ def _ocr_candidates(obs):
         return []
 
 
+# dialog-action buttons, in PROCEED-first priority (we want to get PAST the modal to do the task);
+# negative/cancel last (fallback only). Matched against push-button NAMES (not check/toggle buttons).
+_DISMISS = ["ok", "continue", "yes", "convert", "keep", "accept", "apply", "got it", "done", "proceed",
+            "save", "open", "close", "no thanks", "dismiss", "no", "cancel", "discard"]
+_DIALOG_HINTS = ("dialog", "alert", "file chooser", "popup")
+
+
+def _find_modal_dismiss(cands):
+    """R11 — a blocking MODAL (e.g. GIMP's 'Convert to RGB?' on image load) GRABS input so nothing else
+    works until it's cleared. Detect a dialog with action buttons and return the button to click to PROCEED
+    past it, or None. The dialog's buttons ARE in the a11y tree; we just clear the way FIRST."""
+    has_dialog = any(any(h in c[0].lower() for h in _DIALOG_HINTS) for c in cands)
+    buttons = []
+    for label, cx, cy in cands:
+        role, _, name = label.partition(":")
+        rl = role.lower()
+        if "push" not in rl and rl.strip() != "button" and "button" not in rl:
+            continue
+        if "check" in rl or "toggle" in rl or "radio" in rl:  # not 'Don't ask again' checkboxes
+            continue
+        nl = name.strip().lower()
+        for i, d in enumerate(_DISMISS):
+            if nl == d or nl.startswith(d + " ") or nl.startswith(d):
+                buttons.append((i, label, cx, cy)); break
+    if not buttons:
+        return None
+    # require a dialog context OR 2+ action buttons (a real dialog has several) — avoid false positives
+    if not has_dialog and len(buttons) < 2:
+        return None
+    buttons.sort(key=lambda b: b[0])
+    return buttons[0]  # (priority, label, cx, cy)
+
+
 def _click_target(step):
     """Extract the click/type target text from a planner GUI step."""
     t = step.get("payload", "") if isinstance(step, dict) else str(step)
@@ -308,9 +341,22 @@ class LagadoAgent:
             return "gui step budget", ["DONE"]
         self._gui_count += 1
         last = getattr(self, "_last_pick", None)
+        a11y = _parse_a11y(obs)
+
+        # rung 0 — CLEAR THE WAY: a blocking modal (e.g. GIMP 'Convert to RGB?') grabs input → dismiss it
+        # FIRST, before pursuing the goal. Re-checked every step (modals appear mid-task). Don't re-click
+        # the same dismiss button twice (a persistent/chained dialog → let no-progress catch it).
+        modal = _find_modal_dismiss(a11y)
+        if modal and modal[1] != last:
+            _, label, cx, cy = modal
+            self._last_pick = label
+            self._stuck = 0
+            self._gui_log.append(f"[modal] {label} @({cx},{cy})")
+            print(f"[GUI][modal] dismiss '{label}' @({cx},{cy})", file=sys.stderr, flush=True)
+            return f"gui[modal] dismiss '{label}'", [f"pyautogui.click({cx}, {cy})"]
 
         # rung 1 — a11y
-        sel, plane = self._next_pick(_parse_a11y(obs)), "a11y"
+        sel, plane = self._next_pick(a11y), "a11y"
         if sel == "done":
             self._mode = "done"; self._done = True
             self.last_trace = "gui done | " + " | ".join(self._gui_log)[:400]
