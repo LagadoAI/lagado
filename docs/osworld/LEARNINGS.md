@@ -137,6 +137,21 @@ Tells us — STRATEGIC FORK (not a small fix):
 - **R10c — menu-transience handling** (hold-open / capture-while-open) — narrower, may partially help, but
   spatial ambiguity remains.
 
+
+### F11 — CORRECTION to F10: the GIMP wall is an UNHANDLED MODAL DIALOG, not spatial grounding
+Exact diagnosis (screenshot saved gimp_modal_wall_2026-06-20.png): after loading the image, GIMP shows a
+MODAL **'Convert to RGB Working Space?'** dialog (embedded color profile) with buttons Keep/Convert/Help/
+Don't-ask-again. **The modal GRABS input → clicking the Image menu does NOTHING; the menu can't open while
+the dialog is up.** The agent never dismissed the modal → looped clicking an unreachable menubar. OCR
+'confirmed': no Image-menu items on screen (the 'menu region' text was the Crop tool-options dock; 'Mode'
+@1750 was the right-dock layer-mode — a red herring). **F10's 'spatial-grounding frontier' was PREMATURE —
+the CV/a11y mechanisms work; the immediate wall is a startup MODAL.** Tells us to build:
+- **R11 — modal/blocker handling (TRACTABLE, not a grounding model):** detect a dialog with action buttons
+  (Keep/Convert/OK/Close/Cancel) — they ARE in the a11y tree — and DISMISS it FIRST, before pursuing the
+  goal. A 'clear the way' rung at the top of the GUI loop (and re-check after each step — modals appear
+  mid-task). Then RE-DIAGNOSE menu nav (it may just work once nothing blocks; or reveal the next real layer).
+- LESSON: diagnose with the actual SCREENSHOT before concluding 'frontier'. The wall was mundane + fixable.
+
 ## Build order (data-driven)
 1. **R1a — goal-level effect-verify** (the spine's trigger; cheap; unlocks F1 + is prerequisite for F2/F3).
 2. **R1b — config-apply/app-reload** (finishes the running-app class on the CLI plane).
