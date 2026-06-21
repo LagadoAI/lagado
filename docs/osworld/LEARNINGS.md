@@ -58,6 +58,20 @@ It declares tasks feasible/decomposable that it can't actually do. **Tells us:**
 be determined **empirically by the harness** (attempt + goal-verify + plane-exhaustion), never by the model's
 self-assessment. Reinforces the whole "harness is the moat, model is swappable" thesis.
 
+### F6 — At the wall, the agent should LOOK UP how, not just fail (user idea, 2026-06-20)
+When discover-operate stalls (the terminal-size hallucination), the agent should *consult knowledge* before
+declaring exhaustion. This is "give it more tools" — but the right tool, gated by sovereignty. **Tells us to
+build a DISCOVERY ESCALATION LADDER (feeds the reground):**
+- **R6a — system introspection** (built): `gsettings list-recursively`, `dconf dump`, `ls`, `which`.
+- **R6b — LOCAL DOCS (sovereignty-safe, cheap, do this next):** `man`, `tldr`, `<cmd> --help`, `apropos`,
+  `info`. The terminal can read its own manuals — this would have grounded the gnome-terminal schema without
+  any network. Air-gap-clean; just more discovery probes.
+- **R6c — GATED web search (security-profile-controlled):** self-hosted SearXNG or browser-via-computer-use
+  (see memory `lagado-react-search-grounding`: DDG instant-answer works, general search is bot-blocked).
+  **OFF in Strict/air-gapped (regulated) mode — live egress breaks the sovereignty promise; ON in Open mode.**
+The escalation: introspection → local docs → (if profile allows) web. Search ≠ a special mode; it's the
+top rung of the SAME discover-then-operate ladder.
+
 ## Build order (data-driven)
 1. **R1a — goal-level effect-verify** (the spine's trigger; cheap; unlocks F1 + is prerequisite for F2/F3).
 2. **R1b — config-apply/app-reload** (finishes the running-app class on the CLI plane).
