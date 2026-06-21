@@ -385,6 +385,39 @@ config/control plane (D-Bus-introspected + gsettings + config-file editor) → (
 rich-API (UNO first, 32%) → (4) GUI/a11y/CV residual. Cheapest+most-general first; layer 1 discovers its own
 verbs. [PROVISIONAL — pending advisor skeptic pass on the build direction.]
 
+**ADVISOR SKEPTIC PASS + PROOF — the premise reachable→executes→scores-1.0 was only proven at link 1.** Advisor:
+"reachable ≠ verb-executes ≠ scores 1.0; prove one currently-FAILING task FAIL→PASS to a real env.evaluate()
+1.0 before committing; deeper risk = the 11 CMD_WRONG mean the model ALREADY chose command + authored the WRONG
+call → if the bottleneck is SEMANTIC AUTHORING not channel-availability, a verb library doesn't fix it." Ran the
+gimp-palette proof (`proof_gimp_palette.py`):
+- **VERB PROVEN:** file `RGB → P` via gimp-headless with the CORRECTED constant **CONVERT-DITHER-NONE** (origin
+  typo CONVERT-NO-DITHER fixed). The API verb produces the correct end-state on disk. NOT inference.
+- **env.evaluate() = 0.0 anyway** — the gimp evaluator does `shift+ctrl+e` to **EXPORT FROM THE RUNNING GIMP
+  WINDOW**; my relaunched instance wasn't up-and-focused when the hotkeys fired → `palette_computer.png` never
+  created (404). Disk file being indexed doesn't help — the evaluator reads the INSTANCE, not the disk.
+- Incidental: **ImageMagick NOT installed** (`convert: not found`) → sibling-CLI layer needs provisioning;
+  gimp-headless is the working fallback.
+**→ THE CENTRAL BUILD CONSTRAINT (layer-revealed — this is the real finding):** OSWorld evaluators reconcile by
+SAVING/EXPORTING FROM THE LIVE APP INSTANCE (gimp shift+ctrl+e export; calc ctrl+s save). So "operate via API" is
+NOT "produce the right file" — the RUNNING INSTANCE must reflect the change when the evaluator pokes it. Build
+pattern = **operate-on-file → reliable RELOAD-INTO-FOCUS** (or a live API endpoint, which these instances don't
+expose: gimp has no live API; soffice would need `--accept=socket`). Reliable reload+focus is the FIRST hard
+engineering problem, and chasing the clean 1.0 IS that engineering → belongs in the build session.
+**BUILD NUANCES (carry forward):** the **calc evaluator saves-OVER the existing file** (ctrl+s + compare_table),
+so an openpyxl/UNO-correct DISK file is ROBUST there (more so than gimp's NEW-file export); a channel-proof can
+source target values from the GROUND-TRUTH xlsx (URL in task json) to ISOLATE channel from semantic-authoring;
+container may LACK openpyxl → use headless-UNO or provision.
+
+**DECISION: chose B** — premise empirically CHARACTERIZED (verb proven + constraint named, NOT inference) over
+grinding boots in a 200k-context session; the build session resumes at this depth via this record (same depth,
+cheaper context, reusable artifacts). **BUILD MILESTONES (order):** (M1) reliable reload→evaluator-reconciliation
+— the PROVEN blocker; gimp-palette + a calc task driven to a real env.evaluate()==1.0 = milestone #1, producing
+REUSABLE reload machinery not throwaway proofs. (M2) model SEMANTIC-AUTHORING via typed verbs (UNO calc
+gross-profit — the advisor's key risk: can the model author the RIGHT call, not just reach the channel). Then
+build the generality ladder (config/control plane → sibling-CLI → UNO-first rich-API → GUI/CV residual);
+multi_apps orchestration is necessary-not-sufficient from reliable verbs. OPEN: 1 EXC (multi_apps/0c825995 crash,
+empty plan) to fix; provision ImageMagick or commit to gimp-headless.
+
 ## Build order (data-driven)
 1. **R1a — goal-level effect-verify** (the spine's trigger; cheap; unlocks F1 + is prerequisite for F2/F3).
 2. **R1b — config-apply/app-reload** (finishes the running-app class on the CLI plane).
