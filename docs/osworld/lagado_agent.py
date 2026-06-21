@@ -1,117 +1,133 @@
 """
-LagadoAgent — the OSWorld adapter for the Lagado harness.
+LagadoAgent — the OSWorld adapter for the Lagado harness (CLI/terminal control plane).
 
-Control inversion: OSWorld's loop calls `predict(instruction, obs)` and executes the returned action
-strings on the guest via `python -c`. We bridge to the Rust harness's planner (`osworld_plan` bin, which
-runs OUR decomposition on the brain at :8080) and emit actions.
+DISCOVER-THEN-OPERATE (iterative ReAct): the planner (Rust `osworld_plan` → our brain) decomposes the
+task into command steps; the adapter RUNS each on the guest via a `runner` (wired to the OSWorld
+controller). When a command fails with an UNGROUNDING signal (e.g. `No such schema` — the model assumed a
+config identifier that's false on THIS machine), the harness runs DETERMINISTIC discovery (introspect the
+real schemas/paths/UUIDs), then RE-GROUNDS the command with those facts (`osworld_plan --reground`) and
+retries. This is the anti-hallucination mechanism: the terminal plane introspects itself instead of
+one-shot guessing. OSWorld scores guest END-STATE, so running via the runner counts.
 
-MVP = the TERMINAL plane (our proven home): OSWorld's action channel runs ARBITRARY python on the guest,
-so a "command" step executes directly as `subprocess.run(cmd, shell=True)` — no GUI terminal needed, and
-it counts because OSWorld scores the guest END-STATE, not the method. GUI steps (a11y/CV/pixel plane) are
-flagged but not yet actuated here — the per-domain score reveals exactly where the terminal carries vs.
-where plane-transition is required (the home/away map). That GUI plane is the next build.
-
-Contract matched to mm_agents/agent.py: `action_space`, `observation_type`, `reset()`, `predict()`.
+If no runner is wired (legacy/one-shot), falls back to emitting command actions through env.step.
 """
-import json
-import logging
-import os
-import subprocess
+import json, logging, os, re, subprocess
 
 logger = logging.getLogger("desktopenv.agent")
 
-# the compiled Rust bridge that runs OUR planner/decomposition against the brain on :8080
 OSWORLD_PLAN_BIN = os.environ.get(
-    "LAGADO_OSWORLD_PLAN_BIN",
-    "/home/alucard/projects/lagado/target/debug/osworld_plan",
-)
+    "LAGADO_OSWORLD_PLAN_BIN", "/home/alucard/projects/lagado/target/debug/osworld_plan")
+
+# stderr fragments that mean "the command assumed a fact that's false on this machine" → discover+reground
+UNGROUNDED = ("no such schema", "no such file", "no such directory", "not found",
+              "command not found", "does not exist", "unrecognized", "is not a valid")
+
+
+def _plan_bin(*args):
+    out = subprocess.run([OSWORLD_PLAN_BIN, *args], capture_output=True, text=True, timeout=120)
+    return json.loads(out.stdout.strip().splitlines()[-1])
 
 
 def _guest_command_action(cmd: str) -> str:
-    """A guest action string that runs a shell command directly (the terminal plane). Wrapped by
-    OSWorld's pkgs_prefix as `python -c "...; {this}"`, so it must be valid python. repr() keeps the
-    command intact through the python -c quoting.
-
-    WORKING-DIRECTORY GROUNDING: OSWorld places user files/folders on the Desktop (the GUI working
-    surface; user='user', home=/home/user), but our subprocess runs in the server's cwd. So the planner's
-    relative names ('photos', 'cpjpg') don't resolve → file ops silently match nothing (the os/23393935
-    miss). Run from ~/Desktop (fall back to ~), so relative names resolve; absolute/~ paths are unaffected."""
+    """Legacy one-shot path: a guest action string that runs a shell command from ~/Desktop (OSWorld's
+    working surface) so the planner's relative names resolve; absolute/~ paths unaffected."""
     grounded = "cd ~/Desktop 2>/dev/null || cd ~; " + cmd
-    return (
-        "import subprocess as _sp; "
-        f"_r = _sp.run({grounded!r}, shell=True, capture_output=True, text=True); "
-        "print(_r.stdout); print(_r.stderr)"
-    )
+    return ("import subprocess as _sp; "
+            f"_r = _sp.run({grounded!r}, shell=True, capture_output=True, text=True); "
+            "print(_r.stdout); print(_r.stderr)")
+
+
+def _discovery_probes(cmd: str, err: str):
+    """DETERMINISTIC discovery for a failed command — introspect the ACTUAL system facts the model got
+    wrong. General over the common ungrounding classes (gsettings/dconf config, missing file, missing
+    command); generic --help fallback otherwise."""
+    low = (cmd + " " + err).lower()
+    probes = []
+    if "gsettings" in cmd or "dconf" in cmd or "schema" in low:
+        m = re.search(r'org\.gnome\.([A-Za-z]+)', cmd)
+        kw = (m.group(1) if m else "").lower() or "settings"
+        probes.append(f"gsettings list-schemas 2>/dev/null | grep -iE '{kw}'")
+        if "terminal" in low:
+            probes.append("echo default-profile-uuid: $(gsettings get org.gnome.Terminal.ProfilesList default 2>/dev/null)")
+            probes.append("dconf dump /org/gnome/terminal/ 2>/dev/null | head -20")
+        else:
+            probes.append(f"dconf dump / 2>/dev/null | grep -iE '{kw}' | head -20")
+    if "no such file" in low or "no such directory" in low:
+        for tok in cmd.replace("'", " ").replace('"', " ").split():
+            if "/" in tok:
+                base = os.path.basename(tok.rstrip("/")) or tok
+                probes.append(f"find ~ -iname {base!r} 2>/dev/null | head")
+                break
+    if "command not found" in low or " not found" in low:
+        first = cmd.split()[0] if cmd.split() else ""
+        if first:
+            probes.append(f"compgen -c 2>/dev/null | grep -i {first} | head; apt-cache search {first} 2>/dev/null | head -3")
+    if not probes:
+        first = cmd.split()[0] if cmd.split() else "true"
+        probes.append(f"{first} --help 2>&1 | head -15")
+    return probes
 
 
 class LagadoAgent:
-    def __init__(
-        self,
-        observation_type: str = "screenshot_a11y_tree",
-        action_space: str = "pyautogui",
-        max_steps: int = 15,
-        **kwargs,
-    ):
+    def __init__(self, observation_type="screenshot_a11y_tree", action_space="pyautogui",
+                 max_steps=15, **kwargs):
         self.observation_type = observation_type
         self.action_space = action_space
         self.max_steps = max_steps
-        # per-episode state
-        self._plan = None          # cached decomposition for the current instruction
-        self._emitted = False      # we return the whole terminal script in one predict()
-        self.actions = []
-        self.observations = []
-        self.thoughts = []
+        self.runner = None          # set by the runner: runner(cmd) -> {"out","err","rc"}
+        self._done = False
+        self.actions, self.observations, self.thoughts = [], [], []
 
     def reset(self, runtime_logger=None):
-        self._plan = None
-        self._emitted = False
-        self.actions = []
-        self.observations = []
-        self.thoughts = []
+        self._done = False
+        self.actions, self.observations, self.thoughts = [], [], []
 
-    def _plan_goal(self, instruction: str):
-        """Call the Rust bridge → OUR planner decomposes the OSWorld instruction."""
+    # ── the discover-then-operate execution of ONE command on the guest ──────────────────────────────
+    def _run_grounded(self, instruction, cmd, log):
+        res = self.runner(cmd)
+        out, err, rc = res.get("out", ""), res.get("err", ""), res.get("rc", 0)
+        log.append(f"$ {cmd}\n  rc={rc} {('err='+err.strip()[:80]) if err.strip() else 'ok'}")
+        ungrounded = rc != 0 and any(s in err.lower() for s in UNGROUNDED)
+        if not ungrounded:
+            return rc == 0
+        # DISCOVER → REGROUND → retry (bounded to one round)
+        probes = _discovery_probes(cmd, err)
+        discovery = "\n".join(f"$ {p}\n{self.runner(p).get('out','').strip()}" for p in probes)
+        log.append(f"  ↳ discover:\n{discovery[:300]}")
         try:
-            out = subprocess.run(
-                [OSWORLD_PLAN_BIN, instruction],
-                capture_output=True, text=True, timeout=120,
-            )
-            data = json.loads(out.stdout.strip().splitlines()[-1])
-            return data
+            corrected = _plan_bin("--reground", instruction, cmd, err.strip()[:200], discovery[:1200]).get("command", "")
         except Exception as e:
-            logger.error("osworld_plan bridge failed: %s", e)
-            return {"steps": [], "n": 0, "all_command": False}
+            log.append(f"  reground failed: {e}")
+            return False
+        if not corrected or corrected == cmd:
+            return False
+        res2 = self.runner(corrected)
+        log.append(f"  ↳ regrounded: $ {corrected}\n  rc={res2.get('rc')} {res2.get('err','').strip()[:80]}")
+        return res2.get("rc", 1) == 0
 
-    def predict(self, instruction: str, obs: dict):
-        """Return (response, actions). MVP: decompose once, run command steps via the guest's python
-        channel, end with DONE. GUI steps are surfaced in the response but not yet actuated."""
-        if self._emitted:
+    def predict(self, instruction, obs):
+        if self._done:
             return "done", ["DONE"]
 
-        if self._plan is None:
-            self._plan = self._plan_goal(instruction)
-        steps = self._plan.get("steps", [])
+        plan = _plan_bin(instruction)
+        steps = plan.get("steps", [])
+        cmds = [s["payload"] for s in steps if s.get("kind") == "command"]
+        gui = sum(1 for s in steps if s.get("kind") != "command")
+        self._done = True
 
-        actions = []
-        gui_unhandled = 0
-        for s in steps:
-            if s.get("kind") == "command":
-                actions.append(_guest_command_action(s["payload"]))
-            else:
-                # GUI plane (a11y/CV/pixel) not yet actuated in the MVP — count it for the home/away map.
-                gui_unhandled += 1
+        if not cmds and gui:
+            return f"plan needs GUI plane ({gui} non-command steps)", ["FAIL"]
 
-        self._emitted = True
-        if not actions and gui_unhandled:
-            # nothing we can do from the terminal — honest FAIL (this task needs the GUI plane)
-            response = f"plan needs GUI plane ({gui_unhandled} non-command steps); terminal MVP cannot actuate"
-            return response, ["FAIL"]
+        if self.runner is None:
+            # legacy one-shot: emit command actions through env.step
+            return f"terminal one-shot: {len(cmds)} cmd(s)", [_guest_command_action(c) for c in cmds] + ["DONE"]
 
-        actions.append("DONE")
-        response = (
-            f"terminal-plane plan: {len(actions)-1} command step(s)"
-            + (f", {gui_unhandled} GUI step(s) skipped" if gui_unhandled else "")
-        )
-        self.actions.extend(actions)
-        self.thoughts.append(response)
-        return response, actions
+        # ITERATIVE discover-then-operate via the guest runner
+        log = []
+        # run from the OSWorld working surface so relative names resolve
+        self.runner("cd() { builtin cd \"$@\"; }; :")  # noop warm-up
+        for c in cmds:
+            self._run_grounded(instruction, "cd ~/Desktop 2>/dev/null || cd ~; " + c, log)
+        resp = "discover-then-operate | " + " | ".join(log)[:400]
+        self.thoughts.append(resp)
+        return resp, ["DONE"]

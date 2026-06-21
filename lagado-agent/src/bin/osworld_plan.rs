@@ -13,13 +13,43 @@ use lagado_agent::{agent, config};
 use lagado_agent::agent::SubAction;
 
 fn main() {
-    let instruction: String = std::env::args().skip(1).collect::<Vec<_>>().join(" ");
-    if instruction.trim().is_empty() {
-        eprintln!("usage: osworld_plan \"<task instruction>\"");
-        std::process::exit(2);
-    }
+    let args: Vec<String> = std::env::args().skip(1).collect();
     let adapter: Arc<dyn InferenceAdapter> =
         Arc::new(LlamaCppAdapter::with_url(&config::llama_base_url(), "brain", config::CONTEXT_SIZE));
+
+    // REGROUND mode (discover-then-operate): a command failed because the model assumed system facts that
+    // are false on THIS machine (e.g. a hallucinated gsettings schema name). Given the goal + the failed
+    // command + its error + the DISCOVERED actual facts, emit ONE corrected command grounded in those
+    // facts. Prefer `dconf write <path> <value>` for app config (schema-agnostic — no name to hallucinate).
+    if args.first().map(|s| s.as_str()) == Some("--reground") {
+        let goal = args.get(1).cloned().unwrap_or_default();
+        let failed = args.get(2).cloned().unwrap_or_default();
+        let error = args.get(3).cloned().unwrap_or_default();
+        let discovery = args.get(4).cloned().unwrap_or_default();
+        let prompt = format!(
+"A shell command FAILED because it assumed facts that are WRONG on this machine. Use ONLY the DISCOVERED
+facts below to write ONE corrected command. Output ONLY the command line, nothing else.
+- For application/desktop settings prefer `dconf write <full/dconf/path> <value>` (no schema name needed).
+- Use the EXACT names/paths/UUIDs from DISCOVERED — never invent schema names or keys.
+
+Goal: {goal}
+Failed command: {failed}
+Error: {error}
+DISCOVERED (actual system facts):
+{discovery}
+
+Corrected command:");
+        let cmd = adapter.generate(&prompt, 160, 0.1).unwrap_or_default();
+        let cmd = cmd.lines().map(str::trim).find(|l| !l.is_empty() && !l.starts_with('#')).unwrap_or("").to_string();
+        println!("{}", serde_json::json!({ "command": cmd }));
+        return;
+    }
+
+    let instruction: String = args.join(" ");
+    if instruction.trim().is_empty() {
+        eprintln!("usage: osworld_plan \"<task instruction>\"  |  osworld_plan --reground GOAL FAILED ERR DISCOVERY");
+        std::process::exit(2);
+    }
 
     // OUR planner decomposes the goal (single-turn-fresh). No skills (keep the bridge deterministic/clean).
     let steps = agent::plan_goal(&instruction, &[], &adapter);

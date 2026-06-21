@@ -30,6 +30,20 @@ env = DesktopEnv(
     require_a11y_tree=True,
 )
 
+# wire the guest runner: run a shell command on the guest, return {out, err, rc} — the agent's
+# discover-then-operate loop uses this to execute + observe (the ReAct observation OSWorld's obs lacks).
+def _runner(cmd):
+    py = ("import subprocess as _s, json as _j; "
+          "r=_s.run(%r, shell=True, capture_output=True, text=True); "
+          "print(_j.dumps({'out': r.stdout, 'err': r.stderr, 'rc': r.returncode}))" % cmd)
+    res = env.controller.execute_python_command(py)
+    raw = res.get("output", "") if isinstance(res, dict) else str(res)
+    try:
+        return json.loads(raw.strip().splitlines()[-1])
+    except Exception:
+        return {"out": raw, "err": "", "rc": 0}
+agent.runner = _runner
+
 results = []
 for tf in task_files:
     task = json.load(open(tf))
