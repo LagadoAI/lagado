@@ -604,7 +604,7 @@ fn strip_list_marker(line: &str) -> String {
 ///   untouched (zero regression on tasks that already work).
 /// - The model plan is adopted ONLY if it actually expanded a single goal into >1 step; otherwise,
 ///   or on any model error, it falls back to the original goal.
-fn plan_goal(goal: &str, skills: &[Skill], adapter: &Arc<dyn InferenceAdapter>) -> Vec<String> {
+pub fn plan_goal(goal: &str, skills: &[Skill], adapter: &Arc<dyn InferenceAdapter>) -> Vec<String> {
     let syntactic = decompose_goal(goal);
     if syntactic.len() > 1 {
         return syntactic; // explicit multi-step → trust the deterministic split
