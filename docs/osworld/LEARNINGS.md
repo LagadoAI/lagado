@@ -310,6 +310,81 @@ broad/multi-task run exposes this** — exactly the user's reason for demanding 
 re-run in progress. LESSON: multi-task contamination is invisible to single-task iteration — run broad
 periodically to catch it. Standing baseline (2026-06-20): os 3/4, gimp 0/3, chrome 0/3.
 
+### F18 — palette retry REFUTED the "leaf-grounding works, one fix away" thread (exhausts A on GIMP)
+The leaf-settle + whole-tree `modal=true` scan fix did NOT fire. Trace `gimp/06ca5602` ("set the image to
+Palette-Based"): plan `Image > Mode > Indexed` → open Image (LANDED) → hover Mode (LANDED) → CLICK leaf
+`text: Indexed:_` @(597,193) (LANDED) → progress **no change** → RE-PLAN ×2 (`Convert to Indexed`, then
+`Palette Based`). **No `[GUI][modal] modal=true → Enter` line appears after ANY leaf click** — the
+Convert-to-Indexed dialog was never caught (opened-then-Escaped, or never opened); the conversion was never
+committed. Score 0.0. This run KILLS the "one fix away" optimism — the prior-session belief that leaf
+selection was sound and only the Escape-cancels-dialog timing remained. Three findings:
+  1. **Fix didn't fire** — modal never detected post-leaf even with the whole-tree scan. Whether the dialog
+     opened-but-isn't-modal vs never-opened is GIMP-mechanics depth — deliberately NOT instrumenting (that
+     depth is exactly what fork B questions the value of).
+  2. **Re-plan spun on the IDENTICAL physical action 3×** — same coord (597,193), same OCR label `Indexed:_`,
+     for three different planned leaves. A "re-plan" that resolves to the same click carries zero new
+     information and just burns the budget. (Native GTK menu items are a11y-blind → labels are OCR; the
+     submenu only exposes one "Indexed…" item, so every path collapses to it.)
+  3. **Scoring confound** — the result file `palette_computer.png` (pulled 14:46) is GENUINELY TRUNCATED:
+     `PIL.OSError: image file is truncated`, while both source images open fine. So this task's 0.0 has an
+     IO/evaluator confound layered on top of the actuation miss — partly unscoreable as run.
+DECISION: this was the last "sure-to-help" A-item on the GIMP/creative-app path and it didn't land →
+**A is exhausted on this terrain.** Fork B (pivot to a11y-friendly document/form tasks where the product
+actually lives) is now the recommended direction. Awaiting user instruction.
+
+### F19 — GLOBAL SWEEP (33 tasks, 10 domains) + API-COVERAGE PROBE → the build-map names the build
+First whole-surface measurement (the "entire build → 72%" reframe; 72% = human baseline, SOTA now ~82% incl.
+Holo3-35B-A3B = a 3B-ACTIVE MoE → validates small-model+harness thesis). **Denominator: 369 tasks; 72% = 266;
+multi_apps = 101 = 27% (single-app max = 72.6% → 72% REQUIRES cracking multi_apps).**
+
+SWEEP RESULT (33 sampled): **PASS 4** (os×3, vs_code×1 — ALL command-plane), **GUI_NEEDED 17**, **CMD_WRONG 11**,
+**EXC 1**. Per-domain: os 3/3, vs_code 1/3, all else 0. Scorecard = 12% — but per the ceiling-mindset
+([[osworld-ceiling-mindset]]) this is a BUILD-MAP, not a verdict. The read:
+- The 4 PASSes are all command-plane; vs_code win = `code --install-extension` in ONE call. Where the command
+  plane had the RIGHT VERB → deterministic pass.
+- The 11 CMD_WRONG are ENCOURAGING: the router already CHOSE command (correct instinct), just fired the wrong
+  verb (H2O-subscript, impress align, tbird dark-mode, vlc cone — all have real scripting paths). Routing
+  works; the VERB VOCABULARY is missing.
+- Most of the 17 GUI_NEEDED fell to clicking ONLY because no command verb was found (gimp CMYK/palette/transp →
+  Script-Fu; calc total/gross/sheet → UNO; "play video" → `vlc <file>`). With a verb library they route to
+  command, not pixels.
+- → Both big failure classes are ONE root cause: **missing app-automation verb vocabulary.** NOT a missing
+  CV/pixel plane (that's the residual).
+
+API-COVERAGE PROBE (`probe_app_apis.py` — each app's interface ACTUALLY INVOKED from the command plane):
+**0 ABSENT.** REACHABLE+clean: **libreoffice UNO** (★ calc+writer+impress = 117 tasks = 32% of bench), **chrome
+CDP** :9222 (46), **vs_code `code` CLI** (23), **os** shell (24). REACHABLE-interpreter-but-proof-typo: **gimp
+Script-Fu** (ran; my exact convert-indexed proof tripped on wrong constant CONVERT-NO-DITHER→CONVERT-DITHER-NONE
+— reachability real, decisive verb-proof PENDING a one-char re-run). PRESENT/command-launchable: **vlc** (`vlc
+<file>` + dbus-send; rich MPRIS control unproven). REACHABLE-but-shallow: **thunderbird** (--version runs; hard
+tasks need prefs.js/config editing). → ~64% of the surface sits behind 5 proven-reachable APIs; multi_apps =
+compositions of the same apps (same verbs per step).
+
+**THE BUILD (data-named):** per-app automation VERB LIBRARY over the reachable APIs, **UNO FIRST** (32% of the
+bench, reachable+rich+product-relevant), then CDP / code-CLI / Script-Fu / shell; model SELECTS typed verbs
+(capability layer [[lagado-capability-layer]]), MCP-wrapped so benchmark work = product work. vlc/thunderbird =
+config-file tail. CV/pixel grounding = the residual, NOT the main build. This is the "how not if" frame as a
+bounded engineering program. Open: 1 EXC (multi_apps crash, empty plan) to fix; gimp decisive verb-proof re-run.
+
+**REFINEMENT (user's lateral throw — "OS-level back doors for API-like access via CLI"):** below the per-app
+APIs sits a GENERIC, largely SELF-DESCRIBING OS-level plane that collapses much bespoke work:
+- **D-Bus** (`gdbus`/`busctl`/`qdbus`) — near-universal app/service control, and INTROSPECTABLE (`busctl
+  introspect` enumerates callable methods at runtime → agent DISCOVERS the API, no hardcode; aligns
+  discover-then-operate + [[lagado-no-hardcode-invariant]]). MPRIS = every media player; freedesktop.* = system.
+- **gsettings/dconf** — GNOME/GTK config, introspectable.
+- **Direct config files** — the truly universal back door: chrome Preferences(JSON), tbird prefs.js, vlcrc(INI),
+  vscode settings.json. Edit→(restart)→state changed, any app, no API.
+- **Sibling CLI tools** — ImageMagick (`convert -colors` = GIMP palette/CMYK w/o GIMP), pandoc, pdftk, jq —
+  bypass the GUI app entirely for file transforms.
+- (xdotool/AT-SPI actions = synthetic input, a BRIDGE not semantic API; breaks on Wayland.)
+This maps onto the 11 CMD_WRONG directly (chrome DNT→Preferences, tbird dark→prefs.js, vlc cone→vlcrc, vscode
+line-length→settings.json, vlc play→`vlc <file>`) — one reusable generic bridge reclaims the settings/control/
+media cluster across ALL domains. LIMIT: does NOT cover semantic ops (calc formulas, image mode) → those still
+need rich API (UNO/Script-Fu) or sibling CLI. **→ Build = GENERALITY LADDER, not per-app libraries:** (1)
+config/control plane (D-Bus-introspected + gsettings + config-file editor) → (2) sibling-CLI tools → (3) app
+rich-API (UNO first, 32%) → (4) GUI/a11y/CV residual. Cheapest+most-general first; layer 1 discovers its own
+verbs. [PROVISIONAL — pending advisor skeptic pass on the build direction.]
+
 ## Build order (data-driven)
 1. **R1a — goal-level effect-verify** (the spine's trigger; cheap; unlocks F1 + is prerequisite for F2/F3).
 2. **R1b — config-apply/app-reload** (finishes the running-app class on the CLI plane).
