@@ -100,6 +100,32 @@ Next:", cands.len() - 1);
         return;
     }
 
+    // VERIFY mode (R1a — GOAL-LEVEL effect-verify, the spine's plane-switch trigger): after a plane runs,
+    // does the GOAL ARTIFACT actually hold? Not rc==0, not a key-readback — derive a READ-ONLY check command
+    // + the exact substring that proves success, from the GOAL itself. The adapter runs it; absent ⇒ the CLI
+    // plane did not achieve the goal ⇒ reload (R1b) / SWITCH to GUI. Empty check ⇒ unverifiable (stay safe).
+    if args.first().map(|s| s.as_str()) == Some("--verify") {
+        let goal = args.get(1).cloned().unwrap_or_default();
+        let prompt = format!(
+"Write ONE READ-ONLY shell command that checks whether this GOAL is ALREADY satisfied on this Linux machine,
+and the EXACT text that appears in that command's output WHEN it is satisfied. Use real tools (gsettings,
+dconf read, pactl, amixer, ls, stat, cat, grep). READ-ONLY — never change anything. If the goal cannot be
+checked from the shell, output an empty CHECK.
+Output EXACTLY two lines:
+CHECK: <command, or empty>
+EXPECT: <substring proving success>
+Goal: {goal}");
+        let out = adapter.generate(&prompt, 120, 0.1).unwrap_or_default();
+        let (mut check, mut expect) = (String::new(), String::new());
+        for line in out.lines() {
+            let l = line.trim();
+            if let Some(r) = l.strip_prefix("CHECK:") { check = r.trim().to_string(); }
+            if let Some(r) = l.strip_prefix("EXPECT:") { expect = r.trim().to_string(); }
+        }
+        println!("{}", serde_json::json!({ "check": check, "expect": expect }));
+        return;
+    }
+
     // MENUPATH mode (F13 — the knowledge frame, not the selection frame): per-step menu SELECTION fails
     // (the model lexically picks the menu whose NAME matches a goal word — "image" → Image — 9/9 wrong for
     // a goal whose function lives under Layer). But asked as a KNOWLEDGE question ("what is the menu path?")
