@@ -862,6 +862,25 @@ pub fn discover_environment(actuator: &dyn Actuator, goal: &str) -> String {
     String::new()
 }
 
+/// Derive the guest's home dir from the observed environment listing. The observe `find` roots are
+/// `$HOME/{Desktop,Documents,Downloads}` (the guest shell expands `$HOME`), so the listing contains real
+/// absolute guest paths — we read `/home/<user>` back off the first one. CLASS-GENERAL: works for ANY
+/// guest user (laputa, OSWorld's `user`, a re-provisioned guest) instead of assuming one specific user.
+/// Falls back to `$HOME` only when nothing is observed (callers fail-closed on empty env anyway).
+pub fn guest_home(env: &str) -> String {
+    for line in env.lines() {
+        if let Some(rest) = line.trim().strip_prefix('/') {
+            let mut segs = rest.split('/');
+            if segs.next() == Some("home") {
+                if let Some(user) = segs.next().filter(|u| !u.is_empty()) {
+                    return format!("/home/{user}");
+                }
+            }
+        }
+    }
+    "$HOME".to_string()
+}
+
 /// ROUTING gate (user-chosen posture 2026-06-20): declared file-ops verbs run AUTONOMOUSLY through the
 /// typed-capability loop; ANYTHING undeclared (git/gzip/chmod/compile…) or any explicit NON-home target
 /// falls through to the human-GATED raw-command sequencer (the pre-ffd9ce9 path). This is the safety story
@@ -911,9 +930,11 @@ pub fn goal_path_anchors(goal: &str) -> Vec<String> {
 /// shell — the weak model can't write a check, react_loop_probe v2). The harness wraps each in `test -e`
 /// → deterministic, side-effect-free. Returns (checks, human-hint). Empty checks ⇒ caller fail-closed.
 pub fn derive_expected(goal: &str, env: &str, adapter: &Arc<dyn InferenceAdapter>) -> (Vec<String>, String) {
+    let home = guest_home(env);
+    let home_slash = format!("{home}/");
     let prompt = format!(
 "List the absolute path of EVERY file or folder that must EXIST when this goal is fully done. One path
-per line, starting with /home/laputa/. Use the exact filenames from 'Current files'. No narration, no commands.
+per line, starting with {home}/. Use the exact filenames from 'Current files'. No narration, no commands.
 
 Goal: {goal}
 Current files:
@@ -921,9 +942,9 @@ Current files:
 Expected paths:");
     let text = adapter.generate(&prompt, 96, 0.1).unwrap_or_default();
     let paths: Vec<String> = text.lines().map(str::trim)
-        .filter(|l| l.starts_with("/home/laputa/"))
+        .filter(|l| l.starts_with(&home_slash))
         .map(|l| l.split_whitespace().next().unwrap_or(l).trim_end_matches([',', '.', ';']).to_string())
-        .filter(|p| p.len() > "/home/laputa/".len())
+        .filter(|p| p.len() > home_slash.len())
         .collect();
     let hint = if paths.is_empty() { goal.to_string() } else { paths.join(", ") };
     let checks = paths.into_iter().map(|p| format!("test -e {p}")).collect();
@@ -934,11 +955,12 @@ Expected paths:");
 /// command. Resets every step (no memory of prior reasoning). The expected target + the last command's
 /// ERROR are the forcing functions. Rejects hang-prone commands (sudo/interactive). None ⇒ stop.
 pub fn react_next_command(goal: &str, expected: &str, env: &str, hist: &str, adapter: &Arc<dyn InferenceAdapter>) -> Option<String> {
+    let home = guest_home(env);
     let prompt = format!(
-"You are doing ONE step of a file task on Linux (home is /home/laputa). Output ONLY the single next
+"You are doing ONE step of a file task on Linux (home is {home}). Output ONLY the single next
 shell command that moves toward the EXPECTED RESULT. No narration.
 - use mv to move/rename, cp to copy (KEEP THE SAME FILENAME), mkdir -p for a folder, rm to delete
-- ALWAYS write the FULL absolute path (/home/laputa/...) for BOTH source and destination — copy the
+- ALWAYS write the FULL absolute path ({home}/...) for BOTH source and destination — copy the
   exact source path from 'Current files', never a bare filename. Never invent files/contents. One command.
 
 Goal: {goal}
@@ -963,20 +985,21 @@ Next single command:");
 
 /// The capability menu prompt (the model emits ONE Pythonic call; the grammar enforces well-formedness).
 pub fn capability_prompt(goal: &str, env: &str, hist: &str) -> String {
+    let home = guest_home(env);
     format!(
 "You operate a computer by choosing ONE typed action (a Pythonic call) that moves toward the goal.
-ACTIONS — emit EXACTLY ONE call. Use ONLY absolute paths under /home/laputa (from 'Current files').
-- make_folder(path=\"/home/laputa/Documents/NewFolder\")
-- write_file(path=\"/home/laputa/Documents/file.txt\", content=\"TEXT\")
-- move(source_dir=\"/home/laputa/Downloads\", selector=\"*.pdf\", dest=\"/home/laputa/Documents\")
-- copy(source_dir=\"/home/laputa/Downloads\", selector=\"*.jpg\", dest=\"/home/laputa/Documents\", recursive=true)
-- rename(path=\"/home/laputa/Downloads/old.txt\", new_name=\"new.txt\")
-- delete(source_dir=\"/home/laputa/Downloads\", selector=\"*.jpg\", filter=\"empty\")
-- extract_to_file(mode=\"value\", source=\"/home/laputa/Documents/report.txt\", pattern=\"[0-9]+\", dest_file=\"/home/laputa/Documents/out.txt\")
-- extract_to_file(mode=\"count\", source_dir=\"/home/laputa/Downloads\", selector=\"*.log\", dest_file=\"/home/laputa/Documents/count.txt\")
+ACTIONS — emit EXACTLY ONE call. Use ONLY absolute paths under {home} (from 'Current files').
+- make_folder(path=\"{home}/Documents/NewFolder\")
+- write_file(path=\"{home}/Documents/file.txt\", content=\"TEXT\")
+- move(source_dir=\"{home}/Downloads\", selector=\"*.pdf\", dest=\"{home}/Documents\")
+- copy(source_dir=\"{home}/Downloads\", selector=\"*.jpg\", dest=\"{home}/Documents\", recursive=true)
+- rename(path=\"{home}/Downloads/old.txt\", new_name=\"new.txt\")
+- delete(source_dir=\"{home}/Downloads\", selector=\"*.jpg\", filter=\"empty\")
+- extract_to_file(mode=\"value\", source=\"{home}/Documents/report.txt\", pattern=\"[0-9]+\", dest_file=\"{home}/Documents/out.txt\")
+- extract_to_file(mode=\"count\", source_dir=\"{home}/Downloads\", selector=\"*.log\", dest_file=\"{home}/Documents/count.txt\")
 RULES: source_dir and dest are FOLDERS — NEVER a file or a glob (the glob goes in selector). A NEW folder =
 an EXISTING folder path + /Name. Anything ALREADY in 'Current files' is DONE — do the NEXT needed action,
-NEVER repeat a completed one. Use a GLOB selector (e.g. *.pdf) to affect ALL matches. home is /home/laputa.
+NEVER repeat a completed one. Use a GLOB selector (e.g. *.pdf) to affect ALL matches. home is {home}.
 
 Goal: {goal}
 Current files:
@@ -1204,19 +1227,12 @@ pub fn goal_postconditions(goal: &str) -> Vec<String> {
             else { format!("test -d {p}/.git") }                              // a real repo, not a dir
         }).collect();
     }
-    // GUI app-launch goals ("open the file manager and the terminal emulator") have no file artifact;
-    // verify the PROCESS is up via pgrep. Best-effort synonym map for the curated VM environment;
-    // fail-closed (empty → no claim) when nothing matches, so it can never false-claim success.
-    if ["open ", "launch", "start the", "start a"].iter().any(|v| lo.contains(v)) {
-        let mut procs: Vec<String> = [
-            ("file manager", "thunar"), ("thunar", "thunar"),
-            ("terminal", "xfce4-terminal"), ("web browser", "firefox"), ("browser", "firefox"),
-            ("firefox", "firefox"), ("text editor", "mousepad"), ("mousepad", "mousepad"),
-            ("application finder", "xfce4-appfinder"), ("app finder", "xfce4-appfinder"),
-        ].iter().filter(|(kw, _)| lo.contains(kw)).map(|(_, p)| format!("pgrep -f {p}")).collect();
-        procs.sort(); procs.dedup();
-        if !procs.is_empty() { return procs; }
-    }
+    // GUI app-launch goals ("open the file manager") have no file artifact and no DESKTOP-AGNOSTIC shell
+    // check (a role like "file manager" maps to a different binary on every desktop — thunar/nautilus/nemo
+    // — so an English→binary table names ONE environment, not the class, and silently rots when the guest
+    // changes). Launch completion is confirmed by the perception/effect layer instead (`effect_confirmed`
+    // + `observe_until_quiet`: a new top-level window appeared), which is desktop-agnostic. So this PURE
+    // goal-parse returns no check for pure-launch goals → fail-closed (never false-claims).
     let wants_absent = ["delete", "remove", "get rid of", "erase"].iter().any(|v| lo.contains(v));
     let wants_create = ["create", "make ", "write", "touch", "save", "generate", "new file",
                         "new folder", "new director"].iter().any(|v| lo.contains(v));
@@ -3119,11 +3135,11 @@ mod distill_tests {
         assert!(goal_postconditions("show the contents of /etc/hosts").is_empty());
         assert!(goal_postconditions("what is using port 8080").is_empty());
         assert!(goal_postconditions("create a poem about the sea").is_empty()); // create, but no path
-        // GUI app-launch → verify the process is up (the verification-contract addition).
-        assert_eq!(goal_postconditions("open the web browser"), vec!["pgrep -f firefox"]);
-        assert_eq!(goal_postconditions("open the file manager and the terminal emulator"),
-                   vec!["pgrep -f thunar", "pgrep -f xfce4-terminal"]);
-        // …but a GUI verb with no known app → still empty (fail-closed, never false-claims).
+        // GUI app-launch → no DESKTOP-AGNOSTIC shell check exists (a role maps to a different binary on
+        // every DE), so the PURE goal-parse returns empty; launch completion is confirmed by the
+        // perception/effect layer (a new top-level window appeared), not a hardcoded binary table.
+        assert!(goal_postconditions("open the web browser").is_empty());
+        assert!(goal_postconditions("open the file manager and the terminal emulator").is_empty());
         assert!(goal_postconditions("open the pod bay doors").is_empty());
         // Git: STRONG check or it lies — a bare dir passes `test -e`, so verify `.git` (or a HEAD when
         // a commit is asked for). This is the false-success the benchmark caught.

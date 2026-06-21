@@ -45,10 +45,21 @@ pub async fn ensure_classifier_server() -> Option<Child> {
         return None;
     }
 
+    // The classifier task needs only a small context (short clean-context prompts), but never ASSUME the
+    // model supports that size — clamp the task-need to the model's DISCOVERED trained context (inv #9:
+    // discover, don't hardcode a model-capability assumption). A model with a smaller max would otherwise
+    // fail to spawn.
+    let ctx = {
+        let p = model_path.clone();
+        let model_max = tokio::task::spawn_blocking(move || crate::gguf::read_metadata(&p).ok())
+            .await.ok().flatten().and_then(|m| m.context_length).map(|c| c as usize);
+        model_max.map_or(config::CLASSIFIER_CONTEXT_SIZE, |max| config::CLASSIFIER_CONTEXT_SIZE.min(max))
+    };
+
     let mut cmd = Command::new(config::llama_server_bin());
     cmd.args([
         "-m", &model_path.to_string_lossy(),
-        "-c", &config::CLASSIFIER_CONTEXT_SIZE.to_string(),
+        "-c", &ctx.to_string(),
         "-ngl", "0",
         "-t", "2",
         "--parallel", "1",

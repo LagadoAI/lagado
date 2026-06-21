@@ -71,8 +71,9 @@ def _app_name(obs):
 
 def _modal_present(obs):
     """Universal blocking-modal detector (#1): AT-SPI marks a BLOCKING dialog with state modal=true (a
-    non-modal dockable panel does NOT) — the precise, app-agnostic signal, no button-name vocabulary. The
-    dialog container is filtered out of the actionable candidates, so scan the raw focused-app subtree."""
+    non-modal dockable panel does NOT) — the precise, app-agnostic signal, no button-name vocabulary. Scan
+    the WHOLE tree (not just the focused-app subtree) — a transient action dialog (e.g. 'Convert to Indexed')
+    can be its own top-level node outside the app subtree; a modal is blocking wherever it lives."""
     xml = obs.get("accessibility_tree") if isinstance(obs, dict) else None
     if not xml:
         return False
@@ -80,9 +81,7 @@ def _modal_present(obs):
         root = ET.fromstring(xml)
     except Exception:
         return False
-    app = _focused_app_node(root)
-    scope = app if app is not None else root
-    for n in scope.iter():
+    for n in root.iter():
         for k, v in n.attrib.items():
             if k.split("}")[-1].lower() == "modal" and str(v).strip().lower() == "true":
                 return True
@@ -291,23 +290,6 @@ def _click_target(step):
     return re.sub(r"^(click|type|press|hit)\s+(the\s+)?", "", t.strip(), flags=re.I)
 
 
-def _running_app_to_reload(cmd: str):
-    """A config write (gsettings/dconf) to a GUI app's settings only takes effect on the app's NEXT
-    launch — a RUNNING instance has cached the old config (the os/13584542 terminal-size + chrome DNT
-    misses). Return the process to restart so the change applies, or None. General-ish: map the gsettings
-    schema / dconf path to the app's server process."""
-    low = cmd.lower()
-    APPS = {
-        "terminal": "gnome-terminal-server", "nautilus": "nautilus", "gedit": "gedit",
-        "nemo": "nemo", "eog": "eog", "gnome-text-editor": "gnome-text-editor",
-    }
-    if "gsettings" in low or "dconf" in low:
-        for kw, proc in APPS.items():
-            if kw in low:
-                return proc
-    return None
-
-
 def _discovery_probes(cmd: str, err: str):
     """DETERMINISTIC discovery for a failed command — introspect the ACTUAL system facts the model got
     wrong. General over the common ungrounding classes (gsettings/dconf config, missing file, missing
@@ -376,6 +358,7 @@ class LagadoAgent:
         self._tried_paths = []
         self._replan_budget = 3
         self._doc_closing = False
+        self._leaf_settled = False
 
     # ── the discover-then-operate execution of ONE command on the guest ──────────────────────────────
     def _run_grounded(self, instruction, cmd, log):
@@ -436,6 +419,7 @@ class LagadoAgent:
         self._tried_paths = []      # menu paths that completed with NO app change → re-plan around them
         self._replan_budget = 3
         self._doc_closing = False   # 1-step Escape to close any lingering menu before the progress compare
+        self._leaf_settled = False  # 1-step settle so a leaf-opened dialog can be confirmed before that Escape
         return self._gui_step(obs)
 
     def predict(self, instruction, obs):
@@ -664,6 +648,12 @@ class LagadoAgent:
                 print(f"[GUI][path] FAIL-CLOSED on '{token}' → reactive ladder", file=sys.stderr, flush=True)
                 self._menu_path = []; self._pending = None
             elif path and self._path_idx >= len(path):
+                # the LEAF may have opened a dialog needing CONFIRMATION (e.g. 'Convert to Indexed'). Settle one
+                # step so it renders and rung-0's modal-Enter confirms it BEFORE the progress-check Escape —
+                # else the Escape CANCELS the operation. (rung-0 runs at the top of the next step.)
+                if not getattr(self, "_leaf_settled", False):
+                    self._leaf_settled = True
+                    return "gui leaf-settle", ["WAIT"]
                 # ── PROGRESS CHECK (document-changed proxy, robust): did the APP STATE change across the path?
                 # Compared WHOLE-APP (no region guess) at two MENU-CLOSED moments — the path-start baseline and
                 # now, AFTER an Escape closes any lingering menu so chrome can't pollute the read. Changed → we
@@ -686,6 +676,7 @@ class LagadoAgent:
                 if new and _match_token(new[0], [c for c in a11y if c[0].lower().startswith("menu:")]):
                     self._menu_path = new; self._path_idx = 0; self._anchor_x = None
                     self._pending = None; self._verify_tries = 0
+                    self._leaf_settled = False; self._doc_closing = False   # fresh per-path progress state
                     self._doc_baseline = _region_sig(obs, None)   # fresh menu-closed baseline for the new path
                     self._gui_log.append(f"[replan] {' > '.join(new)}")
                     print(f"[GUI][progress] no change → RE-PLAN ({self._replan_budget} left): {' > '.join(new)}", file=sys.stderr, flush=True)
