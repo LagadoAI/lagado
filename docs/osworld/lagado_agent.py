@@ -55,6 +55,78 @@ def _readback_check(cmd: str):
     return None
 
 
+import xml.etree.ElementTree as ET
+try:
+    from mm_agents.accessibility_tree_wrap.heuristic_retrieve import filter_nodes, component_ns_ubuntu
+except Exception:
+    filter_nodes, component_ns_ubuntu = None, "https://accessibility.ubuntu.example.org/ns/component"
+
+
+def _parse_a11y(obs):
+    """OSWorld a11y XML → candidate elements [(label, cx, cy)] for the GUI plane. Reuses OSWorld's
+    filter_nodes (visible/actionable) + screencoord/size → center. This is the candidate source our
+    selection discipline picks from (a11y first; CV/pixel are the later fallback rungs)."""
+    xml = obs.get("accessibility_tree") if isinstance(obs, dict) else None
+    if not xml or filter_nodes is None:
+        return []
+    try:
+        root = ET.fromstring(xml)
+    except Exception:
+        return []
+    cands = []
+    for node in filter_nodes(root, "ubuntu"):
+        name = node.get("name", "") or ""
+        role = node.tag.split("}")[-1]
+        coord = node.get("{%s}screencoord" % component_ns_ubuntu)
+        size = node.get("{%s}size" % component_ns_ubuntu)
+        if not coord or not size:
+            continue
+        try:
+            x, y = map(int, coord.strip("()").split(", "))
+            w, h = map(int, size.strip("()").split(", "))
+        except Exception:
+            continue
+        if w <= 0 or h <= 0:
+            continue
+        label = f"{role}: {name}".strip()[:80]
+        cands.append((label, x + w // 2, y + h // 2))
+    return cands
+
+
+def _rank_for(target: str, cands, cap=40):
+    """Rank candidates by token-overlap with the target; keep top `cap` and order so the MOST relevant is
+    LAST (late-band — the model attends to the highest-numbered el_N, per selection.rs)."""
+    tt = set(re.findall(r"[a-z0-9]+", target.lower()))
+    def score(c):
+        ct = set(re.findall(r"[a-z0-9]+", c[0].lower()))
+        return len(tt & ct)
+    ranked = sorted(cands, key=score)        # ascending → best last
+    return ranked[-cap:] if len(ranked) > cap else ranked
+
+
+def _click_target(step):
+    """Extract the click/type target text from a planner GUI step."""
+    t = step.get("payload", "") if isinstance(step, dict) else str(step)
+    return re.sub(r"^(click|type|press|hit)\s+(the\s+)?", "", t.strip(), flags=re.I)
+
+
+def _running_app_to_reload(cmd: str):
+    """A config write (gsettings/dconf) to a GUI app's settings only takes effect on the app's NEXT
+    launch — a RUNNING instance has cached the old config (the os/13584542 terminal-size + chrome DNT
+    misses). Return the process to restart so the change applies, or None. General-ish: map the gsettings
+    schema / dconf path to the app's server process."""
+    low = cmd.lower()
+    APPS = {
+        "terminal": "gnome-terminal-server", "nautilus": "nautilus", "gedit": "gedit",
+        "nemo": "nemo", "eog": "eog", "gnome-text-editor": "gnome-text-editor",
+    }
+    if "gsettings" in low or "dconf" in low:
+        for kw, proc in APPS.items():
+            if kw in low:
+                return proc
+    return None
+
+
 def _discovery_probes(cmd: str, err: str):
     """DETERMINISTIC discovery for a failed command — introspect the ACTUAL system facts the model got
     wrong. General over the common ungrounding classes (gsettings/dconf config, missing file, missing
@@ -138,28 +210,68 @@ class LagadoAgent:
         return res2.get("rc", 1) == 0
 
     def predict(self, instruction, obs):
+        # GUI plane in progress (iterative — one element pick per OSWorld step)
+        if getattr(self, "_mode", None) == "gui":
+            return self._gui_step(obs)
         if self._done:
             return "done", ["DONE"]
 
         plan = _plan_bin(instruction)
         steps = plan.get("steps", [])
         cmds = [s["payload"] for s in steps if s.get("kind") == "command"]
-        gui = sum(1 for s in steps if s.get("kind") != "command")
-        self._done = True
+        gui_steps = [s for s in steps if s.get("kind") != "command"]
+        self.last_plan = steps                 # per-task map (narrow-in preserved)
+        self.last_category = None
 
-        if not cmds and gui:
-            return f"plan needs GUI plane ({gui} non-command steps)", ["FAIL"]
-
-        if self.runner is None:
-            # legacy one-shot: emit command actions through env.step
+        # CLI plane FIRST (our home base) — run any command steps via the guest runner
+        if cmds and self.runner is not None:
+            log = []
+            for c in cmds:
+                self._run_grounded(instruction, "cd ~/Desktop 2>/dev/null || cd ~; " + c, log)
+            self.last_category = "CMD_RAN"
+            self.last_trace = "discover-then-operate | " + " | ".join(log)
+            self.thoughts.append(self.last_trace[:400])
+            if not gui_steps:
+                self._done = True
+                return self.last_trace[:400], ["DONE"]
+            # mixed plan → fall through to the GUI plane for the remaining steps (the SWITCH)
+        elif cmds and self.runner is None:
+            self._done = True
             return f"terminal one-shot: {len(cmds)} cmd(s)", [_guest_command_action(c) for c in cmds] + ["DONE"]
 
-        # ITERATIVE discover-then-operate via the guest runner
-        log = []
-        # run from the OSWorld working surface so relative names resolve
-        self.runner("cd() { builtin cd \"$@\"; }; :")  # noop warm-up
-        for c in cmds:
-            self._run_grounded(instruction, "cd ~/Desktop 2>/dev/null || cd ~; " + c, log)
-        resp = "discover-then-operate | " + " | ".join(log)[:400]
-        self.thoughts.append(resp)
-        return resp, ["DONE"]
+        # ── SWITCH TRIGGER → GUI PLANE (a11y selection; CV/pixel are later fallback rungs) ──
+        if gui_steps:
+            self.last_category = "GUI_NEEDED"
+            self._gui_targets = [_click_target(s) for s in gui_steps]
+            self._gui_idx = 0
+            self._instruction = instruction
+            self._mode = "gui"
+            return self._gui_step(obs)
+
+        self._done = True
+        return "no actionable plan", ["FAIL"]
+
+    def _gui_step(self, obs):
+        """One GUI-plane step: read the current a11y tree → rank candidates → SELECT (our grammar-
+        constrained el_N | none discipline) → click. Fail-closed: `none` ⇒ re-observe (don't hallucinate a
+        click). a11y is rung 1; CV/pixel fallback (when a11y yields nothing) is the next build."""
+        import sys
+        if self._gui_idx >= len(self._gui_targets):
+            self._mode = "done"; self._done = True
+            return "gui plan exhausted", ["DONE"]
+        target = self._gui_targets[self._gui_idx]
+        cands = _parse_a11y(obs)
+        ranked = _rank_for(target, cands)
+        if not ranked:
+            self._gui_idx += 1
+            print(f"[GUI] '{target}': no a11y candidates → (CV/pixel fallback TBD)", file=sys.stderr, flush=True)
+            return f"gui '{target}': no a11y elements", ["WAIT"]
+        labels = [c[0] for c in ranked]
+        idx = _plan_bin("--select", target, *labels).get("index", -1)
+        self._gui_idx += 1
+        if idx is None or idx < 0 or idx >= len(ranked):
+            print(f"[GUI] '{target}': no match among {len(ranked)} (escape)", file=sys.stderr, flush=True)
+            return f"gui '{target}': no match (escape)", ["WAIT"]
+        label, cx, cy = ranked[idx]
+        print(f"[GUI] '{target}' → el_{idx} '{label}' @({cx},{cy})", file=sys.stderr, flush=True)
+        return f"gui click el_{idx} '{label}' @({cx},{cy})", [f"pyautogui.click({cx}, {cy})"]

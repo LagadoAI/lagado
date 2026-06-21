@@ -45,6 +45,31 @@ Corrected command:");
         return;
     }
 
+    // SELECT mode (GUI plane — our perception-fusion selection discipline): given the goal/sub-goal + a
+    // candidate element list (from OSWorld's a11y tree), pick the ONE element that matches via a
+    // GRAMMAR-CONSTRAINED `el_N | none` choice (fail-closed escape — `none` when nothing matches, never a
+    // hallucinated coord). Mirrors selection.rs (el_N index + ESCAPE_TOKEN). Caller resolves el_N → coords.
+    if args.first().map(|s| s.as_str()) == Some("--select") {
+        let goal = args.get(1).cloned().unwrap_or_default();
+        let cands: Vec<String> = args.get(2..).unwrap_or(&[]).to_vec();
+        if cands.is_empty() { println!("{}", serde_json::json!({"index": -1})); return; }
+        let list = cands.iter().enumerate().map(|(i, c)| format!("el_{i}: {c}")).collect::<Vec<_>>().join("\n");
+        let prompt = format!(
+"Pick the ONE on-screen element that best matches the goal. Output ONLY its token (el_0..el_{}) — or `none`
+if NONE of them matches.
+Goal: {goal}
+Elements:
+{list}
+Answer:", cands.len() - 1);
+        // terminal-leading alternation of literals (GBNF-safe) — el_0 | el_1 | … | none
+        let alts = (0..cands.len()).map(|i| format!("\"el_{i}\"")).collect::<Vec<_>>().join(" | ");
+        let grammar = format!("root ::= {alts} | \"none\"");
+        let out = adapter.generate_constrained(&prompt, 8, 0.1, &grammar).map(|(t, _)| t).unwrap_or_default();
+        let idx = out.trim().strip_prefix("el_").and_then(|n| n.parse::<i64>().ok()).unwrap_or(-1);
+        println!("{}", serde_json::json!({"index": idx, "token": out.trim()}));
+        return;
+    }
+
     let instruction: String = args.join(" ");
     if instruction.trim().is_empty() {
         eprintln!("usage: osworld_plan \"<task instruction>\"  |  osworld_plan --reground GOAL FAILED ERR DISCOVERY");
