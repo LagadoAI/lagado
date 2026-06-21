@@ -62,7 +62,7 @@ class DockerProvider(Provider):
             port += 1
         raise PortAllocationError(f"No available ports found starting from {start_port}")
 
-    def _wait_for_vm_ready(self, timeout: int = 300):
+    def _wait_for_vm_ready(self, timeout: int = 900):
         """Wait for VM to be ready by checking screenshot endpoint."""
         start_time = time.time()
         
@@ -117,7 +117,8 @@ class DockerProvider(Provider):
                     cap_add=["NET_ADMIN"],
                     devices=devices,
                     security_opt=["label=disable"],  # SELinux Enforcing blocks /dev/kvm + /dev/net/tun in rootless podman
-                    sysctls={"net.ipv4.ip_forward": "1"},  # qemu-docker needs IP forwarding for guest port-forward
+                    sysctls={"net.ipv4.ip_forward": "1"},
+                    privileged=True,  # qemu-docker NAT/MASQUERADE needs full privilege on this SELinux+nftables host  # qemu-docker needs IP forwarding for guest port-forward
                     volumes={
                         os.path.abspath(path_to_vm): {
                             "bind": "/System.qcow2",
