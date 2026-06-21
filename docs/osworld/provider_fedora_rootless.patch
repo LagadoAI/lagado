@@ -1,0 +1,29 @@
+diff --git a/desktop_env/providers/docker/provider.py b/desktop_env/providers/docker/provider.py
+index 3d5cd20..3710899 100644
+--- a/desktop_env/providers/docker/provider.py
++++ b/desktop_env/providers/docker/provider.py
+@@ -105,16 +105,23 @@ class DockerProvider(Provider):
+                 else:
+                     self.environment["KVM"] = "N"
+                     logger.warning("KVM device not found, running without hardware acceleration (will be slower)")
++                # The nested QEMU VM needs a TUN device for networking + port-forwarding (host→guest :5000).
++                # Without it qemu-docker falls back to usermode networking with NO port forwarding → the
++                # controller can't reach the guest server. Pass the host's tun node (rootless podman).
++                if os.path.exists("/dev/net/tun"):
++                    devices.append("/dev/net/tun")
+ 
+                 self.container = self.client.containers.run(
+                     "happysixd/osworld-docker",
+                     environment=self.environment,
+                     cap_add=["NET_ADMIN"],
+                     devices=devices,
++                    security_opt=["label=disable"],  # SELinux Enforcing blocks /dev/kvm + /dev/net/tun in rootless podman
++                    sysctls={"net.ipv4.ip_forward": "1"},  # qemu-docker needs IP forwarding for guest port-forward
+                     volumes={
+                         os.path.abspath(path_to_vm): {
+                             "bind": "/System.qcow2",
+-                            "mode": "ro"
++                            "mode": "ro,z"  # SELinux relabel — required for rootless podman on Fedora (Enforcing)
+                         }
+                     },
+                     ports={
