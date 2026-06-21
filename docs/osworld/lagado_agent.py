@@ -534,11 +534,24 @@ class LagadoAgent:
                     print(f"[GUI][verify] '{pend['label']}' effect LANDED at locus → advance", file=sys.stderr, flush=True)
                 else:
                     self._verify_tries = getattr(self, "_verify_tries", 0) + 1
-                    print(f"[GUI][verify] '{pend['label']}' no effect at locus yet (try {self._verify_tries})", file=sys.stderr, flush=True)
-                    if self._verify_tries < 2:
+                    if self._verify_tries == 1:                 # maybe a slow effect → re-observe once
+                        print(f"[GUI][verify] '{pend['label']}' no effect (try 1) → settle", file=sys.stderr, flush=True)
                         return "gui verify-wait", ["WAIT"]
-                    print(f"[GUI][verify] '{pend['label']}' produced NO effect → fail-closed", file=sys.stderr, flush=True)
-                    self._menu_path = []; self._pending = None
+                    if self._verify_tries == 2:                 # rule out a transient MISS → re-attempt below
+                        print(f"[GUI][verify] '{pend['label']}' still no effect (try 2) → re-attempt", file=sys.stderr, flush=True)
+                        self._pending = None                    # act-logic re-emits the SAME (un-advanced) idx
+                    else:
+                        # persistent no-op after settle + re-attempt. For a LEAF that means the operation is
+                        # ALREADY SATISFIED (e.g. greyed 'Add Alpha Channel' when alpha already exists) — audit
+                        # logic: a transaction netting to zero is already reconciled, not an error → SKIP, don't
+                        # fail. For a navigation HOP, no submenu = a real nav failure → fail-closed.
+                        if self._path_idx == len(path) - 1:
+                            self._gui_log.append(f"[verify] {pend['label']} already satisfied → skip")
+                            print(f"[GUI][verify] '{pend['label']}' no-op after retry → ALREADY SATISFIED → skip", file=sys.stderr, flush=True)
+                            self._path_idx += 1; self._pending = None; self._verify_tries = 0
+                        else:
+                            print(f"[GUI][verify] '{pend['label']}' nav hop produced no submenu → fail-closed", file=sys.stderr, flush=True)
+                            self._menu_path = []; self._pending = None; self._verify_tries = 0
             # (2) ACT on the current token (set a pending verification; DON'T advance until it's confirmed)
             path = getattr(self, "_menu_path", None) or []
             if path and self._path_idx < len(path):

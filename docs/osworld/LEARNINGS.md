@@ -281,7 +281,7 @@ reality, deterministic code reconciles. "You can't fake the balance."
 - **Deeper finding:** the floor catches PLAN↔WORLD mismatches, not just hops — a disabled/already-satisfied/
   inapplicable action surfaces as "no observed effect." Here it also reveals the plan is wrong for the state:
   alpha already exists, so the real task is select-background + delete, not Add Alpha Channel.
-- **What the no-effect signal now ENABLES (next builds, observation-grounded):** (1) precondition-SKIP — a
+- **What the no-effect signal now ENABLES (next builds, observation-grounded):** (1) precondition-SKIP (BUILT + validated, retry-then-skip) — a
   no-op on a planned step often means it's ALREADY SATISFIED (alpha exists) → move on, don't fail (the banked
   Option-2 idea, now grounded in observation not a model guess); (2) RE-PLAN toward the next sub-goal when an
   op is moot/exhausted. The floor is the trigger both need. No leaf-locus fix needed — the floor is correct.
