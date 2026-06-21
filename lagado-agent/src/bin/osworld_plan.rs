@@ -141,13 +141,19 @@ Command:");
         let goal = args.get(1).cloned().unwrap_or_default();
         let app = args.get(2).cloned().unwrap_or_default();
         let app = if app.trim().is_empty() { "this application".to_string() } else { app };
+        // RE-PLAN (args 3+): paths already tried that produced NO change → ask for a DIFFERENT next operation.
+        let tried: Vec<String> = args.get(3..).unwrap_or(&[]).to_vec();
+        let tried_block = if tried.is_empty() { String::new() } else {
+            format!("\nThese were ALREADY tried and changed nothing — give a DIFFERENT path for the NEXT step \
+toward the goal, do NOT repeat them:\n- {}", tried.join("\n- "))
+        };
         // KNOWLEDGE frame, naming the app — proven 5/5 correct (Layer > Transparency …). Do NOT list the
         // menu bar here: priming the model with the menu names re-triggers the lexical mis-pick (Image …).
         let prompt = format!(
 "In {app}, give the EXACT menu-bar path that accomplishes the goal, as names separated by ' > '
 (menu > submenu > item). Use your KNOWLEDGE of where the function lives — do NOT pick a menu just because its
 name matches a word in the goal. Output ONLY the path, e.g. `Layer > Transparency > Add Alpha Channel`.
-Goal: {goal}
+Goal: {goal}{tried_block}
 Path:");
         let out = adapter.generate(&prompt, 48, 0.1).unwrap_or_default();
         let line = out.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("");

@@ -134,11 +134,18 @@ def _effect_landed(pre, post):
     a meaningful pixel delta (>3% of the coarse grid shifted notably; robust to cursor/antialias noise)."""
     if pre[0] != post[0]:
         return True
+    return _pixels_changed(pre, post)
+
+
+def _pixels_changed(pre, post, thresh=0.03):
+    """PIXEL-only change (no a11y) — for the document/progress proxy: the work-product is VISUAL, and the
+    whole-app a11y set churns on any UI interaction (focus, menu state), so it can't say 'the document moved'.
+    >3% of the coarse grid shifted notably."""
     a, b = pre[1], post[1]
-    if a is not None and b is not None and a.shape == b.shape:
-        import numpy as np
-        return float((np.abs(a - b) > 20).mean()) > 0.03
-    return False
+    if a is None or b is None or a.shape != b.shape:
+        return False
+    import numpy as np
+    return float((np.abs(a - b) > 20).mean()) > thresh
 
 
 def _match_token(token, cands):
@@ -391,6 +398,10 @@ class LagadoAgent:
         self._last_pick = None
         self._pending = None        # change-at-locus verification of the last action
         self._verify_tries = 0
+        self._doc_baseline = None   # whole-app, menu-closed signature at the start of the current path
+        self._tried_paths = []      # menu paths that completed with NO app change → re-plan around them
+        self._replan_budget = 3
+        self._doc_closing = False   # 1-step Escape to close any lingering menu before the progress compare
         return self._gui_step(obs)
 
     def predict(self, instruction, obs):
@@ -452,12 +463,14 @@ class LagadoAgent:
             return None
         return ranked[idx]
 
-    def _plan_menu_path(self, app):
+    def _plan_menu_path(self, app, tried=None):
         """Knowledge-frame menu path (F13): the brain names the right menu only when asked 'in <app>, what is
         the menu PATH' (Layer > Transparency > …, 5/5) — NOT 'which menu matches the goal' (lexically mis-picks
-        Image, 9/9), and NOT grounded in the menu bar (listing 'Image' re-primes the mis-pick, 5/5 wrong)."""
+        Image, 9/9), and NOT grounded in the menu bar (listing 'Image' re-primes the mis-pick, 5/5 wrong).
+        `tried` = paths already attempted that changed nothing → ask for a DIFFERENT next operation (re-plan)."""
         try:
-            res = _plan_bin("--menupath", self._instruction, app or "this application")
+            extra = [" > ".join(p) for p in (tried or [])]
+            res = _plan_bin("--menupath", self._instruction, app or "this application", *extra)
             return [t for t in res.get("path", []) if t]
         except Exception:
             return []
@@ -470,7 +483,7 @@ class LagadoAgent:
         can't be picked. A token that never appears fails CLOSED → the reactive a11y→CV ladder. Non-menu tasks
         use the ladder directly. (Fixes F13's two walls: lexical mis-pick of the top menu + CV pollution.)"""
         import sys
-        MAX_GUI, STUCK_LIMIT = 16, 4
+        MAX_GUI, STUCK_LIMIT = 28, 4   # headroom for the re-plan loop (≤3 paths × ~7 steps + progress checks)
         if self._gui_count >= MAX_GUI:
             self._mode = "done"; self._done = True
             self.last_trace = "gui | " + " | ".join(self._gui_log)[:400]
@@ -507,6 +520,9 @@ class LagadoAgent:
                 # accept only if the first token is an actual menu-bar menu (else not a menu task → reactive)
                 if path and _match_token(path[0], [(m, 0, 0) for m in menubar]):
                     self._menu_path = path; self._path_idx = 0; self._anchor_x = None
+                    # menu-closed WHOLE-APP baseline for the progress check (no region guess — the menu bar is
+                    # visible but no dropdown is open here, so this is a clean 'before' state).
+                    self._doc_baseline = _region_sig(obs, None)
                     self._gui_log.append(f"[path] {' > '.join(path)}")
                     print(f"[GUI][path] planned: {' > '.join(path)}", file=sys.stderr, flush=True)
                 else:
@@ -589,9 +605,36 @@ class LagadoAgent:
                     return "gui path-wait", ["WAIT"]
                 print(f"[GUI][path] FAIL-CLOSED on '{token}' → reactive ladder", file=sys.stderr, flush=True)
                 self._menu_path = []; self._pending = None
-            elif path and self._path_idx >= len(path):   # all tokens acted + confirmed → done
+            elif path and self._path_idx >= len(path):
+                # ── PROGRESS CHECK (document-changed proxy, robust): did the APP STATE change across the path?
+                # Compared WHOLE-APP (no region guess) at two MENU-CLOSED moments — the path-start baseline and
+                # now, AFTER an Escape closes any lingering menu so chrome can't pollute the read. Changed → we
+                # got somewhere → done. Unchanged → we spun → RE-PLAN a DIFFERENT operation (budget-bounded). ──
+                if not getattr(self, "_doc_closing", False):
+                    self._doc_closing = True   # double-Escape closes BOTH menu levels (dropdown + flyout)
+                    return "gui progress: close menus", ["pyautogui.press('escape'); time.sleep(0.2); pyautogui.press('escape')"]
+                self._doc_closing = False
+                # PIXEL-only (the document is visual; the a11y set is too noisy for 'did the doc move')
+                changed = self._doc_baseline is None or _pixels_changed(self._doc_baseline, _region_sig(obs, None))
+                if changed:
+                    self._mode = "done"; self._done = True
+                    self.last_trace = "gui done(progress) | " + " | ".join(self._gui_log)[:400]
+                    print("[GUI][progress] app state CHANGED across path → progress made → done", file=sys.stderr, flush=True)
+                    return "gui done", ["DONE"]
+                # no change → this operation spun → RE-PLAN a different one (told what was tried)
+                self._tried_paths.append(path)
+                self._replan_budget = getattr(self, "_replan_budget", 0) - 1
+                new = self._plan_menu_path(_app_name(obs), tried=self._tried_paths) if self._replan_budget > 0 else []
+                if new and _match_token(new[0], [c for c in a11y if c[0].lower().startswith("menu:")]):
+                    self._menu_path = new; self._path_idx = 0; self._anchor_x = None
+                    self._pending = None; self._verify_tries = 0
+                    self._doc_baseline = _region_sig(obs, None)   # fresh menu-closed baseline for the new path
+                    self._gui_log.append(f"[replan] {' > '.join(new)}")
+                    print(f"[GUI][progress] no change → RE-PLAN ({self._replan_budget} left): {' > '.join(new)}", file=sys.stderr, flush=True)
+                    return "gui replan", ["WAIT"]
                 self._mode = "done"; self._done = True
-                self.last_trace = "gui path-done | " + " | ".join(self._gui_log)[:400]
+                self.last_trace = "gui done(no-progress) | " + " | ".join(self._gui_log)[:400]
+                print(f"[GUI][progress] no change, no further plan ({self._replan_budget} budget) → done", file=sys.stderr, flush=True)
                 return "gui done", ["DONE"]
 
         # ── reactive a11y→CV ladder (non-menu tasks, or a failed/abandoned path) ──
