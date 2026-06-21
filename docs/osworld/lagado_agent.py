@@ -352,6 +352,30 @@ class LagadoAgent:
     def reset(self, runtime_logger=None):
         self._done = False
         self.actions, self.observations, self.thoughts = [], [], []
+        # FULL per-task reset — clear ALL carried state so one task can't leak into the next (a multi-task
+        # broad run surfaced this; single-task runs never would). Plane/plan/path/verify/re-plan + reporting.
+        self._mode = None
+        self._instruction = ""
+        self.last_trace = ""
+        self.last_plan = []
+        self.last_category = None
+        self._gui_count = 0
+        self._stuck = 0
+        self._modal_tries = 0
+        self._enter_tries = 0
+        self._menubar_waits = 0
+        self._menu_path = None
+        self._path_planned = False
+        self._path_idx = 0
+        self._anchor_x = None
+        self._path_tries = 0
+        self._last_pick = None
+        self._pending = None
+        self._verify_tries = 0
+        self._doc_baseline = None
+        self._tried_paths = []
+        self._replan_budget = 3
+        self._doc_closing = False
 
     # ── the discover-then-operate execution of ONE command on the guest ──────────────────────────────
     def _run_grounded(self, instruction, cmd, log):
