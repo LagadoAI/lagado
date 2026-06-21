@@ -131,6 +131,31 @@ Command:");
         return;
     }
 
+    // LEAFPICK mode (A — ground the final operation in the ACTUAL on-screen submenu items): the planned leaf
+    // can be wrong/hallucinated (e.g. 'CMYK Color' for 'Palette-Based' when the real options are RGB /
+    // Grayscale / Indexed). Given the goal + the items REALLY visible, pick the one that achieves it by
+    // KNOWLEDGE (Indexed = palette-based) — grammar-constrained el_N | none, no lexical decoy at this level.
+    if args.first().map(|s| s.as_str()) == Some("--leafpick") {
+        let goal = args.get(1).cloned().unwrap_or_default();
+        let items: Vec<String> = args.get(2..).unwrap_or(&[]).to_vec();
+        if items.is_empty() { println!("{}", serde_json::json!({"index": -1})); return; }
+        let list = items.iter().enumerate().map(|(i, c)| format!("el_{i}: {c}")).collect::<Vec<_>>().join("\n");
+        let prompt = format!(
+"These are the menu items VISIBLE on screen right now. Pick the ONE that accomplishes the goal — use your
+KNOWLEDGE of what each item does (e.g. 'Indexed' makes an image palette-based). Output ONLY its token
+(el_0..el_{}), or `none` if none of them does.
+Goal: {goal}
+Items:
+{list}
+Answer:", items.len() - 1);
+        let alts = (0..items.len()).map(|i| format!("\"el_{i}\"")).collect::<Vec<_>>().join(" | ");
+        let grammar = format!("root ::= {alts} | \"none\"");
+        let out = adapter.generate_constrained(&prompt, 8, 0.1, &grammar).map(|(t, _)| t).unwrap_or_default();
+        let idx = out.trim().strip_prefix("el_").and_then(|n| n.parse::<i64>().ok()).unwrap_or(-1);
+        println!("{}", serde_json::json!({"index": idx, "token": out.trim()}));
+        return;
+    }
+
     // MENUPATH mode (F13 — the knowledge frame, not the selection frame): per-step menu SELECTION fails
     // (the model lexically picks the menu whose NAME matches a goal word — "image" → Image — 9/9 wrong for
     // a goal whose function lives under Layer). But asked as a KNOWLEDGE question ("what is the menu path?")

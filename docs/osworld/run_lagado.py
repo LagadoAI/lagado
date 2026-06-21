@@ -13,14 +13,16 @@ logging.basicConfig(level=logging.WARNING)
 from desktop_env.desktop_env import DesktopEnv
 from mm_agents.lagado_agent import LagadoAgent
 
-MAX_STEPS = 15
+MAX_STEPS = 32   # must exceed the GUI spine's own MAX_GUI (28) so the re-plan loop can actually finish
 RESULTS = "/tmp/osworld_broad_results.json"
 
 specs = sys.argv[1:] or ["os:3"]
 plan = []
 for s in specs:
     dom, _, n = s.partition(":")
-    if n and not n.isdigit():   # dom:<task-id-prefix> → target one specific task
+    # id if it has non-digits OR is long (task-id prefixes are 8 hex chars, e.g. all-digit '13584542');
+    # a bare short number (e.g. '3') is a COUNT.
+    if n and (not n.isdigit() or len(n) >= 5):   # dom:<task-id-prefix> → target one specific task
         for tf in sorted(glob.glob(f"evaluation_examples/examples/{dom}/{n}*.json")):
             plan.append((dom, tf))
     else:

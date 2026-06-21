@@ -517,6 +517,20 @@ class LagadoAgent:
         except Exception:
             return []
 
+    def _leaf_pick(self, region):
+        """Ground the final operation in the ACTUAL visible items (--leafpick): the planned leaf token can be
+        hallucinated ('CMYK Color' for 'Palette-Based'); the real options (RGB/Grayscale/Indexed) decide it by
+        knowledge. Returns (label, cx, cy) or None."""
+        if not region:
+            return None
+        cands = region[:30]
+        try:
+            res = _plan_bin("--leafpick", self._instruction, *[c[0] for c in cands])
+        except Exception:
+            return None
+        idx = res.get("index", -1)
+        return cands[idx] if isinstance(idx, int) and 0 <= idx < len(cands) else None
+
     def _gui_step(self, obs):
         """GUI step. MENU tasks → plan the menu PATH once (knowledge frame), then FOLLOW it deterministically:
         the menubar token CLICK-opens its dropdown, each submenu-PARENT token HOVER-opens its flyout (GTK opens
@@ -627,17 +641,19 @@ class LagadoAgent:
                     ax = self._anchor_x
                     cv = _ocr_candidates(obs)
                     region = [c for c in cv if (ax - 220) < c[1] < (ax + 580) and c[2] > 88] if ax is not None else cv
-                    cand = _match_token(token, region)
+                    is_leaf = (idx == len(path) - 1)
+                    # leaf → GROUND in the actual visible items (the planned token may be hallucinated);
+                    # parent → match the planned token to descend.
+                    cand = (self._leaf_pick(region) or _match_token(token, region)) if is_leaf else _match_token(token, region)
                     if cand:
                         label, cx, cy = cand
-                        is_leaf = (idx == len(path) - 1)
                         self._last_pick = label; self._path_tries = 0
                         kind = "click" if is_leaf else "hover"
                         loc = _action_locus(kind, cx, cy)
-                        self._pending = {"locus": loc, "pre": _region_sig(obs, loc), "label": token}
-                        if is_leaf:                   # LAST token → CLICK the leaf (activates / opens dialog)
-                            print(f"[GUI][path] step {self._gui_count}: CLICK leaf '{token}' @({cx},{cy})", file=sys.stderr, flush=True)
-                            return f"gui[path] click '{token}'", [f"pyautogui.moveTo({cx}, {cy}); pyautogui.click({cx}, {cy})"]
+                        self._pending = {"locus": loc, "pre": _region_sig(obs, loc), "label": label}
+                        if is_leaf:                   # LAST token → CLICK the (grounded) leaf
+                            print(f"[GUI][path] step {self._gui_count}: CLICK leaf '{label}' (planned '{token}') @({cx},{cy})", file=sys.stderr, flush=True)
+                            return f"gui[path] click '{label}'", [f"pyautogui.moveTo({cx}, {cy}); pyautogui.click({cx}, {cy})"]
                         print(f"[GUI][path] step {self._gui_count}: HOVER '{token}' @({cx},{cy})", file=sys.stderr, flush=True)
                         return f"gui[path] hover '{token}'", [f"pyautogui.moveTo({cx}, {cy}); time.sleep(0.6)"]
                 # token not visible yet → re-perceive a few times (the flyout needs a beat); then fail CLOSED
