@@ -37,6 +37,24 @@ def _guest_command_action(cmd: str) -> str:
             "print(_r.stdout); print(_r.stderr)")
 
 
+def _readback_check(cmd: str):
+    """For a config-SET command, derive the GET/READ that confirms the value actually took (the
+    exit-0-but-wrong guard). Returns (read_cmd, expected_value) or None. Value/key taken from the END so a
+    schema with an inline $(...) (spaces) still parses; re-running the same $() re-resolves the UUID."""
+    c = cmd.split(";")[-1].strip()
+    toks = c.split()
+    if "gsettings" in c and "set" in toks:
+        rest = toks[toks.index("set") + 1:]
+        if len(rest) >= 3:
+            value, key, schema = rest[-1], rest[-2], " ".join(rest[:-2])
+            return (f"gsettings get {schema} {key}", value.strip("\"'"))
+    if "dconf" in c and "write" in toks:
+        rest = toks[toks.index("write") + 1:]
+        if len(rest) >= 2:
+            return (f"dconf read {rest[0]}", " ".join(rest[1:]).strip("\"'"))
+    return None
+
+
 def _discovery_probes(cmd: str, err: str):
     """DETERMINISTIC discovery for a failed command — introspect the ACTUAL system facts the model got
     wrong. General over the common ungrounding classes (gsettings/dconf config, missing file, missing
@@ -90,6 +108,16 @@ class LagadoAgent:
         log.append(f"$ {cmd}\n  rc={rc} {('err='+err.strip()[:80]) if err.strip() else 'ok'}")
         print(f"[CMD] {cmd}\n  rc={rc} out={out.strip()[:120]!r} err={err.strip()[:160]!r}", file=sys.stderr, flush=True)
         ungrounded = rc != 0 and any(s in err.lower() for s in UNGROUNDED)
+        # EFFECT-VERIFY (exit-0-but-wrong): a config-set can "succeed" rc=0 without the value taking (wrong
+        # schema/path the model hallucinated). Read it back; mismatch ⇒ ungrounded ⇒ discover→reground.
+        if not ungrounded and rc == 0:
+            chk = _readback_check(cmd)
+            if chk:
+                got = self.runner(chk[0]).get("out", "")
+                if chk[1] not in got:
+                    ungrounded = True
+                    err = (err + f" [effect-verify: {chk[0]} -> {got.strip()[:60]!r} != {chk[1]!r}]").strip()
+                    print(f"[EFFECT-FAIL] {chk[0]} -> {got.strip()[:60]!r} expected {chk[1]!r}", file=sys.stderr, flush=True)
         if not ungrounded:
             return rc == 0
         # DISCOVER → REGROUND → retry (bounded to one round)
