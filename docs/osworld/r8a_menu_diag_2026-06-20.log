@@ -1,0 +1,6 @@
+MENUS: ['menu:GNU Image Manipulation Program', 'menu:System', 'menu:File', 'menu:Edit', 'menu:Select', 'menu:View', 'menu:Image', 'menu:Layer']
+PROBE target = menu:Image @(269,76); baseline menu-items = 0
+  [A: click center] +0 new elements, 0 menu-items; sample: []
+  [B: moveTo+click+longer settle] +6 new elements, 0 menu-items; sample: ['combo-box:Default', 'combo-box:Normal', 'label:computer.png (187.9\xa0MB)', 'label:Lock:']
+  [C: F10 + Down (keyboard menu nav)] +7 new elements, 0 menu-items; sample: ['combo-box:Default', 'combo-box:Normal', 'label:Lock:', 'table-cell:computer.png']
+  [D: Alt+i mnemonic] +6 new elements, 0 menu-items; sample: ['combo-box:Default', 'label:Create a duplicate of this image', 'combo-box:Normal', 'label:Lock:']

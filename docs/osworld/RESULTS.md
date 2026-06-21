@@ -74,6 +74,7 @@ NOTE: `calc` recorded 0 — the domain dir is `libreoffice_calc` not `calc` (run
 | 2026-06-20 | 5b021a8 | 3/4 | 0/3 | 0/3 | (bug) | first broad map; GUI plane is the spec |
 | 2026-06-20 | 51807fb | 3/4 | 0/3 | 0/3 | (bug) | GUI plane wired: engages+selects top-level menus, fail-closes; wall = reactive menu navigation (R7) |
 | 2026-06-20 | d76c331 | 3/4 | 0/3 | 0/3 | (bug) | R7 reactive loop works (reasons to right menu, drove web nav, no-progress stops clean); wall = menubar-menu OPEN (R8) |
+| 2026-06-20 | (diag) | 3/4 | 0/3 | 0/3 | (bug) | R8a: GIMP menu items INVISIBLE to a11y (4 interactions, 0 menu-items) → CV/pixel plane REQUIRED (F9), not a click fix |
 
 ## Failure-category taxonomy (the narrow-in keys)
 - **PASS** — covered by the current harness.

@@ -102,10 +102,26 @@ elements work). **Tells us to build R8 — menu-open interaction:**
   click-popups are flaky; OR window-focus-first + move-then-click + longer settle while the popup is open.
 - This is a narrow GTK-actuation fix, NOT a loop-logic problem (R7 logic verified).
 
+
+### F9 — R8 diagnosed: GIMP menu items are INVISIBLE to a11y → CV/pixel is REQUIRED, not a click fix
+R8a probe on the real `menu:Image @(269,76)`, 4 interactions: plain click → +0 (didn't register);
+moveTo+click+settle / F10+Down / Alt+i → screen CHANGES (+6/+7 elements, incl. an Image-menu tooltip) but
+**ZERO menu-items ever enter the a11y tree.** The menu responds; its items just aren't AT-SPI-exposed (GIMP
+coverage gap, or the popup closes during the a11y query — transient-popup race). **No a11y interaction can
+navigate a GIMP menu.** Contrast: chrome web nav worked (rich web a11y). **This is the a11y-coverage wall the
+ladder exists for. Tells us:**
+- **R8 (menu-click fix) is WRONG** — there are no a11y nodes to select, regardless of how we open the menu.
+- **R7c (CV/pixel plane) is now REQUIRED, not optional:** when a11y yields no candidate for a real on-screen
+  target, fall to CV — read the menu from the SCREENSHOT (which reliably captures the open popup), OCR/match
+  the item text, click by PIXEL. Needs OCR (tesseract) or a grounding/parse model (OmniParser-style) — this
+  is the 'captioning is a required sense' finding (memory lagado-axblind-probe-finding) made concrete.
+- VALIDATES the a11y→CV→pixel ladder empirically: a11y for accessible apps (web/chrome), CV+OCR for native
+  apps (GIMP, likely libreoffice). The CV plane is the next real build, gated behind a11y-yields-nothing.
+
 ## Build order (data-driven)
 1. **R1a — goal-level effect-verify** (the spine's trigger; cheap; unlocks F1 + is prerequisite for F2/F3).
 2. **R1b — config-apply/app-reload** (finishes the running-app class on the CLI plane).
-3. **R3 — GUI actuation plane** (a11y→CV→pixel), gated by the R1a trigger (the big build).
+3. **R7c — CV/pixel plane (OCR/grounding)** — REQUIRED for native-app menus (a11y-blind; F9), gated by a11y-yields-nothing. The big build.
 4. **R2a — empirical infeasibility** (falls out once both planes can exhaust → FAIL) — +8% of the bench.
 
 Update this ledger as new runs surface new finding-classes. Every measured failure is a line item here.
