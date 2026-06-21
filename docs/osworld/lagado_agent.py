@@ -104,6 +104,33 @@ def _rank_for(target: str, cands, cap=40):
     return ranked[-cap:] if len(ranked) > cap else ranked
 
 
+_OCR = None
+def _ocr_candidates(obs):
+    """CV plane (R7c): OCR the OSWorld screenshot → text candidates [(label, cx, cy)] with pixel centers.
+    Used when a11y is BLIND to a real on-screen target (native-app menus — F9). easyocr, CPU, lazy-init."""
+    global _OCR
+    shot = obs.get("screenshot") if isinstance(obs, dict) else None
+    if not shot:
+        return []
+    try:
+        import io, numpy as np
+        from PIL import Image
+        img = np.array(Image.open(io.BytesIO(shot)).convert("RGB"))
+        if _OCR is None:
+            import easyocr
+            _OCR = easyocr.Reader(["en"], gpu=False, verbose=False)
+        cands = []
+        for bbox, text, conf in _OCR.readtext(img):
+            if conf < 0.4 or not str(text).strip():
+                continue
+            xs = [p[0] for p in bbox]; ys = [p[1] for p in bbox]
+            cands.append((f"text: {str(text).strip()}"[:80], int(sum(xs) / 4), int(sum(ys) / 4)))
+        return cands
+    except Exception as e:
+        import sys; print(f"[OCR] failed: {e}", file=sys.stderr, flush=True)
+        return []
+
+
 def _click_target(step):
     """Extract the click/type target text from a planner GUI step."""
     t = step.get("payload", "") if isinstance(step, dict) else str(step)
@@ -253,48 +280,65 @@ class LagadoAgent:
         self._done = True
         return "no actionable plan", ["FAIL"]
 
-    def _gui_step(self, obs):
-        """REACTIVE GUI step (R7): read the LIVE a11y tree → pick the ONE next element toward the GOAL
-        (grammar-constrained el_N | done | none) → click. SETTLE/no-progress: if the candidate set is
-        unchanged for several steps (a click had no effect — e.g. a menu didn't open) → stop. Fail-closed:
-        `none` ⇒ WAIT (re-observe). a11y is rung 1; CV/pixel fallback when a11y is empty is the next build."""
-        import sys
-        MAX_GUI, STUCK_LIMIT = 12, 3
-        if self._gui_count >= MAX_GUI:
-            self._mode = "done"; self._done = True
-            self.last_trace = "gui (reactive) | " + " | ".join(self._gui_log)[:400]
-            return "gui step budget reached", ["DONE"]
-        self._gui_count += 1
-
-        cands = _parse_a11y(obs)
-        chash = hash(tuple(sorted(c[0] for c in cands)))
-        if chash == self._last_hash:
-            self._stuck += 1
-        else:
-            self._stuck = 0
-            self._last_hash = chash
-        if self._stuck >= STUCK_LIMIT:                 # clicks aren't changing the screen → give up cleanly
-            self._mode = "done"; self._done = True
-            print(f"[GUI] no-progress x{self._stuck} → stop", file=sys.stderr, flush=True)
-            self.last_trace = "gui (reactive, stuck) | " + " | ".join(self._gui_log)[:400]
-            return "gui no-progress", ["DONE"]
+    def _next_pick(self, obs_or_cands):
+        """Run the reactive selection (--next: el_N | done | none) over a candidate set. Returns 'done',
+        a (label, cx, cy) tuple, or None (no useful pick)."""
+        cands = obs_or_cands
         if not cands:
-            print("[GUI] no a11y candidates → WAIT (CV/pixel fallback TBD)", file=sys.stderr, flush=True)
-            return "gui: no a11y elements", ["WAIT"]
-
+            return None
         ranked = _rank_for(self._instruction, cands, cap=50)
-        labels = [c[0] for c in ranked]
-        res = _plan_bin("--next", self._instruction, *labels)
+        res = _plan_bin("--next", self._instruction, *[c[0] for c in ranked])
         tok, idx = res.get("token", "none"), res.get("index", -1)
         if tok == "done":
-            self._mode = "done"; self._done = True
-            print("[GUI] model says done", file=sys.stderr, flush=True)
-            self.last_trace = "gui (reactive, done) | " + " | ".join(self._gui_log)[:400]
-            return "gui done", ["DONE"]
+            return "done"
         if tok == "none" or idx is None or idx < 0 or idx >= len(ranked):
-            print(f"[GUI] none among {len(ranked)} → WAIT", file=sys.stderr, flush=True)
-            return "gui: none (settle)", ["WAIT"]
-        label, cx, cy = ranked[idx]
-        self._gui_log.append(f"el_{idx} {label} @({cx},{cy})")
-        print(f"[GUI] step {self._gui_count}: el_{idx} '{label}' @({cx},{cy})", file=sys.stderr, flush=True)
-        return f"gui click '{label}' @({cx},{cy})", [f"pyautogui.click({cx}, {cy})"]
+            return None
+        return ranked[idx]
+
+    def _gui_step(self, obs):
+        """REACTIVE GUI step with the a11y→CV ladder (R7+R7c): pick the next element toward the GOAL from
+        the LIVE a11y tree; if a11y is BLIND (no pick, or REPEATS the same pick — native-app menus, F9) fall
+        to CV — OCR the screenshot (the open menu IS visible in pixels) and pick by pixel. Fail-closed (no
+        plane advances ⇒ settle/stop). a11y first (cheap); CV only when a11y stalls."""
+        import sys
+        MAX_GUI, STUCK_LIMIT = 14, 4
+        if self._gui_count >= MAX_GUI:
+            self._mode = "done"; self._done = True
+            self.last_trace = "gui | " + " | ".join(self._gui_log)[:400]
+            return "gui step budget", ["DONE"]
+        self._gui_count += 1
+        last = getattr(self, "_last_pick", None)
+
+        # rung 1 — a11y
+        sel, plane = self._next_pick(_parse_a11y(obs)), "a11y"
+        if sel == "done":
+            self._mode = "done"; self._done = True
+            self.last_trace = "gui done | " + " | ".join(self._gui_log)[:400]
+            return "gui done", ["DONE"]
+
+        # rung 2 — CV/OCR fallback when a11y is blind (None) or STUCK (repeating the same element)
+        if sel is None or (isinstance(sel, tuple) and sel[0] == last):
+            print("[GUI] a11y blind/stuck → CV(OCR) fallback", file=sys.stderr, flush=True)
+            cvsel = self._next_pick(_ocr_candidates(obs))
+            if cvsel == "done":
+                self._mode = "done"; self._done = True
+                self.last_trace = "gui done(cv) | " + " | ".join(self._gui_log)[:400]
+                return "gui done", ["DONE"]
+            if isinstance(cvsel, tuple) and cvsel[0] != last:
+                sel, plane = cvsel, "cv"
+
+        if not isinstance(sel, tuple) or sel[0] == last:
+            self._stuck = getattr(self, "_stuck", 0) + 1
+            print(f"[GUI] neither plane advanced (stuck {self._stuck})", file=sys.stderr, flush=True)
+            if self._stuck >= STUCK_LIMIT:
+                self._mode = "done"; self._done = True
+                self.last_trace = "gui stuck | " + " | ".join(self._gui_log)[:400]
+                return "gui no-progress", ["DONE"]
+            return "gui settle", ["WAIT"]
+
+        self._stuck = 0
+        label, cx, cy = sel
+        self._last_pick = label
+        self._gui_log.append(f"[{plane}] {label} @({cx},{cy})")
+        print(f"[GUI][{plane}] step {self._gui_count}: '{label}' @({cx},{cy})", file=sys.stderr, flush=True)
+        return f"gui[{plane}] '{label}'", [f"pyautogui.click({cx}, {cy})"]
