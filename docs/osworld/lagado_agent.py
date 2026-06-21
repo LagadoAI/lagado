@@ -89,6 +89,58 @@ def _modal_present(obs):
     return False
 
 
+def _region_sig(obs, region):
+    """Harness-derived signature of a screen region across senses — the a11y label-SET plus a noise-robust
+    coarse grayscale grid of the pixels. region = (x0,x1,y0,y1) or None for the focused app. This is the
+    independent observation the change-at-locus verifier reconciles against; the MODEL is never consulted."""
+    a11y = _parse_a11y(obs)
+    if region is None:
+        labels = frozenset(c[0] for c in a11y)
+    else:
+        x0, x1, y0, y1 = region
+        labels = frozenset(c[0] for c in a11y if x0 <= c[1] <= x1 and y0 <= c[2] <= y1)
+    arr = None
+    shot = obs.get("screenshot") if isinstance(obs, dict) else None
+    if shot:
+        try:
+            import io, numpy as np
+            from PIL import Image
+            img = np.asarray(Image.open(io.BytesIO(shot)).convert("L"), dtype=np.int16)
+            if region is not None:
+                h, w = img.shape
+                img = img[max(0, y0):min(h, y1), max(0, x0):min(w, x1)]
+            if img.size:
+                from PIL import Image as _I
+                arr = np.asarray(_I.fromarray(img.astype("uint8")).resize((32, 32)), dtype=np.int16)  # coarse → ignore 1px noise
+        except Exception:
+            arr = None
+    return (labels, arr)
+
+
+def _action_locus(kind, cx, cy):
+    """The region to watch for an action's effect — DERIVED FROM THE ACTION ALONE (no model). A menu-open's
+    effect appears below the clicked item; a hover's flyout appears to its right; a leaf-click/type can land
+    anywhere (dialog/doc) → watch the whole app. Offsets are anchored to the action's coords, not the screen."""
+    if kind == "open":
+        return (cx - 150, cx + 360, cy + 5, 900)
+    if kind == "hover":
+        return (cx - 40, cx + 460, cy - 120, cy + 420)
+    return None
+
+
+def _effect_landed(pre, post):
+    """Did the locus CHANGE between the pre- and post-action observations? The unfakeable floor — 'a change
+    in the spot we expect' — reconciled from observation, not the model's say-so. Structural (a11y set) OR
+    a meaningful pixel delta (>3% of the coarse grid shifted notably; robust to cursor/antialias noise)."""
+    if pre[0] != post[0]:
+        return True
+    a, b = pre[1], post[1]
+    if a is not None and b is not None and a.shape == b.shape:
+        import numpy as np
+        return float((np.abs(a - b) > 20).mean()) > 0.03
+    return False
+
+
 def _match_token(token, cands):
     """Best candidate whose label matches a menu-path TOKEN (deterministic, no model). Exact substring wins;
     else most word-overlap (≥1 word). Returns (label, cx, cy) or None. Used to FOLLOW a planned menu path on
@@ -337,6 +389,8 @@ class LagadoAgent:
         self._anchor_x = None
         self._path_tries = 0
         self._last_pick = None
+        self._pending = None        # change-at-locus verification of the last action
+        self._verify_tries = 0
         return self._gui_step(obs)
 
     def predict(self, instruction, obs):
@@ -466,47 +520,66 @@ class LagadoAgent:
                     return "gui await-menubar", ["WAIT"]
                 self._menu_path = []; self._path_planned = True
 
-        # ── FOLLOW the planned path deterministically ──
+        # ── FOLLOW the planned path, CONFIRM-GATED (change-at-locus floor) ──
         path = getattr(self, "_menu_path", None) or []
         if path:
-            idx = self._path_idx
-            if idx >= len(path):                      # path consumed (no dialog left) → done
+            # (1) RECONCILE the previous action: did its effect land at the harness-derived locus? The model is
+            # never asked 'did it work' — the harness observes the spot the action should have changed. Advance
+            # only on a confirmed change; no change after a beat = the action did nothing → fail closed.
+            pend = getattr(self, "_pending", None)
+            if pend is not None:
+                if _effect_landed(pend["pre"], _region_sig(obs, pend["locus"])):
+                    self._path_idx += 1; self._pending = None; self._verify_tries = 0
+                    self._gui_log.append(f"[verify] {pend['label']} landed")
+                    print(f"[GUI][verify] '{pend['label']}' effect LANDED at locus → advance", file=sys.stderr, flush=True)
+                else:
+                    self._verify_tries = getattr(self, "_verify_tries", 0) + 1
+                    print(f"[GUI][verify] '{pend['label']}' no effect at locus yet (try {self._verify_tries})", file=sys.stderr, flush=True)
+                    if self._verify_tries < 2:
+                        return "gui verify-wait", ["WAIT"]
+                    print(f"[GUI][verify] '{pend['label']}' produced NO effect → fail-closed", file=sys.stderr, flush=True)
+                    self._menu_path = []; self._pending = None
+            # (2) ACT on the current token (set a pending verification; DON'T advance until it's confirmed)
+            path = getattr(self, "_menu_path", None) or []
+            if path and self._path_idx < len(path):
+                idx, token = self._path_idx, path[self._path_idx]
+                if idx == 0:                          # menubar → CLICK to open the dropdown
+                    cand = _match_token(token, [c for c in a11y if c[0].lower().startswith("menu:")])
+                    if cand:
+                        label, cx, cy = cand
+                        self._anchor_x = cx; self._last_pick = label; self._path_tries = 0
+                        loc = _action_locus("open", cx, cy)
+                        self._pending = {"locus": loc, "pre": _region_sig(obs, loc), "label": token}
+                        print(f"[GUI][path] step {self._gui_count}: open menu '{token}' @({cx},{cy})", file=sys.stderr, flush=True)
+                        return f"gui[path] open '{token}'", [f"pyautogui.moveTo({cx}, {cy}); pyautogui.click({cx}, {cy})"]
+                else:                                 # submenu item → match in the region-clipped OCR
+                    ax = self._anchor_x
+                    cv = _ocr_candidates(obs)
+                    region = [c for c in cv if (ax - 220) < c[1] < (ax + 580) and c[2] > 88] if ax is not None else cv
+                    cand = _match_token(token, region)
+                    if cand:
+                        label, cx, cy = cand
+                        is_leaf = (idx == len(path) - 1)
+                        self._last_pick = label; self._path_tries = 0
+                        kind = "click" if is_leaf else "hover"
+                        loc = _action_locus(kind, cx, cy)
+                        self._pending = {"locus": loc, "pre": _region_sig(obs, loc), "label": token}
+                        if is_leaf:                   # LAST token → CLICK the leaf (activates / opens dialog)
+                            print(f"[GUI][path] step {self._gui_count}: CLICK leaf '{token}' @({cx},{cy})", file=sys.stderr, flush=True)
+                            return f"gui[path] click '{token}'", [f"pyautogui.moveTo({cx}, {cy}); pyautogui.click({cx}, {cy})"]
+                        print(f"[GUI][path] step {self._gui_count}: HOVER '{token}' @({cx},{cy})", file=sys.stderr, flush=True)
+                        return f"gui[path] hover '{token}'", [f"pyautogui.moveTo({cx}, {cy}); time.sleep(0.6)"]
+                # token not visible yet → re-perceive a few times (the flyout needs a beat); then fail CLOSED
+                self._path_tries = getattr(self, "_path_tries", 0) + 1
+                print(f"[GUI][path] token '{token}' not visible (try {self._path_tries})", file=sys.stderr, flush=True)
+                if self._path_tries < 3:
+                    return "gui path-wait", ["WAIT"]
+                print(f"[GUI][path] FAIL-CLOSED on '{token}' → reactive ladder", file=sys.stderr, flush=True)
+                self._menu_path = []; self._pending = None
+            elif path and self._path_idx >= len(path):   # all tokens acted + confirmed → done
                 self._mode = "done"; self._done = True
                 self.last_trace = "gui path-done | " + " | ".join(self._gui_log)[:400]
                 return "gui done", ["DONE"]
-            token = path[idx]
-            if idx == 0:                              # menubar → CLICK to open the dropdown
-                cand = _match_token(token, [c for c in a11y if c[0].lower().startswith("menu:")])
-                if cand:
-                    label, cx, cy = cand
-                    self._anchor_x = cx; self._path_idx = 1; self._last_pick = label; self._path_tries = 0
-                    self._gui_log.append(f"[path0] open {token} @({cx},{cy})")
-                    print(f"[GUI][path] step {self._gui_count}: open menu '{token}' @({cx},{cy})", file=sys.stderr, flush=True)
-                    return f"gui[path] open '{token}'", [f"pyautogui.moveTo({cx}, {cy}); pyautogui.click({cx}, {cy})"]
-            else:                                     # submenu item → match in the region-clipped OCR
-                ax = self._anchor_x
-                cv = _ocr_candidates(obs)
-                region = [c for c in cv if (ax - 220) < c[1] < (ax + 580) and c[2] > 88] if ax is not None else cv
-                cand = _match_token(token, region)
-                if cand:
-                    label, cx, cy = cand
-                    is_leaf = (idx == len(path) - 1)
-                    self._path_idx += 1; self._last_pick = label; self._path_tries = 0
-                    if is_leaf:                       # LAST token → CLICK the leaf (activates / opens dialog)
-                        self._gui_log.append(f"[path-leaf] {token} @({cx},{cy})")
-                        print(f"[GUI][path] step {self._gui_count}: CLICK leaf '{token}' @({cx},{cy})", file=sys.stderr, flush=True)
-                        return f"gui[path] click '{token}'", [f"pyautogui.moveTo({cx}, {cy}); pyautogui.click({cx}, {cy})"]
-                    # PARENT token → HOVER (moveTo + dwell, NO click) to open the submenu flyout
-                    self._gui_log.append(f"[path-hover] {token} @({cx},{cy})")
-                    print(f"[GUI][path] step {self._gui_count}: HOVER '{token}' @({cx},{cy})", file=sys.stderr, flush=True)
-                    return f"gui[path] hover '{token}'", [f"pyautogui.moveTo({cx}, {cy}); time.sleep(0.6)"]
-            # token not visible yet → re-perceive a few times (the flyout needs a beat); then fail CLOSED
-            self._path_tries = getattr(self, "_path_tries", 0) + 1
-            print(f"[GUI][path] token '{token}' not visible (try {self._path_tries})", file=sys.stderr, flush=True)
-            if self._path_tries < 3:
-                return "gui path-wait", ["WAIT"]
-            print(f"[GUI][path] FAIL-CLOSED on '{token}' → reactive ladder", file=sys.stderr, flush=True)
-            self._menu_path = []
 
         # ── reactive a11y→CV ladder (non-menu tasks, or a failed/abandoned path) ──
         sel, plane = self._next_pick(a11y), "a11y"

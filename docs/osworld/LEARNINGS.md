@@ -260,6 +260,32 @@ be it:
   a11y show the goal achieved? — read-only by nature), never a model-authored shell command. That's the next
   real build for the spine — not another patch.
 
+### F16 — the verification spine, built + VALIDATED: change-at-locus floor catches a no-op the model would have claimed
+The systemic truth (user's audit lens): the model is an unreliable narrator — of the world and of itself —
+so truth must be GROUNDED BY OBSERVATION, not asked of the model. Reconciliation, not self-certification:
+the model never observes/reports/judges its own result; it emits a CLAIM (action), the harness observes
+reality, deterministic code reconciles. "You can't fake the balance."
+- **BUILT — change-at-locus floor (harness-derived).** After each action the harness checks whether the
+  effect the ACTION TYPE implies actually landed at the locus the ACTION defines — model never consulted.
+  `_region_sig` (a11y label-set + noise-robust 32×32 grayscale grid) + `_effect_landed` (a11y-set change OR
+  >3% pixel delta) + `_action_locus` (open→dropdown-below; hover→flyout-right; leaf→whole-app). The path-
+  follower is now CONFIRM-GATED: advance a hop only on observed effect; no change after a beat = fail-closed.
+- **LIVE (gimp transparency):** `open Layer → [verify] LANDED` (dropdown appeared) → `HOVER Transparency →
+  [verify] LANDED` (flyout appeared) → `CLICK leaf 'Add Alpha Channel' → [verify] NO effect → fail-closed`.
+- **The leaf 'no effect' was a TRUE CATCH, not a false negative (diagnosed, not guessed):** the measured
+  delta was ~1% on BOTH the whole-app AND a concentrated menu-region locus (so not a locus/threshold miss),
+  a11y unchanged, no modal. Screenshot: **'Add Alpha Channel' is GREYED OUT** — the dog PNG already has an
+  alpha channel, so GIMP disables it. The click hit a dead item; the menu stayed open; genuinely zero effect.
+  **The harness observed that the planned action did NOTHING and refused to advance — exactly where a model
+  relying on self-report would have asserted "done."** This is the spine working as a truth instrument.
+- **Deeper finding:** the floor catches PLAN↔WORLD mismatches, not just hops — a disabled/already-satisfied/
+  inapplicable action surfaces as "no observed effect." Here it also reveals the plan is wrong for the state:
+  alpha already exists, so the real task is select-background + delete, not Add Alpha Channel.
+- **What the no-effect signal now ENABLES (next builds, observation-grounded):** (1) precondition-SKIP — a
+  no-op on a planned step often means it's ALREADY SATISFIED (alpha exists) → move on, don't fail (the banked
+  Option-2 idea, now grounded in observation not a model guess); (2) RE-PLAN toward the next sub-goal when an
+  op is moot/exhausted. The floor is the trigger both need. No leaf-locus fix needed — the floor is correct.
+
 ## Build order (data-driven)
 1. **R1a — goal-level effect-verify** (the spine's trigger; cheap; unlocks F1 + is prerequisite for F2/F3).
 2. **R1b — config-apply/app-reload** (finishes the running-app class on the CLI plane).
