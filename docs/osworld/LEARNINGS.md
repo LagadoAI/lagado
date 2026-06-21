@@ -118,6 +118,25 @@ ladder exists for. Tells us:**
 - VALIDATES the a11y→CV→pixel ladder empirically: a11y for accessible apps (web/chrome), CV+OCR for native
   apps (GIMP, likely libreoffice). The CV plane is the next real build, gated behind a11y-yields-nothing.
 
+
+### F10 — R7c CV ladder WORKS mechanically; native-menu nav hits the spatial-grounding frontier
+a11y→CV ladder verified: a11y stalls on the GIMP menu → CV(OCR) fires → reads menu text off the screenshot
+→ clicks by pixel. The MECHANISM is real (F9 answered: CV sees what a11y can't). BUT it LOOPS
+(Colors→Mode→Colors→Mode). Two frontier problems: (1) MENU TRANSIENCE — the menu likely closes before the
+next screenshot, so the open submenu isn't in the captured pixels; (2) SPATIAL AMBIGUITY — `text:Mode`
+@(1750,482) is the WRONG 'Mode' (right-side layer-mode dock, not Image→Mode menu item); OCR finds several
+'Mode's and our text-match+el_N selection has NO spatial reasoning to pick the one IN the just-opened menu.
+**This is the GUI frontier the leaderboard-toppers solve with specialized GROUNDING models (UI-TARS,
+OmniParser+planner) that understand spatial layout — a grounding-model-shaped hole, NOT a loop-logic bug.**
+Tells us — STRATEGIC FORK (not a small fix):
+- **R10a — accept native-app deep-GUI (GIMP menus) as out-of-current-scope**; double down where we WIN: the
+  CLI home plane (os 3/4) + accessible GUI (chrome web nav worked). Note: regulated-market tasks skew
+  doc/form/file, not GIMP image-editing — this may be the right product focus anyway.
+- **R10b — invest in a spatial GROUNDING model** (OmniParser-style screen-parse, or a small grounding model)
+  for the CV rung — the field's answer, but a bigger build + a model dependency.
+- **R10c — menu-transience handling** (hold-open / capture-while-open) — narrower, may partially help, but
+  spatial ambiguity remains.
+
 ## Build order (data-driven)
 1. **R1a — goal-level effect-verify** (the spine's trigger; cheap; unlocks F1 + is prerequisite for F2/F3).
 2. **R1b — config-apply/app-reload** (finishes the running-app class on the CLI plane).
