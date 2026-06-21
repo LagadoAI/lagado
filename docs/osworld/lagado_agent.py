@@ -84,9 +84,11 @@ class LagadoAgent:
 
     # ── the discover-then-operate execution of ONE command on the guest ──────────────────────────────
     def _run_grounded(self, instruction, cmd, log):
+        import sys
         res = self.runner(cmd)
         out, err, rc = res.get("out", ""), res.get("err", ""), res.get("rc", 0)
         log.append(f"$ {cmd}\n  rc={rc} {('err='+err.strip()[:80]) if err.strip() else 'ok'}")
+        print(f"[CMD] {cmd}\n  rc={rc} out={out.strip()[:120]!r} err={err.strip()[:160]!r}", file=sys.stderr, flush=True)
         ungrounded = rc != 0 and any(s in err.lower() for s in UNGROUNDED)
         if not ungrounded:
             return rc == 0
@@ -102,6 +104,8 @@ class LagadoAgent:
         if not corrected or corrected == cmd:
             return False
         res2 = self.runner(corrected)
+        import sys
+        print(f"[DISCOVER]\n{discovery[:500]}\n[REGROUND] {corrected}\n  rc={res2.get('rc')} err={res2.get('err','').strip()[:160]!r}", file=sys.stderr, flush=True)
         log.append(f"  ↳ regrounded: $ {corrected}\n  rc={res2.get('rc')} {res2.get('err','').strip()[:80]}")
         return res2.get("rc", 1) == 0
 

@@ -616,12 +616,15 @@ pub fn plan_goal(goal: &str, skills: &[Skill], adapter: &Arc<dyn InferenceAdapte
     // catch the failure modes the probe exposed (hallucinated/dangerous/hang-prone commands).
     let prompt = format!(
 "Break the goal into the FEWEST concrete steps, one per line. The agent can act two ways:
-- run the command <shell command>   — runs a shell command and reads its output. PREFER this for
-  file operations, system info, running a program, package work — anything a terminal does well.
+- run the command <shell command>   — runs a shell command and reads its output. STRONGLY PREFER this:
+  file operations, system info, running a program, package work, AND changing SETTINGS / PREFERENCES /
+  CONFIGURATION (use gsettings/dconf — desktop and app settings are changeable from the terminal without
+  the GUI). Almost everything a desktop does can be done from the command line; try it FIRST.
 - write to <path>: <content>        — writes the given content to a file (use \\n for a newline). Use
   this to author a SCRIPT or config file with multi-line content — never a multi-line echo.
-- Click <element>                   — clicks an on-screen GUI element. Use ONLY to launch a GUI app
-  or for a GUI-only task. To open an app: Click the Applications menu, then Click <the app>.
+- Click <element>                   — clicks an on-screen GUI element. LAST RESORT — use ONLY to launch a
+  GUI app or for a task with NO command-line way. A settings/config task is NOT GUI-only: use gsettings/
+  dconf. To open an app: Click the Applications menu, then Click <the app>.
 
 Rules:
 - One action per line. Pick the SIMPLEST surface for the goal.
