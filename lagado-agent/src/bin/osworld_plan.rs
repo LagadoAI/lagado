@@ -100,6 +100,34 @@ Next:", cands.len() - 1);
         return;
     }
 
+    // MENUPATH mode (F13 — the knowledge frame, not the selection frame): per-step menu SELECTION fails
+    // (the model lexically picks the menu whose NAME matches a goal word — "image" → Image — 9/9 wrong for
+    // a goal whose function lives under Layer). But asked as a KNOWLEDGE question ("what is the menu path?")
+    // the SAME model answers correctly (Layer > Transparency > Add Alpha Channel, 6/6). So plan the path
+    // here, then the adapter FOLLOWS it deterministically (match each token on screen, fail-closed). Grounded
+    // in the ACTUAL menu-bar menus so the first token is real (and the app is implied without naming it).
+    if args.first().map(|s| s.as_str()) == Some("--menupath") {
+        let goal = args.get(1).cloned().unwrap_or_default();
+        let app = args.get(2).cloned().unwrap_or_default();
+        let app = if app.trim().is_empty() { "this application".to_string() } else { app };
+        // KNOWLEDGE frame, naming the app — proven 5/5 correct (Layer > Transparency …). Do NOT list the
+        // menu bar here: priming the model with the menu names re-triggers the lexical mis-pick (Image …).
+        let prompt = format!(
+"In {app}, give the EXACT menu-bar path that accomplishes the goal, as names separated by ' > '
+(menu > submenu > item). Use your KNOWLEDGE of where the function lives — do NOT pick a menu just because its
+name matches a word in the goal. Output ONLY the path, e.g. `Layer > Transparency > Add Alpha Channel`.
+Goal: {goal}
+Path:");
+        let out = adapter.generate(&prompt, 48, 0.1).unwrap_or_default();
+        let line = out.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("");
+        let path: Vec<String> = line.split('>')
+            .map(|s| s.trim().trim_matches('`').trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        println!("{}", serde_json::json!({ "path": path }));
+        return;
+    }
+
     let instruction: String = args.join(" ");
     if instruction.trim().is_empty() {
         eprintln!("usage: osworld_plan \"<task instruction>\"  |  osworld_plan --reground GOAL FAILED ERR DISCOVERY");

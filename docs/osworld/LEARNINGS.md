@@ -166,6 +166,59 @@ open. THE WALL IS BROKEN — the chain is modal-clear → moveTo-open → a11y/C
 (third time): SCREENSHOT FIRST. 'grounding frontier'(F10) and 'a11y-blind-unfixable'(F9) were BOTH the same
 unhandled modal + a bare-click. The hard wall was two mundane bugs.
 
+### F13 — LIVE: dock-launcher disruption fixed; a11y→CV ladder navigates INTO the menu; next wall = plane oscillation
+The F12 breakthrough proved each piece works in ISOLATION (clean diag). Integrating in the live run hit one
+confound then exposed the real next wall — both now diagnosed with screenshots, not theory.
+- **Confound (FIXED): the dock-launcher click.** In the run, step 1 kept clicking the GIMP dock icon
+  'push-button: GNU Image Manipulation Program' @(35,541) — the model ranks it goal-relevant ("image"). A
+  screenshot (dock_1_after_dock_click.png) CONFIRMED the cause: clicking an already-open app's dock icon
+  pops a **window-preview overlay + shifts focus**, so the subsequent modal needed 2 tries and the menu
+  never opened. A PROMPT rule ("don't click launchers") did NOT stop the model. **Fix = DETERMINISTIC:
+  drop far-left push-buttons (cx<60, the Ubuntu dock strip) from `_parse_a11y` candidates.** After: step 1
+  is sane, **modal dismisses on try 1**, `[GUI][a11y] menu: Image` opens it, and **`[GUI][cv] step: 'Mode'`
+  — the menu OPENS and CV reads the items and picks the correct first hop (Image→Mode→…).** The full ladder
+  fires LIVE: a11y for the menubar, CV/OCR for the a11y-blind menu items. The dock wall is broken.
+- **Next wall (DIAGNOSED, not yet fixed): a11y/CV plane OSCILLATION on menu DESCENT.** After CV picks
+  `Mode`, the next step's a11y plane re-offers the top-level `menu: Image` @(269,76), the model RE-PICKS it
+  (it matches the goal), which TOGGLES the menu shut — undoing CV's descent. Loop: Image→(CV)Mode→Image→
+  (CV)Mode… never reaches the Mode SUBMENU (RGB/Grayscale/Indexed). Also CV then matched a stale 'Mode'
+  @(1750,482) = the right-dock layer-mode, a red herring. **Root cause: menu descent is a free per-step
+  pick that can bounce back to the menubar; it needs to be a COMMITTED mode — once a menu is open and we're
+  descending, suppress the menubar-parent candidates (or prefer the CV submenu items) until the path
+  completes or dead-ends.** Plus: the menu-item click must land on the submenu-PARENT precisely to open the
+  child submenu.
+- **Task-choice note:** judged on `045bf3ff` "turn image into CYMK mode" — a BAD target: stock GIMP's
+  Image→Mode has only RGB/Grayscale/Indexed, **no CMYK** (needs a plugin/export), so even perfect
+  navigation can't complete it. Use `06ca5602` (Palette-Based → Image→Mode→**Indexed**, reachable) and
+  `2a729ded` (transparent bg → Layer→Transparency→Add Alpha Channel) as the clean navigation judges.
+
+### F14 — RESOLVED: menu descent works LIVE via knowledge-frame path-planning + deterministic follow
+F13 left two quantified walls (lexical menu mis-pick + CV pollution). A boot-free probe found the root and
+the fix: the model picks the WRONG menu when asked to SELECT ("which of these menus matches 'transparent'?"
+→ Image, **9/9 wrong**, independent of ranking position — not a late-band artifact) but the RIGHT one when
+asked as KNOWLEDGE ("in GIMP, what is the menu PATH?" → `Layer > Transparency > Add Alpha Channel`, **5/5**).
+NOTE: grounding the knowledge prompt in the menu bar RE-PRIMES the mis-pick (listing 'Image' → `Image >
+Adjustments > Transparency`, 5/5 wrong) — so name the APP, do NOT list the menus.
+- **Build:** `osworld_plan --menupath GOAL APP` (knowledge frame, temp 0.1) → path tokens. Adapter PLANS the
+  path once (when the real menu bar is visible), then FOLLOWS it deterministically: token0 = menubar CLICK
+  (opens dropdown), middle tokens = submenu-parent HOVER (GTK flyout opens on dwell, not click), last token
+  = leaf CLICK. Each token matched on screen (`_match_token`: substring → word-overlap) — a11y for the
+  menubar, **region-clipped CV** (anchored on the opened menu's x, y>menubar) for the a11y-blind items, so
+  off-menu red-herrings can't be picked. Token never appears → fail CLOSED to the reactive ladder.
+- **Two integration bugs found by INSTRUMENTING (not guessing):** (1) `_app_name` grabbed the first a11y
+  application = `ibus-x11` (input-method daemon), feeding the planner a junk app → lexical Image path. Fix =
+  skip shell/daemon apps, pick the foreground app (most UI elements). (2) planning fired on an early frame
+  where only the desktop panel's `System` menu was in a11y (`menubar=['System']`) → premature empty lock.
+  Fix = require ≥3 menus before planning; bounded-WAIT otherwise.
+- **LIVE RESULT (gimp/2a729ded):** `app='gimp'` → `planned: Layer > Transparency > Add Alpha Channel` →
+  `open menu 'Layer' @(320,76)` → `HOVER 'Transparency' @(371,318)` → `CLICK leaf 'Add Alpha Channel'
+  @(686,317)`. The correct menu opened (NOT Image), the flyout hovered, the leaf clicked, no red-herrings.
+  **Both F13 walls resolved, the descent mechanism is proven end-to-end.**
+- **Still 0.0 (expected, NOT a descent failure):** transparency is MULTI-OPERATION (add-alpha → select bg →
+  delete); the follower does ONE menu op then stops. NEXT LAYER = multi-operation menu sequencing. A clean
+  full PASS wants a single-op task (palette Image→Mode→Indexed→Convert) — blocked upstream by the planner
+  ROUTING bug ("set image to Palette-Based" → desktop `gsettings`, never reaches GUI).
+
 ## Build order (data-driven)
 1. **R1a — goal-level effect-verify** (the spine's trigger; cheap; unlocks F1 + is prerequisite for F2/F3).
 2. **R1b — config-apply/app-reload** (finishes the running-app class on the CLI plane).

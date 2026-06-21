@@ -20,8 +20,12 @@ specs = sys.argv[1:] or ["os:3"]
 plan = []
 for s in specs:
     dom, _, n = s.partition(":")
-    for tf in sorted(glob.glob(f"evaluation_examples/examples/{dom}/*.json"))[:int(n or 3)]:
-        plan.append((dom, tf))
+    if n and not n.isdigit():   # dom:<task-id-prefix> → target one specific task
+        for tf in sorted(glob.glob(f"evaluation_examples/examples/{dom}/{n}*.json")):
+            plan.append((dom, tf))
+    else:
+        for tf in sorted(glob.glob(f"evaluation_examples/examples/{dom}/*.json"))[:int(n or 3)]:
+            plan.append((dom, tf))
 print(f"=== Lagado × OSWorld broad map | {len(plan)} tasks across {len(specs)} domains ===", flush=True)
 
 agent = LagadoAgent()

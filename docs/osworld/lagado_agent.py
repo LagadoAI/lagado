@@ -28,6 +28,52 @@ def _plan_bin(*args):
     return json.loads(out.stdout.strip().splitlines()[-1])
 
 
+def _app_name(obs):
+    """Foreground application name from the a11y tree (e.g. 'gimp', 'soffice'). Lets the menu-path planner
+    use the proven KNOWLEDGE frame ('In <app>, the menu path is…' = 5/5 correct) instead of grounding in the
+    menu bar (which primes the lexical mis-pick). Skips the desktop shell apps."""
+    xml = obs.get("accessibility_tree") if isinstance(obs, dict) else None
+    if not xml:
+        return ""
+    try:
+        root = ET.fromstring(xml)
+    except Exception:
+        return ""
+    # skip the desktop shell + a11y/input-method daemons (ibus-x11, at-spi…) — they are a11y "applications"
+    # but never the foreground app. Among the rest, the FOREGROUND app has by far the most UI elements.
+    skip = ("gnome-shell", "cinnamon", "muffin", "mutter", "plasmashell", "xfdesktop", "desktop", "panel",
+            "ibus", "ibus-x11", "at-spi", "at-spi2-registryd", "gsd-xsettings", "xfsettingsd")
+    best, best_n = "", -1
+    for n in root.iter():
+        if n.tag.split("}")[-1].lower() == "application":
+            nm = (n.get("name", "") or "").strip()
+            low = nm.lower()
+            if not nm or low in skip or any(s in low for s in ("ibus", "at-spi")):
+                continue
+            cnt = sum(1 for _ in n.iter())          # foreground app = most UI elements
+            if cnt > best_n:
+                best, best_n = nm, cnt
+    return best
+
+
+def _match_token(token, cands):
+    """Best candidate whose label matches a menu-path TOKEN (deterministic, no model). Exact substring wins;
+    else most word-overlap (≥1 word). Returns (label, cx, cy) or None. Used to FOLLOW a planned menu path on
+    screen — the screen verifies the model's path; no match ⇒ caller fails closed."""
+    tl = token.lower().strip()
+    for c in cands:                         # exact substring (handles 'menu: Layer' ⊇ 'layer')
+        if tl and tl in c[0].lower():
+            return c
+    tw = set(re.findall(r"[a-z0-9]+", tl))
+    best, bestn = None, 0
+    for c in cands:
+        cw = set(re.findall(r"[a-z0-9]+", c[0].lower()))
+        n = len(tw & cw)
+        if n > bestn:
+            best, bestn = c, n
+    return best if bestn >= 1 else None
+
+
 def _guest_command_action(cmd: str) -> str:
     """Legacy one-shot path: a guest action string that runs a shell command from ~/Desktop (OSWorld's
     working surface) so the planner's relative names resolve; absolute/~ paths unaffected."""
@@ -88,8 +134,14 @@ def _parse_a11y(obs):
             continue
         if w <= 0 or h <= 0:
             continue
+        cx, cy = x + w // 2, y + h // 2
+        # drop Ubuntu-dock launcher buttons (far-left push-buttons) — clicking an already-open app's dock
+        # icon pops a window-preview overlay + shifts focus, breaking the click sequence (confirmed via
+        # screenshot). The dock strip is cx<60; the app's own toolbar/menus are further right.
+        if "push" in role.lower() and cx < 60:
+            continue
         label = f"{role}: {name}".strip()[:80]
-        cands.append((label, x + w // 2, y + h // 2))
+        cands.append((label, cx, cy))
     return cands
 
 
@@ -308,6 +360,13 @@ class LagadoAgent:
             self._stuck = 0
             self._last_hash = None
             self._gui_log = []
+            # menu path-following state (F13): plan the path once, then follow it deterministically
+            self._menu_path = None
+            self._path_planned = False
+            self._path_idx = 0
+            self._anchor_x = None
+            self._path_tries = 0
+            self._last_pick = None
             return self._gui_step(obs)
 
         self._done = True
@@ -328,13 +387,25 @@ class LagadoAgent:
             return None
         return ranked[idx]
 
+    def _plan_menu_path(self, app):
+        """Knowledge-frame menu path (F13): the brain names the right menu only when asked 'in <app>, what is
+        the menu PATH' (Layer > Transparency > …, 5/5) — NOT 'which menu matches the goal' (lexically mis-picks
+        Image, 9/9), and NOT grounded in the menu bar (listing 'Image' re-primes the mis-pick, 5/5 wrong)."""
+        try:
+            res = _plan_bin("--menupath", self._instruction, app or "this application")
+            return [t for t in res.get("path", []) if t]
+        except Exception:
+            return []
+
     def _gui_step(self, obs):
-        """REACTIVE GUI step with the a11y→CV ladder (R7+R7c): pick the next element toward the GOAL from
-        the LIVE a11y tree; if a11y is BLIND (no pick, or REPEATS the same pick — native-app menus, F9) fall
-        to CV — OCR the screenshot (the open menu IS visible in pixels) and pick by pixel. Fail-closed (no
-        plane advances ⇒ settle/stop). a11y first (cheap); CV only when a11y stalls."""
+        """GUI step. MENU tasks → plan the menu PATH once (knowledge frame), then FOLLOW it deterministically:
+        the menubar token CLICK-opens its dropdown, each submenu-PARENT token HOVER-opens its flyout (GTK opens
+        on dwell, not click), the LAST token CLICKs the leaf. Tokens are matched on screen — a11y for the
+        menubar, region-clipped CV (OCR) for the a11y-blind menu items — so red-herrings off the open menu
+        can't be picked. A token that never appears fails CLOSED → the reactive a11y→CV ladder. Non-menu tasks
+        use the ladder directly. (Fixes F13's two walls: lexical mis-pick of the top menu + CV pollution.)"""
         import sys
-        MAX_GUI, STUCK_LIMIT = 14, 4
+        MAX_GUI, STUCK_LIMIT = 16, 4
         if self._gui_count >= MAX_GUI:
             self._mode = "done"; self._done = True
             self.last_trace = "gui | " + " | ".join(self._gui_log)[:400]
@@ -343,31 +414,95 @@ class LagadoAgent:
         last = getattr(self, "_last_pick", None)
         a11y = _parse_a11y(obs)
 
-        # rung 0 — CLEAR THE WAY: a blocking modal (e.g. GIMP 'Convert to RGB?') grabs input → dismiss it
-        # FIRST. Clearing a blocker is MANDATORY, so ALLOW re-clicking a persistent modal (capped at 3 —
-        # don't let the same-button guard strand us behind it). moveTo before click so it registers.
+        # rung 0 — CLEAR THE WAY: dismiss a blocking modal/dialog FIRST (e.g. GIMP 'Convert to RGB?', or a
+        # leaf-activated 'Convert to Indexed' dialog). A dialog means the path's leaf fired. moveTo+click;
+        # allow re-clicking a persistent modal (capped 3) so the same-button guard can't strand us behind it.
         modal = _find_modal_dismiss(a11y)
         if modal:
             self._modal_tries = (getattr(self, "_modal_tries", 0) + 1) if modal[1] == last else 1
             if self._modal_tries <= 3:
                 _, label, cx, cy = modal
-                self._last_pick = label
-                self._stuck = 0
+                self._last_pick = label; self._stuck = 0
                 self._gui_log.append(f"[modal:{self._modal_tries}] {label} @({cx},{cy})")
                 print(f"[GUI][modal] dismiss '{label}' @({cx},{cy}) try {self._modal_tries}", file=sys.stderr, flush=True)
                 return f"gui[modal] dismiss '{label}'", [f"pyautogui.moveTo({cx}, {cy}); pyautogui.click({cx}, {cy})"]
-            # modal won't clear after 3 → fall through (may be non-blocking or unhandleable)
         else:
             self._modal_tries = 0
 
-        # rung 1 — a11y
+        # ── plan the menu PATH once (knowledge frame), as soon as the MENU BAR is visible ──
+        # Lock ONLY after we've seen a populated menu bar — else an init-race (a11y not ready / modal still
+        # covering the bar on step 1) plans an EMPTY path and locks reactive forever (the F13-path bug).
+        if not getattr(self, "_path_planned", False):
+            menubar = [c[0].split(":", 1)[1].strip() for c in a11y if c[0].lower().startswith("menu:")]
+            # require the REAL app menu bar (≥3 menus) — a lone 'System' panel menu on an early frame is not
+            # it (the app's a11y tree populates a step or two after the window appears).
+            if len(menubar) >= 3:
+                app = _app_name(obs)
+                path = self._plan_menu_path(app)
+                # accept only if the first token is an actual menu-bar menu (else not a menu task → reactive)
+                if path and _match_token(path[0], [(m, 0, 0) for m in menubar]):
+                    self._menu_path = path; self._path_idx = 0; self._anchor_x = None
+                    self._gui_log.append(f"[path] {' > '.join(path)}")
+                    print(f"[GUI][path] planned: {' > '.join(path)}", file=sys.stderr, flush=True)
+                else:
+                    self._menu_path = []
+                self._path_planned = True
+            # menu bar not visible yet → don't lock; settle and retry planning next step (bounded — if the
+            # bar never shows in a11y, give up planning and use the reactive ladder)
+            else:
+                self._menubar_waits = getattr(self, "_menubar_waits", 0) + 1
+                if self._menubar_waits <= 3:
+                    return "gui await-menubar", ["WAIT"]
+                self._menu_path = []; self._path_planned = True
+
+        # ── FOLLOW the planned path deterministically ──
+        path = getattr(self, "_menu_path", None) or []
+        if path:
+            idx = self._path_idx
+            if idx >= len(path):                      # path consumed (no dialog left) → done
+                self._mode = "done"; self._done = True
+                self.last_trace = "gui path-done | " + " | ".join(self._gui_log)[:400]
+                return "gui done", ["DONE"]
+            token = path[idx]
+            if idx == 0:                              # menubar → CLICK to open the dropdown
+                cand = _match_token(token, [c for c in a11y if c[0].lower().startswith("menu:")])
+                if cand:
+                    label, cx, cy = cand
+                    self._anchor_x = cx; self._path_idx = 1; self._last_pick = label; self._path_tries = 0
+                    self._gui_log.append(f"[path0] open {token} @({cx},{cy})")
+                    print(f"[GUI][path] step {self._gui_count}: open menu '{token}' @({cx},{cy})", file=sys.stderr, flush=True)
+                    return f"gui[path] open '{token}'", [f"pyautogui.moveTo({cx}, {cy}); pyautogui.click({cx}, {cy})"]
+            else:                                     # submenu item → match in the region-clipped OCR
+                ax = self._anchor_x
+                cv = _ocr_candidates(obs)
+                region = [c for c in cv if (ax - 220) < c[1] < (ax + 580) and c[2] > 88] if ax is not None else cv
+                cand = _match_token(token, region)
+                if cand:
+                    label, cx, cy = cand
+                    is_leaf = (idx == len(path) - 1)
+                    self._path_idx += 1; self._last_pick = label; self._path_tries = 0
+                    if is_leaf:                       # LAST token → CLICK the leaf (activates / opens dialog)
+                        self._gui_log.append(f"[path-leaf] {token} @({cx},{cy})")
+                        print(f"[GUI][path] step {self._gui_count}: CLICK leaf '{token}' @({cx},{cy})", file=sys.stderr, flush=True)
+                        return f"gui[path] click '{token}'", [f"pyautogui.moveTo({cx}, {cy}); pyautogui.click({cx}, {cy})"]
+                    # PARENT token → HOVER (moveTo + dwell, NO click) to open the submenu flyout
+                    self._gui_log.append(f"[path-hover] {token} @({cx},{cy})")
+                    print(f"[GUI][path] step {self._gui_count}: HOVER '{token}' @({cx},{cy})", file=sys.stderr, flush=True)
+                    return f"gui[path] hover '{token}'", [f"pyautogui.moveTo({cx}, {cy}); time.sleep(0.6)"]
+            # token not visible yet → re-perceive a few times (the flyout needs a beat); then fail CLOSED
+            self._path_tries = getattr(self, "_path_tries", 0) + 1
+            print(f"[GUI][path] token '{token}' not visible (try {self._path_tries})", file=sys.stderr, flush=True)
+            if self._path_tries < 3:
+                return "gui path-wait", ["WAIT"]
+            print(f"[GUI][path] FAIL-CLOSED on '{token}' → reactive ladder", file=sys.stderr, flush=True)
+            self._menu_path = []
+
+        # ── reactive a11y→CV ladder (non-menu tasks, or a failed/abandoned path) ──
         sel, plane = self._next_pick(a11y), "a11y"
         if sel == "done":
             self._mode = "done"; self._done = True
             self.last_trace = "gui done | " + " | ".join(self._gui_log)[:400]
             return "gui done", ["DONE"]
-
-        # rung 2 — CV/OCR fallback when a11y is blind (None) or STUCK (repeating the same element)
         if sel is None or (isinstance(sel, tuple) and sel[0] == last):
             print("[GUI] a11y blind/stuck → CV(OCR) fallback", file=sys.stderr, flush=True)
             cvsel = self._next_pick(_ocr_candidates(obs))
@@ -377,7 +512,6 @@ class LagadoAgent:
                 return "gui done", ["DONE"]
             if isinstance(cvsel, tuple) and cvsel[0] != last:
                 sel, plane = cvsel, "cv"
-
         if not isinstance(sel, tuple) or sel[0] == last:
             self._stuck = getattr(self, "_stuck", 0) + 1
             print(f"[GUI] neither plane advanced (stuck {self._stuck})", file=sys.stderr, flush=True)
@@ -386,12 +520,9 @@ class LagadoAgent:
                 self.last_trace = "gui stuck | " + " | ".join(self._gui_log)[:400]
                 return "gui no-progress", ["DONE"]
             return "gui settle", ["WAIT"]
-
         self._stuck = 0
         label, cx, cy = sel
         self._last_pick = label
         self._gui_log.append(f"[{plane}] {label} @({cx},{cy})")
         print(f"[GUI][{plane}] step {self._gui_count}: '{label}' @({cx},{cy})", file=sys.stderr, flush=True)
-        # moveTo BEFORE click — a bare click(x,y) didn't reliably open GIMP menus (the diagnostic: moveTo+
-        # click opens the menu, exposing items to CV; bare click does not). Same fix as the modal rung.
         return f"gui[{plane}] '{label}'", [f"pyautogui.moveTo({cx}, {cy}); pyautogui.click({cx}, {cy})"]
