@@ -92,6 +92,39 @@ environment. The sibling `discover_environment:846` already does `$HOME` correct
 8. **Add the missing modal rail** to `reload_into_focus` (subsumes the gimp ICC/dismiss instance fix).
 9. **VLM patch grid → derive from encoder** (closes the swappable-model break; latent until patch path re-wired).
 
+## FIX STATUS (2026-06-21)
+
+**DONE + verified (cargo check + 287 lib tests green), commits `b7b5edc`, `30d0380`:**
+- **#1 `/home/laputa` live bug** — new `guest_home(env)` derives `/home/<user>` from the observed listing;
+  `derive_expected` (prompt + the load-bearing filter), `react_next_command`, `capability_prompt` all use it.
+  The Rust agent now works against ANY guest user (laputa, OSWorld's `user`, …), not one.
+- **#3 stale XFCE app-map** — deleted from `goal_postconditions`; launch completion is confirmed by the
+  DE-agnostic perception/effect layer (`effect_confirmed`/`observe_until_quiet`). Test updated.
+- **#7 (part)** — deleted dead `_running_app_to_reload` per-app dict (`lagado_agent.py`).
+- **#2 (part)** — classifier ctx now CLAMPED to the GGUF-discovered max (`min(task_need, model_max)`) —
+  removes the unsafe assumption without bloating the CPU classifier's KV.
+- **#5 planner de-exemplar** — dropped GIMP menu recipes from `--next` and the GNOME/audio tool-list from
+  `--verify`; kept the general technique (knowledge-of-the-app menu path; read-only exit-0 check).
+
+**DEFERRED — need LIVE verification (won't change blind; a wrong value is worse than a known-stable one):**
+- **#2 main adapter `CONTEXT_SIZE=32768`** — the correct value is the GOVERNOR'S PLANNED ctx (what the
+  server actually runs at), not the GGUF max (using max would over-budget `assemble_context` if the server
+  runs smaller). Needs the startup sequence wired + an app smoke test.
+- **#2 sampling params** (`GEN2_MIN_P`/`GEN25_TOP_K`/`REPEAT_PENALTY`) — route through `EnginePrefs`
+  (governor/user); plumbing + live inference check.
+- **#4 VM literals → `VmConfig`** (user/host/port/geometry/`DISPLAY`) — runtime VM path; needs a guest boot.
+- **#9 VLM patch grid** — derive from the encoder grid; latent (patch path unwired), needs the FFI path.
+
+**Re-scoped after closer look (NOT a blind box-tick):**
+- **#8 modal rail in `reload_into_focus`** — a *blanket* post-load dialog-dismiss is UNSAFE (wrong-button:
+  a load dialog may need keep/convert/don't-show, not Escape). The class-general primitives are PREVENTION
+  (produce a clean file, e.g. strip ICC) + SURFACING the signal (`reload_into_focus` already returns the
+  verified active window so the caller sees a stolen focus). Instance-specific dialog handling stays in the
+  proof script. So no blanket-dismiss was added — adding it would reduce safety to satisfy a checkbox.
+
+**Remaining (lower-risk, next batch):** #6 split `extract_to_file` / reconsider `larger_than_1k`;
+#7 retire/re-contract `recovery.rs`'s dead `{"tool":...}` JSON + delete the dead VLM spawn.
+
 ## Standing rule (the way of thinking, generalized)
 The instance-instinct appears at execution boundaries. For every line touching the VM, the model, or the
 evaluator, ask: *does this name a class, or the one instance I'm looking at?* If it can only name the
