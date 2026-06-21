@@ -106,23 +106,28 @@ Next:", cands.len() - 1);
     // plane did not achieve the goal ⇒ reload (R1b) / SWITCH to GUI. Empty check ⇒ unverifiable (stay safe).
     if args.first().map(|s| s.as_str()) == Some("--verify") {
         let goal = args.get(1).cloned().unwrap_or_default();
+        // EXIT-CODE semantics (robust): a check command that EXITS 0 iff the goal holds. Handles `grep -q`,
+        // `test`, comparisons — no fragile 'substring in output' (a silent `grep -q` printed nothing and a
+        // backtick-wrapped check broke the old version). If unprovable from the shell → NONE (don't guess).
         let prompt = format!(
-"Write ONE READ-ONLY shell command that checks whether this GOAL is ALREADY satisfied on this Linux machine,
-and the EXACT text that appears in that command's output WHEN it is satisfied. Use real tools (gsettings,
-dconf read, pactl, amixer, ls, stat, cat, grep). READ-ONLY — never change anything. If the goal cannot be
-checked from the shell, output an empty CHECK.
-Output EXACTLY two lines:
-CHECK: <command, or empty>
-EXPECT: <substring proving success>
-Goal: {goal}");
-        let out = adapter.generate(&prompt, 120, 0.1).unwrap_or_default();
-        let (mut check, mut expect) = (String::new(), String::new());
-        for line in out.lines() {
-            let l = line.trim();
-            if let Some(r) = l.strip_prefix("CHECK:") { check = r.trim().to_string(); }
-            if let Some(r) = l.strip_prefix("EXPECT:") { expect = r.trim().to_string(); }
-        }
-        println!("{}", serde_json::json!({ "check": check, "expect": expect }));
+"Write ONE READ-ONLY shell command that EXITS 0 if and only if this goal is ALREADY satisfied on this Linux
+machine, and exits non-zero otherwise. Use test, [ ], grep -q, comparisons of `gsettings get`/`dconf read`/
+`pactl`/`stat` output. READ-ONLY — never modify anything. Do NOT wrap it in backticks. If the goal cannot be
+checked from the shell, output exactly: NONE
+Output ONLY the command on one line (or NONE).
+Goal: {goal}
+Command:");
+        let out = adapter.generate(&prompt, 100, 0.1).unwrap_or_default();
+        // strip markdown code fences (the model wraps in ```bash … ```) then take the first real command line
+        let cleaned = out.replace("```bash", "").replace("```sh", "").replace("```", "");
+        let line = cleaned.lines().map(str::trim)
+            .map(|l| l.strip_prefix("Command:").unwrap_or(l).trim())
+            .map(|l| l.strip_prefix("$").unwrap_or(l).trim())
+            .find(|l| !l.is_empty() && !l.starts_with('#'))
+            .unwrap_or("")
+            .trim_matches('`').trim().to_string();
+        let check = if line.eq_ignore_ascii_case("none") { String::new() } else { line };
+        println!("{}", serde_json::json!({ "check": check }));
         return;
     }
 

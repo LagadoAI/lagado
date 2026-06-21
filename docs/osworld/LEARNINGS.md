@@ -228,7 +228,7 @@ for the test. The test exists to EXPOSE weakness, not to be hardcoded around. Au
 |---|---|---|---|---|
 | 1 | `_DISMISS` word list (ok/yes/convert/keep/…) | English, finite; `convert/keep` are GIMP-dialog words | dialog present → press **default button / Enter** (no vocab) | **FIXED ✓live** |
 | 2 | dock filter `cx<60` push-buttons | hardcoded px geometry for the Ubuntu/Cinnamon dock | restrict a11y to the **focused app's subtree** (dock = different app) | **FIXED ✓live** |
-| 3 | `RUNNING_APP_RELOAD` table (gnome-terminal-server, nautilus) | per-app; every app needs a row | CLI unmet → do it via the **app's own UI** (GUI plane); table = optional sugar | open (R1 refactor) |
+| 3 | `RUNNING_APP_RELOAD` table (gnome-terminal-server, nautilus) | per-app; every app needs a row | CLI unmet → do it via the **app's own UI** (GUI plane); table = optional sugar | **REMOVED** + brain-verify REJECTED → F15 |
 | 4 | menu region-clip `anchor_x−220…+580, y>88` | magic px offsets, toolkit/res-tuned | derive region from the **opened menu element's bbox** | open |
 | 5 | `UNGROUNDED` stderr-string list | English, tool-specific | `rc≠0` is the signal; list = refinement only | open |
 | 6 | magic consts (`cd ~/Desktop`, `≥3 menus`, `sleep 0.6`, `conf<0.4`, `MAX_GUI=16`) | benchmark/res assumptions | derive or mark as tunables, not load-bearing | open |
@@ -238,6 +238,27 @@ dismiss THESE words, reload THIS app) instead of the general invariant it's an i
 done RIGHT = `_app_name` (universal floor: pick the app with the most UI elements; thin daemon skip-list as
 optional sugar). Every patch above should be refactored to that shape. Keep this table updated as patches
 are universalized or new ones are caught.
+
+### F15 — the universal R1 refactor (#3): brain-authored shell goal-verify is UNSAFE + noisy → the spine's real bottleneck
+Doing R1 the universal way (CLI goal-verify gates the CLI→GUI switch; drop the per-app reload table) exposed
+that the **goal-verify SIGNAL is the bottleneck of the whole spine**, and a brain-written shell check cannot
+be it:
+- **Noisy:** asked to write a check for a goal, the brain was **0/3 semantically correct** — volume → checked
+  a `volume-max` *ceiling key* not the set volume; terminal → `stty size` of the runner's pty not the profile
+  default; palette → a `org.gimp.GIMP` schema that doesn't exist. So `met=False` is noise; switching on it
+  would send a PASSING CLI task on a wasteful GUI excursion.
+- **UNSAFE (the killer):** the model **ignores "read-only"** — the copy-goal check contained `cp --parents`
+  and the compress check `gzip -f`/`rm`/`>> file`. Running a brain "check" on the guest MUTATES the scored
+  end-state. A trust-positive/negative split does NOT fix this (a mutating check mutates whether it passes or
+  fails). So the whole "brain writes a verify command we execute" approach is rejected.
+- **What shipped (#3):** (a) the per-app reload TABLE is REMOVED (universal-first — no app-specific hacks);
+  (b) brain `--verify` is NOT wired (the Rust mode is left dead/documented, not called); (c) the SAFE
+  goal-verify remains `_readback_check` — HARNESS-derived, deterministic, guaranteed read-only because the
+  harness builds the `gsettings get`/`dconf read`, not the model (config-scoped, per-command, real).
+- **R1c (outcome-driven CLI→GUI switch) stays GATED** on a trustworthy+safe goal-verify, which is now the
+  named open problem. The universal verify must be **harness-derived or PERCEPTION-based** (does the screen/
+  a11y show the goal achieved? — read-only by nature), never a model-authored shell command. That's the next
+  real build for the spine — not another patch.
 
 ## Build order (data-driven)
 1. **R1a — goal-level effect-verify** (the spine's trigger; cheap; unlocks F1 + is prerequisite for F2/F3).

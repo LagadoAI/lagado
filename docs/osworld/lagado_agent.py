@@ -22,13 +22,10 @@ OSWORLD_PLAN_BIN = os.environ.get(
 UNGROUNDED = ("no such schema", "no such file", "no such directory", "not found",
               "command not found", "does not exist", "unrecognized", "is not a valid")
 
-# R1b — config-apply / app-reload (F1): a config write (gsettings/dconf) to a RUNNING app doesn't take effect
-# until the app re-reads it (e.g. gnome-terminal caches its profile in gnome-terminal-server). After such a
-# write, restart the app so the change applies. (schema/path substring → best-effort reload command.)
-RUNNING_APP_RELOAD = (
-    ("terminal", "pkill -HUP -f gnome-terminal-server 2>/dev/null; pkill -f gnome-terminal-server 2>/dev/null; true"),
-    ("nautilus", "nautilus -q 2>/dev/null; true"),
-)
+# R1b's per-app reload table was the fragile patch (#3): every app needs a row. REMOVED — the universal
+# response to "CLI config-set didn't achieve the goal" is R1c: do it through the app's own UI (GUI plane),
+# which applies the change the way the app expects. An app-specific reload could return later as explicit
+# OPTIONAL sugar, never as the foundation.
 
 
 def _plan_bin(*args):
@@ -324,45 +321,6 @@ class LagadoAgent:
         log.append(f"  ↳ regrounded: $ {corrected}\n  rc={res2.get('rc')} {res2.get('err','').strip()[:80]}")
         return res2.get("rc", 1) == 0
 
-    def _goal_verify(self, instruction, log):
-        """R1a — GOAL-LEVEL effect-verify (the plane-switch trigger): does the GOAL ARTIFACT hold, not just
-        rc==0 / a key readback? Derive a READ-ONLY check + expected substring from the goal (--verify), run it.
-        Returns True (met) / False (check ran, goal absent → switch) / None (unverifiable or the check itself
-        failed → stay safe, don't switch)."""
-        import sys
-        if self.runner is None:
-            return None
-        try:
-            res = _plan_bin("--verify", instruction)
-        except Exception:
-            return None
-        check, expect = res.get("check", "").strip(), res.get("expect", "").strip()
-        if not check or not expect or check.lower() in ("none", "empty"):
-            return None
-        r = self.runner("cd ~/Desktop 2>/dev/null || cd ~; " + check)
-        if r.get("rc", 0) != 0:                  # the check itself failed → can't conclude (don't false-switch)
-            return None
-        out = (r.get("out", "") + " " + r.get("err", "")).strip()
-        met = expect.lower() in out.lower()
-        log.append(f"  ↳ R1a verify: {check} -> {'MET' if met else 'UNMET'} (want {expect!r})")
-        print(f"[R1A] verify {check!r} -> {out.strip()[:80]!r} {'MET' if met else 'UNMET'} (want {expect!r})", file=sys.stderr, flush=True)
-        return met
-
-    def _reload_running_app(self, cmds, log):
-        """R1b — config-apply/app-reload (F1): if the plan wrote app config (gsettings/dconf), restart the
-        running app so the change takes effect. Best-effort; returns True if a reload fired."""
-        import sys
-        joined = " ; ".join(cmds).lower()
-        if not any(k in joined for k in ("gsettings set", "dconf write", "gsettings reset")):
-            return False
-        for key, reload_cmd in RUNNING_APP_RELOAD:
-            if key in joined and self.runner is not None:
-                self.runner(reload_cmd)
-                log.append(f"  ↳ R1b reload running app ({key})")
-                print(f"[R1B] reload running app for '{key}': {reload_cmd}", file=sys.stderr, flush=True)
-                return True
-        return False
-
     def _enter_gui(self, instruction, obs):
         """Enter the GUI plane (fresh state). Used both for a planned GUI step and for the OUTCOME-DRIVEN
         switch (R1c): CLI ran but the goal-verify says UNMET → switch to GUI even with no planned gui_steps."""
@@ -400,20 +358,20 @@ class LagadoAgent:
             log = []
             for c in cmds:
                 self._run_grounded(instruction, "cd ~/Desktop 2>/dev/null || cd ~; " + c, log)
-            # ── GOAL-LEVEL verify (R1a) + config-apply/reload (R1b). The outcome-driven CLI→GUI SWITCH on a
-            # verified-UNMET goal is R1c — DEFERRED (a brain-derived check can false-negative; switching on it
-            # would regress a passing CLI task). For now verify only LABELS the outcome + confirms done; R1b
-            # applies a config write to its running app. The score is OSWorld's, independent of our label. ──
-            met = self._goal_verify(instruction, log)         # R1a — goal artifact check
-            if met is False and self._reload_running_app(cmds, log):   # R1b — apply to running app, re-verify
-                met = self._goal_verify(instruction, log)
-            self.last_category = "CMD_WRONG" if met is False else "CMD_RAN"
+            # ── GOAL-LEVEL verify: the SAFE source is the harness-derived read-back (`_readback_check`, run
+            # inside `_run_grounded`) — deterministic and guaranteed read-only because the HARNESS builds the
+            # `gsettings get`/`dconf read`, not the model. Brain-authored shell verify was REJECTED here: it is
+            # both noisy (~0/3 semantically right) AND unsafe (the model ignores 'read-only' and writes checks
+            # containing cp/gzip/rm → running them mutates the scored end-state). So R1c (the outcome-driven
+            # CLI→GUI switch) stays GATED on a trustworthy+safe goal-verify — the real bottleneck of the spine,
+            # which a brain-written shell command cannot be. ──
+            self.last_category = "CMD_RAN"
             self.last_trace = "discover-then-operate | " + " | ".join(log)
             self.thoughts.append(self.last_trace[:400])
             if not gui_steps:
                 self._done = True
                 return self.last_trace[:400], ["DONE"]
-            # mixed plan → fall through to the GUI plane for the remaining steps (the SWITCH)
+            # mixed plan → fall through to the GUI plane for the remaining steps
         elif cmds and self.runner is None:
             self._done = True
             return f"terminal one-shot: {len(cmds)} cmd(s)", [_guest_command_action(c) for c in cmds] + ["DONE"]
