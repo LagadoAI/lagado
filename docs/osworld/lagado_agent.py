@@ -30,10 +30,16 @@ OSWORLD_PLAN_BIN = os.environ.get(
 def _guest_command_action(cmd: str) -> str:
     """A guest action string that runs a shell command directly (the terminal plane). Wrapped by
     OSWorld's pkgs_prefix as `python -c "...; {this}"`, so it must be valid python. repr() keeps the
-    command intact through the python -c quoting."""
+    command intact through the python -c quoting.
+
+    WORKING-DIRECTORY GROUNDING: OSWorld places user files/folders on the Desktop (the GUI working
+    surface; user='user', home=/home/user), but our subprocess runs in the server's cwd. So the planner's
+    relative names ('photos', 'cpjpg') don't resolve → file ops silently match nothing (the os/23393935
+    miss). Run from ~/Desktop (fall back to ~), so relative names resolve; absolute/~ paths are unaffected."""
+    grounded = "cd ~/Desktop 2>/dev/null || cd ~; " + cmd
     return (
         "import subprocess as _sp; "
-        f"_r = _sp.run({cmd!r}, shell=True, capture_output=True, text=True); "
+        f"_r = _sp.run({grounded!r}, shell=True, capture_output=True, text=True); "
         "print(_r.stdout); print(_r.stderr)"
     )
 
