@@ -36,10 +36,31 @@ def _plan_bin(*args):
     return json.loads(out.stdout.strip().splitlines()[-1])
 
 
+# desktop shell + a11y/input-method daemons — a11y "applications" that are never the foreground app
+# (optional sugar on top of the universal "most UI elements" floor).
+_APP_SKIP = ("gnome-shell", "cinnamon", "muffin", "mutter", "plasmashell", "xfdesktop", "desktop", "panel",
+             "ibus", "ibus-x11", "at-spi", "at-spi2-registryd", "gsd-xsettings", "xfsettingsd")
+
+
+def _focused_app_node(root):
+    """The foreground application <node> — UNIVERSAL floor: the app with the most UI elements. Scoping
+    perception to this node's subtree is the general way to ignore OTHER apps' chrome (the dock/panel belong
+    to gnome-shell/cinnamon, a different app), replacing the `cx<60` dock pixel-patch (#2). Returns the node
+    or None."""
+    best, best_n = None, -1
+    for n in root.iter():
+        if n.tag.split("}")[-1].lower() == "application":
+            nm = (n.get("name", "") or "").strip().lower()
+            if not nm or nm in _APP_SKIP or any(s in nm for s in ("ibus", "at-spi")):
+                continue
+            cnt = sum(1 for _ in n.iter())          # foreground app = most UI elements
+            if cnt > best_n:
+                best, best_n = n, cnt
+    return best
+
+
 def _app_name(obs):
-    """Foreground application name from the a11y tree (e.g. 'gimp', 'soffice'). Lets the menu-path planner
-    use the proven KNOWLEDGE frame ('In <app>, the menu path is…' = 5/5 correct) instead of grounding in the
-    menu bar (which primes the lexical mis-pick). Skips the desktop shell apps."""
+    """Foreground application name (e.g. 'gimp', 'soffice') for the knowledge-frame menu planner."""
     xml = obs.get("accessibility_tree") if isinstance(obs, dict) else None
     if not xml:
         return ""
@@ -47,21 +68,28 @@ def _app_name(obs):
         root = ET.fromstring(xml)
     except Exception:
         return ""
-    # skip the desktop shell + a11y/input-method daemons (ibus-x11, at-spi…) — they are a11y "applications"
-    # but never the foreground app. Among the rest, the FOREGROUND app has by far the most UI elements.
-    skip = ("gnome-shell", "cinnamon", "muffin", "mutter", "plasmashell", "xfdesktop", "desktop", "panel",
-            "ibus", "ibus-x11", "at-spi", "at-spi2-registryd", "gsd-xsettings", "xfsettingsd")
-    best, best_n = "", -1
-    for n in root.iter():
-        if n.tag.split("}")[-1].lower() == "application":
-            nm = (n.get("name", "") or "").strip()
-            low = nm.lower()
-            if not nm or low in skip or any(s in low for s in ("ibus", "at-spi")):
-                continue
-            cnt = sum(1 for _ in n.iter())          # foreground app = most UI elements
-            if cnt > best_n:
-                best, best_n = nm, cnt
-    return best
+    node = _focused_app_node(root)
+    return (node.get("name", "") or "").strip() if node is not None else ""
+
+
+def _modal_present(obs):
+    """Universal blocking-modal detector (#1): AT-SPI marks a BLOCKING dialog with state modal=true (a
+    non-modal dockable panel does NOT) — the precise, app-agnostic signal, no button-name vocabulary. The
+    dialog container is filtered out of the actionable candidates, so scan the raw focused-app subtree."""
+    xml = obs.get("accessibility_tree") if isinstance(obs, dict) else None
+    if not xml:
+        return False
+    try:
+        root = ET.fromstring(xml)
+    except Exception:
+        return False
+    app = _focused_app_node(root)
+    scope = app if app is not None else root
+    for n in scope.iter():
+        for k, v in n.attrib.items():
+            if k.split("}")[-1].lower() == "modal" and str(v).strip().lower() == "true":
+                return True
+    return False
 
 
 def _match_token(token, cands):
@@ -127,8 +155,14 @@ def _parse_a11y(obs):
         root = ET.fromstring(xml)
     except Exception:
         return []
+    # #2 — scope to the FOCUSED app's subtree: the dock/panel are a DIFFERENT app (gnome-shell/cinnamon), so
+    # they fall away universally — no pixel-geometry rule. (Fallback to the whole tree on an early frame with
+    # no app node yet.)
+    scope = _focused_app_node(root)
+    if scope is None:
+        scope = root
     cands = []
-    for node in filter_nodes(root, "ubuntu"):
+    for node in filter_nodes(scope, "ubuntu"):
         name = node.get("name", "") or ""
         role = node.tag.split("}")[-1]
         coord = node.get("{%s}screencoord" % component_ns_ubuntu)
@@ -142,14 +176,8 @@ def _parse_a11y(obs):
             continue
         if w <= 0 or h <= 0:
             continue
-        cx, cy = x + w // 2, y + h // 2
-        # drop Ubuntu-dock launcher buttons (far-left push-buttons) — clicking an already-open app's dock
-        # icon pops a window-preview overlay + shifts focus, breaking the click sequence (confirmed via
-        # screenshot). The dock strip is cx<60; the app's own toolbar/menus are further right.
-        if "push" in role.lower() and cx < 60:
-            continue
         label = f"{role}: {name}".strip()[:80]
-        cands.append((label, cx, cy))
+        cands.append((label, x + w // 2, y + h // 2))
     return cands
 
 
@@ -189,39 +217,6 @@ def _ocr_candidates(obs):
     except Exception as e:
         import sys; print(f"[OCR] failed: {e}", file=sys.stderr, flush=True)
         return []
-
-
-# dialog-action buttons, in PROCEED-first priority (we want to get PAST the modal to do the task);
-# negative/cancel last (fallback only). Matched against push-button NAMES (not check/toggle buttons).
-_DISMISS = ["ok", "continue", "yes", "convert", "keep", "accept", "apply", "got it", "done", "proceed",
-            "save", "open", "close", "no thanks", "dismiss", "no", "cancel", "discard"]
-_DIALOG_HINTS = ("dialog", "alert", "file chooser", "popup")
-
-
-def _find_modal_dismiss(cands):
-    """R11 — a blocking MODAL (e.g. GIMP's 'Convert to RGB?' on image load) GRABS input so nothing else
-    works until it's cleared. Detect a dialog with action buttons and return the button to click to PROCEED
-    past it, or None. The dialog's buttons ARE in the a11y tree; we just clear the way FIRST."""
-    has_dialog = any(any(h in c[0].lower() for h in _DIALOG_HINTS) for c in cands)
-    buttons = []
-    for label, cx, cy in cands:
-        role, _, name = label.partition(":")
-        rl = role.lower()
-        if "push" not in rl and rl.strip() != "button" and "button" not in rl:
-            continue
-        if "check" in rl or "toggle" in rl or "radio" in rl:  # not 'Don't ask again' checkboxes
-            continue
-        nl = name.strip().lower()
-        for i, d in enumerate(_DISMISS):
-            if nl == d or nl.startswith(d + " ") or nl.startswith(d):
-                buttons.append((i, label, cx, cy)); break
-    if not buttons:
-        return None
-    # require a dialog context OR 2+ action buttons (a real dialog has several) — avoid false positives
-    if not has_dialog and len(buttons) < 2:
-        return None
-    buttons.sort(key=lambda b: b[0])
-    return buttons[0]  # (priority, label, cx, cy)
 
 
 def _click_target(step):
@@ -472,20 +467,20 @@ class LagadoAgent:
         last = getattr(self, "_last_pick", None)
         a11y = _parse_a11y(obs)
 
-        # rung 0 — CLEAR THE WAY: dismiss a blocking modal/dialog FIRST (e.g. GIMP 'Convert to RGB?', or a
-        # leaf-activated 'Convert to Indexed' dialog). A dialog means the path's leaf fired. moveTo+click;
-        # allow re-clicking a persistent modal (capped 3) so the same-button guard can't strand us behind it.
-        modal = _find_modal_dismiss(a11y)
-        if modal:
-            self._modal_tries = (getattr(self, "_modal_tries", 0) + 1) if modal[1] == last else 1
-            if self._modal_tries <= 3:
-                _, label, cx, cy = modal
-                self._last_pick = label; self._stuck = 0
-                self._gui_log.append(f"[modal:{self._modal_tries}] {label} @({cx},{cy})")
-                print(f"[GUI][modal] dismiss '{label}' @({cx},{cy}) try {self._modal_tries}", file=sys.stderr, flush=True)
-                return f"gui[modal] dismiss '{label}'", [f"pyautogui.moveTo({cx}, {cy}); pyautogui.click({cx}, {cy})"]
+        # rung 0 — CLEAR THE WAY, UNIVERSALLY (#1): a BLOCKING modal (state modal=true — GIMP 'Convert to RGB?',
+        # a leaf-activated 'Convert to Indexed', any native confirm) GRABS input → activate its DEFAULT action
+        # with ENTER (proven to clear it). No button-name vocabulary, no coordinates — every native dialog
+        # honours its default button on Enter. If Enter doesn't clear it after 2 tries, fall through: the
+        # dialog's buttons are in a11y, so the path/selection plane picks one (also universal).
+        if _modal_present(obs):
+            self._enter_tries = getattr(self, "_enter_tries", 0) + 1
+            if self._enter_tries <= 2:
+                self._gui_log.append(f"[modal] Enter (default) try {self._enter_tries}")
+                print(f"[GUI][modal] modal=true → Enter (default action) try {self._enter_tries}", file=sys.stderr, flush=True)
+                return "gui[modal] Enter", ["pyautogui.press('enter')"]
+            # Enter didn't clear it → fall through; the path/selection plane will choose a dialog button
         else:
-            self._modal_tries = 0
+            self._enter_tries = 0
 
         # ── plan the menu PATH once (knowledge frame), as soon as the MENU BAR is visible ──
         # Lock ONLY after we've seen a populated menu bar — else an init-race (a11y not ready / modal still

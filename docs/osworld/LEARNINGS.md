@@ -219,6 +219,26 @@ Adjustments > Transparency`, 5/5 wrong) — so name the APP, do NOT list the men
   full PASS wants a single-op task (palette Image→Mode→Indexed→Convert) — blocked upstream by the planner
   ROUTING bug ("set image to Palette-Based" → desktop `gsettings`, never reaches GUI).
 
+## PATCHWORK AUDIT (2026-06-21, user directive) — "if a solution is task-specific it is fragile by nature"
+Principle: build the UNIVERSAL floor first (lower fidelity, works everywhere); add task-specific solutions
+as OPTIONAL sugar ON TOP — never as the foundation. Building rules tuned to THESE OSWorld tasks = building
+for the test. The test exists to EXPOSE weakness, not to be hardcoded around. Audit of accreted patches:
+
+| # | Patch | Why fragile | Universal floor | Status |
+|---|---|---|---|---|
+| 1 | `_DISMISS` word list (ok/yes/convert/keep/…) | English, finite; `convert/keep` are GIMP-dialog words | dialog present → press **default button / Enter** (no vocab) | **FIXED ✓live** |
+| 2 | dock filter `cx<60` push-buttons | hardcoded px geometry for the Ubuntu/Cinnamon dock | restrict a11y to the **focused app's subtree** (dock = different app) | **FIXED ✓live** |
+| 3 | `RUNNING_APP_RELOAD` table (gnome-terminal-server, nautilus) | per-app; every app needs a row | CLI unmet → do it via the **app's own UI** (GUI plane); table = optional sugar | open (R1 refactor) |
+| 4 | menu region-clip `anchor_x−220…+580, y>88` | magic px offsets, toolkit/res-tuned | derive region from the **opened menu element's bbox** | open |
+| 5 | `UNGROUNDED` stderr-string list | English, tool-specific | `rc≠0` is the signal; list = refinement only | open |
+| 6 | magic consts (`cd ~/Desktop`, `≥3 menus`, `sleep 0.6`, `conf<0.4`, `MAX_GUI=16`) | benchmark/res assumptions | derive or mark as tunables, not load-bearing | open |
+
+**The pattern (the sweet tooth):** a specific task failed → I added a specific RULE (filter THIS button,
+dismiss THESE words, reload THIS app) instead of the general invariant it's an instance of. The template
+done RIGHT = `_app_name` (universal floor: pick the app with the most UI elements; thin daemon skip-list as
+optional sugar). Every patch above should be refactored to that shape. Keep this table updated as patches
+are universalized or new ones are caught.
+
 ## Build order (data-driven)
 1. **R1a — goal-level effect-verify** (the spine's trigger; cheap; unlocks F1 + is prerequisite for F2/F3).
 2. **R1b — config-apply/app-reload** (finishes the running-app class on the CLI plane).
