@@ -1,6 +1,7 @@
 pub mod action_graph;
 pub mod agent;
 pub mod auth;
+pub mod back_door;
 pub mod board;
 pub mod bootstrap;
 pub mod bracket_parser;
