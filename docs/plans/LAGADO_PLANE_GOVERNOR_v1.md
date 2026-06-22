@@ -76,3 +76,22 @@ OSWorld Python adapter. This spec joins them into one deterministic governor wit
 4. **API plane:** port `uno_apply.py` into a Rust API plane (the M2 work), registered as the top in-app plane.
 
 Step 1 is the decision brain; 2–4 are wiring. The governor is **rails** — the model never picks the plane.
+
+## Refinements (2026-06-21, from live design review)
+- **The in-task stepback is one full ladder, richest-first, ending at the CLI base:** `API → back-door →
+  a11y → CV → pixel → CLI` (`plane::IN_APP_LADDER`/`next_in_app`). API (richest in-task) and the back-door
+  were initially dropped — restored. The **CLI is NOT excluded** — it's the reliable launch pad, placed
+  LAST for in-app *visibility* work (blind to in-app elements) but kept for what it's GOOD at
+  (file/system/launch/discovery, operate-on-file, the back-door), as the final reliable resort.
+- **Switch only on stepback EXHAUSTION, never on one no-effect.** A single "nothing happened" is normal
+  (slow paint / settle / retry-able miss); the within-plane stepback (settle → re-perceive → re-plan a
+  different op) absorbs it. The governor re-aims only on the supervisor's `Escalate` / `PerceptionBlind`.
+- **AUTONOMY-FIRST — human handback is the ABSOLUTE LAST RESORT.** Exhausting the ladder *under current
+  findings* is NOT a handback: the world may have changed, so the agent **re-discovers + re-picks**
+  (`PlaneGovernor::repick`, switch-back capable). Human is reached only when re-discovery + re-pick also
+  yield nothing AND the supervisor confirms no world progress — 100% sure the AI cannot proceed.
+- **Live wire DONE (`agent.rs` escalate seam):** the supervisor's `Escalate(Sense)` now drives
+  `next_in_app` (feasibility-bounded a11y→CV→pixel via the existing `sense_level`, reusing the locus); on
+  ladder-exhaustion it re-discovers + re-picks (resets the ladder) rather than deferring to human. 297 lib
+  tests. STILL pending live VM smoke test (the Lagado guest + classifier/embedder servers must be booted —
+  this env currently runs only the brain :8080 for the OSWorld path).

@@ -5,6 +5,11 @@
 //! (config-file / gsettings-dconf / D-Bus / sibling-CLI) + **discovery**, and is the vantage from which
 //! the governor determines the next plane.
 //!
+//! AUTONOMY-FIRST: human handback is the ABSOLUTE LAST RESORT — only when the AI is 100% sure it cannot
+//! proceed (every feasible plane tried AND re-discovery + re-pick yield nothing AND the supervisor confirms
+//! no world progress). Exhausting the ladder under current findings is NOT a handback trigger; the agent
+//! re-discovers and re-picks first.
+//!
 //! This module is the DECISION CORE (pure, unit-tested). Execution reuses the existing `Perceptor`/
 //! `Actuator` planes and the `supervisor` switch engine; full wiring + the plane impls are the integration
 //! step (see `docs/plans/LAGADO_PLANE_GOVERNOR_v1.md`). It JOINS logic previously scattered across
@@ -122,6 +127,24 @@ pub fn preferred_order(kind: TaskKind) -> Vec<PlaneId> {
     }
 }
 
+/// The full IN-TASK stepback ladder, richest-first, ENDING at the CLI base:
+/// **API → back-door → a11y → CV → pixel → CLI**.
+/// The CLI is NOT excluded — it's the reliable launch pad, placed LAST for in-app *visibility* work (it's
+/// blind to in-app elements) but kept available for what it's GOOD at (file/system/launch/discovery,
+/// operate-on-file, the back-door route) as the final reliable resort before giving up to Human. Because the
+/// stepback only descends on EXHAUSTION (not one no-effect), it reaches the CLI only after the richer planes
+/// are spent — so the CLI is used for its strengths, never as a reflex that abandons the GUI on a stall.
+pub const IN_APP_LADDER: [PlaneId; 6] =
+    [PlaneId::Api, PlaneId::BackDoor, PlaneId::A11y, PlaneId::Cv, PlaneId::Pixel, PlaneId::Cli];
+
+/// The next feasible IN-TASK plane below `current` on the ladder, or `None` if exhausted (⇒ the supervisor
+/// escalates to Human). Called when the within-plane stepback is spent — NOT on a single no-effect. Spans
+/// the whole set (API + back-door + a11y/CV/pixel + the CLI base), not just a11y/CV/pixel.
+pub fn next_in_app(current: PlaneId, findings: &Findings) -> Option<PlaneId> {
+    let i = IN_APP_LADDER.iter().position(|&p| p == current)?;
+    IN_APP_LADDER[i + 1..].iter().copied().find(|&p| plane_applicable(p, findings))
+}
+
 /// Is a plane usable at all in the current environment (the FEASIBILITY gate the supervisor's blind
 /// `escalate()` lacks)? The CLI launch pad is always available (the reliability floor).
 pub fn plane_applicable(id: PlaneId, findings: &Findings) -> bool {
@@ -188,7 +211,10 @@ impl PlaneGovernor {
 
     /// Re-aim the stepback at the next feasible plane (records the exhausted one). Feasibility is
     /// re-evaluated against current findings, so a re-pick can land on a cheaper plane if the world changed.
-    /// `None` ⇒ exhausted ⇒ the loop's existing handback.
+    ///
+    /// `None` ⇒ all feasible planes tried UNDER CURRENT FINDINGS. This is NOT a human-handback trigger by
+    /// itself — the caller must RE-DISCOVER and `repick()` first (autonomy-first). Human is the ABSOLUTE
+    /// LAST RESORT (see `repick`).
     ///
     /// CALL TIMING (load-bearing): only after the WITHIN-PLANE stepback has EXHAUSTED — i.e. the
     /// supervisor's `Escalate` (accumulated stalls past its threshold) or `PerceptionBlind`. NEVER on a
@@ -200,6 +226,19 @@ impl PlaneGovernor {
         self.tried.insert(n);
         self.current = n;
         Some(n)
+    }
+
+    /// Re-pick from scratch after RE-DISCOVERY (fresh findings): clear the tried set and pick anew. The
+    /// autonomy-first retry — when the ladder is exhausted under stale findings, the world may have changed
+    /// (a dialog closed, an app launched, the API came up), so a fresh pass can find a now-feasible (even
+    /// cheaper) plane. HUMAN HANDBACK IS THE ABSOLUTE LAST RESORT: only after re-discovery + re-pick ALSO
+    /// yield no usable plane AND the supervisor confirms no world progress — i.e. 100% sure the AI cannot
+    /// proceed. Exhaust autonomy before ever asking the human.
+    pub fn repick(&mut self, goal: &str, findings: &Findings) -> PlaneId {
+        let current = pick(goal, findings);
+        self.tried = [current].into_iter().collect();
+        self.current = current;
+        current
     }
 }
 
@@ -290,6 +329,35 @@ mod tests {
         assert_eq!(gov.next("click the Save button", &f), Some(PlaneId::Cv));
         assert_eq!(gov.next("click the Save button", &f), Some(PlaneId::Pixel));
         assert_eq!(gov.next("click the Save button", &f), None); // all feasible planes tried → handback
+    }
+
+    #[test]
+    fn in_app_ladder_spans_api_backdoor_a11y_cv_pixel_then_cli() {
+        let f = gui();
+        // step DOWN the visibility ladder, then to the CLI base (NOT excluded), then truly exhausted
+        assert_eq!(next_in_app(PlaneId::A11y, &f), Some(PlaneId::Cv));
+        assert_eq!(next_in_app(PlaneId::Cv, &f), Some(PlaneId::Pixel));
+        assert_eq!(next_in_app(PlaneId::Pixel, &f), Some(PlaneId::Cli)); // CLI base = last reliable resort
+        assert_eq!(next_in_app(PlaneId::Cli, &f), None);                 // only NOW is the ladder spent
+        // the ladder INCLUDES API (top) + back-door, not just a11y/cv/pixel:
+        let api_cfg = Findings { app_has_api: true, has_config_backend: true, gui_available: true, ..Default::default() };
+        assert_eq!(next_in_app(PlaneId::Api, &api_cfg), Some(PlaneId::BackDoor));
+        let api_gui = Findings { app_has_api: true, gui_available: true, ..Default::default() };
+        assert_eq!(next_in_app(PlaneId::Api, &api_gui), Some(PlaneId::A11y));
+        assert_eq!(next_in_app(PlaneId::BackDoor, &f), Some(PlaneId::A11y));
+        // no GUI surface → the in-app planes are infeasible, but the CLI base is still there (not excluded)
+        assert_eq!(next_in_app(PlaneId::A11y, &Findings::default()), Some(PlaneId::Cli));
+    }
+
+    #[test]
+    fn repick_after_rediscovery_finds_newly_feasible_plane() {
+        // ladder exhausted with no GUI → next() is None (NOT a human handback)
+        let blind = Findings::default();
+        let mut gov = PlaneGovernor::start("click the Save button", &blind);
+        // (start picks Cli as the always-feasible fallback when no GUI)
+        // world changes: a GUI surface appears → re-discover + repick lands on a11y, autonomy continues
+        let now_gui = gui();
+        assert_eq!(gov.repick("click the Save button", &now_gui), PlaneId::A11y);
     }
 
     #[test]

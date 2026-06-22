@@ -1899,10 +1899,41 @@ pub async fn agent_loop(
                 crate::supervisor::Directive::Escalate(tier)
                     if tier.kind == crate::supervisor::TierKind::Sense =>
                 {
-                    // Stall escalated to a richer sense — bump the sense level; the next perception
-                    // runs richer (CV pass on). Captioning's seam, same as the PerceptionBlind path.
-                    sense_level = sense_level.saturating_add(1);
-                    chronos::log(&format!("supervisor_escalate_sense: '{}' (level {sense_level})", tier.label));
+                    // PLANE-GOVERNOR (in-app stepback): the within-plane stepback is SPENT (the supervisor
+                    // accumulated stalls past its threshold — NOT one no-effect), so re-aim to the next
+                    // feasible IN-APP plane down the visibility ladder (a11y → CV → pixel), REUSING the
+                    // existing `sense` mechanism and the current locus (sub-goal). Bounded by feasibility:
+                    // when the ladder is exhausted the bump is REFUSED so the supervisor's next escalation
+                    // reaches Human — closing the old unbounded blind `sense_level += 1`.
+                    let cur = match sense_level {
+                        0 => crate::plane::PlaneId::A11y,
+                        1 => crate::plane::PlaneId::Cv,
+                        _ => crate::plane::PlaneId::Pixel,
+                    };
+                    let findings = crate::plane::Findings { gui_available: true, ..Default::default() };
+                    match crate::plane::next_in_app(cur, &findings) {
+                        Some(next) => {
+                            sense_level = match next {
+                                crate::plane::PlaneId::Cv => 1,
+                                crate::plane::PlaneId::Pixel => 2,
+                                _ => sense_level,
+                            };
+                            chronos::log(&format!(
+                                "plane_governor: in-app stepback spent on {cur:?} → re-aim to {next:?} (sense {sense_level}) [{}]",
+                                tier.label));
+                        }
+                        None => {
+                            // AUTONOMY-FIRST: the in-task ladder is spent UNDER CURRENT FINDINGS — that is
+                            // NOT "give up to the human". The world may have changed (a dialog closed, the
+                            // app launched), so RE-DISCOVER + RE-PICK: reset to the top of the in-app ladder
+                            // and re-attempt with fresh perception. Human is the absolute last resort, reached
+                            // only via the supervisor's genuine-stall cap (no world progress) — never here.
+                            sense_level = 0;
+                            chronos::log(&format!(
+                                "plane_governor: in-task ladder exhausted at {cur:?} under current findings → re-discover + re-pick (autonomy-first; human is last resort) [{}]",
+                                tier.label));
+                        }
+                    }
                 }
                 // Continue / Done / ResetFromBoard / Escalate(Model): defer to the inner
                 // tactical machinery (recovery_manager, should_cutoff, structural detection).
