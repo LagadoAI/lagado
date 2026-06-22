@@ -839,6 +839,17 @@ fn reform_hint(failure: CommandFailure) -> &'static str {
 /// reasons over. Roots = the user's standard folders + /tmp + ANY absolute path named in the goal;
 /// `find -maxdepth 4` so nested files (OSWorld trees, /tmp fixtures) are VISIBLE; sorted (stable for the
 /// no-progress compare) and capped (bounded prompt). Deterministic; read-only.
+/// Common instruction words that are NOT directory names — so `discover_environment` doesn't probe
+/// `$HOME/<every-word>`. A real staged dir name (photos, IncomeStatement2, …) survives this filter.
+const DISCOVER_STOPWORDS: &[&str] = &[
+    "the", "and", "any", "all", "for", "from", "into", "with", "that", "this", "these", "those", "your",
+    "you", "can", "please", "help", "each", "found", "files", "file", "folder", "folders", "directory",
+    "directories", "dir", "copy", "move", "create", "make", "delete", "remove", "save", "open", "rename",
+    "new", "text", "name", "named", "value", "values", "cell", "cells", "row", "rows", "column", "columns",
+    "sheet", "sheets", "go", "through", "recursively", "inside", "above", "below", "blank", "empty",
+    "finish", "work", "even", "they", "are", "but", "not", "their", "them", "set", "add", "fill", "out",
+];
+
 pub fn discover_environment(actuator: &dyn Actuator, goal: &str) -> String {
     // FOCUSED roots: the three work dirs (nested files visible) + any ABSOLUTE path named in the goal.
     // NOT $HOME-root or /tmp — recursing those is a firehose (tine/, system temp) that drowns the signal
@@ -849,7 +860,19 @@ pub fn discover_environment(actuator: &dyn Actuator, goal: &str) -> String {
         let t = tok.trim_matches(|c: char| !c.is_alphanumeric() && !"/_-.".contains(c));
         if t.starts_with('/') && t.len() > 1 { roots.push(t.to_string()); }
     }
+    // GOAL-NAMED relative dirs: a task may stage files in a dir named in the goal (e.g. "the 'photos'
+    // directory") that lives directly under $HOME, which the three work-dir roots miss → the capability
+    // loop can't ground it → handback. Add `$HOME/<name>` for plausible name tokens; the find's `[ -e ]`
+    // gates existence, so non-existent candidates cost nothing (no $HOME-firehose). Class-general: grounds
+    // a goal-named dir wherever the task put it, without recursing all of $HOME.
+    for tok in goal.split(|c: char| !c.is_alphanumeric() && c != '_' && c != '-') {
+        let t = tok.trim();
+        if t.len() >= 3 && t.chars().next().is_some_and(|c| c.is_alphabetic()) && !DISCOVER_STOPWORDS.contains(&t.to_lowercase().as_str()) {
+            roots.push(format!("$HOME/{t}"));
+        }
+    }
     roots.sort(); roots.dedup();
+    roots.truncate(24); // bound the candidate set (perf + the head -80 cap)
     let script = format!(
         "for r in {}; do [ -e \"$r\" ] && find \"$r\" -maxdepth 4 -not -path '*/.*' 2>/dev/null; done \
          | sort -u | head -80", roots.join(" "));
