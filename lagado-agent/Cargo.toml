@@ -33,6 +33,11 @@ path = "src/bin/cv_measure.rs"
 test = false
 
 [[bin]]
+name = "osworld_run"
+path = "src/bin/osworld_run.rs"
+test = false
+
+[[bin]]
 name = "first_walk"
 path = "src/bin/first_walk.rs"
 test = false

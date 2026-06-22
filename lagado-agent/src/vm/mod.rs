@@ -4,10 +4,12 @@ use std::sync::{Arc, RwLock};
 use crate::perception::PerceptionCache;
 
 mod qmp;
+pub mod osworld;
 pub mod ssh_actuator;
 pub mod ssh_perceptor;
 
 pub use qmp::QmpClient;
+pub use osworld::{OsworldActuator, OsworldPerceptor, osworld_pair};
 pub use ssh_actuator::SshActuator;
 pub use ssh_perceptor::SshPerceptor;
 
