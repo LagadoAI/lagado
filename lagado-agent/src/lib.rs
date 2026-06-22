@@ -23,6 +23,7 @@ pub mod memory;
 pub mod memory_tiers;
 pub mod operator;
 pub mod perception;
+pub mod plane;
 pub mod projector;
 pub mod recovery;
 pub mod retrieval;
