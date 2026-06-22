@@ -104,6 +104,175 @@ pub fn ops_to_json(ops: &[ApiOp]) -> Option<Value> {
     arr.map(Value::Array)
 }
 
+/// Build the GUEST-side execution step for the live OSWorld harness: a SINGLE self-contained command
+/// string that (1) kills any running soffice + clears the lock file, (2) applies the native ops to
+/// `file_path` through a private headless LibreOffice via UNO (the proven `uno_apply` logic — live calc
+/// engine computes formulas, saves with the Excel-2007 filter), then (3) reloads the corrected file into
+/// a GUI LibreOffice on the guest display so the OSWorld evaluator's activate-by-title + ctrl+s saves the
+/// LIVE instance with corrected content (the `m1_reconcile` reload-into-focus pattern).
+///
+/// Returned string is meant for `Actuator::run_command`, which runs it as `subprocess.run(cmd,
+/// shell=True)` ON THE GUEST. It is a quoted heredoc (`python3 - <<'EOF' … EOF`) so the only
+/// shell-interpreted token is the delimiter — every quote/dollar/backtick inside the body is inert.
+/// `file_path` and `ops_json` are embedded as Python raw triple-quoted literals (shell- and Python-inert;
+/// serde_json output never contains `"""`), so the OSWorld guest sees them verbatim.
+///
+/// `ops_json` is the stringified array `ops_to_json(...)` produces (e.g. via `.to_string()`).
+pub fn build_guest_apply(file_path: &str, ops_json: &str) -> String {
+    const TEMPLATE: &str = r#"python3 - <<'LAGADO_GUEST_APPLY_EOF'
+import sys, os, json, time, subprocess, signal
+
+# --- inputs (embedded verbatim; raw triple-quoted = shell- and Python-inert) ---
+FILE_PATH = r"""__LAGADO_FILE_PATH__"""
+OPS = json.loads(r"""__LAGADO_OPS_JSON__""")
+
+PORT = 2019
+PROFILE = "file:///tmp/lagado_guest_louser"
+
+
+def excel_to_calc(f):
+    """Excel-A1 -> Calc-A1 for setFormula: sheet refs '!'->'.', arg sep ','->';' (outside strings)."""
+    out, in_str = [], False
+    for ch in f:
+        if ch == '"':
+            in_str = not in_str
+            out.append(ch)
+        elif not in_str and ch == '!':
+            out.append('.')
+        elif not in_str and ch == ',':
+            out.append(';')
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
+def kill_soffice():
+    """Hammer until no soffice remains (single-instance: a survivor would make the reload ATTACH to it
+    and never raise its own window)."""
+    for _ in range(25):
+        subprocess.run("pkill -9 soffice; pkill -9 soffice.bin; true", shell=True)
+        n = subprocess.run("pgrep -c soffice; true", shell=True,
+                           capture_output=True, text=True).stdout.strip().splitlines()
+        if (n[-1] if n else "0") == "0":
+            return
+        time.sleep(1)
+
+
+def clear_lock():
+    d = os.path.dirname(os.path.abspath(FILE_PATH))
+    b = os.path.basename(FILE_PATH)
+    try:
+        os.remove(os.path.join(d, ".~lock.%s#" % b))
+    except OSError:
+        pass
+
+
+def apply_ops():
+    """Apply OPS to FILE_PATH via a private headless LibreOffice + UNO socket (uno_apply shape)."""
+    soffice = subprocess.Popen(
+        ["soffice", "--headless", "--invisible", "--nodefault", "--norestore", "--nologo",
+         "--nofirststartwizard",
+         "--accept=socket,host=localhost,port=%d;urp;StarOffice.ComponentContext" % PORT,
+         "-env:UserInstallation=%s" % PROFILE],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    import uno
+    from com.sun.star.beans import PropertyValue
+
+    def pv(n, v):
+        p = PropertyValue()
+        p.Name = n
+        p.Value = v
+        return p
+
+    localContext = uno.getComponentContext()
+    resolver = localContext.ServiceManager.createInstanceWithContext(
+        "com.sun.star.bridge.UnoUrlResolver", localContext)
+    ctx = None
+    for _ in range(40):
+        try:
+            ctx = resolver.resolve(
+                "uno:socket,host=localhost,port=%d;urp;StarOffice.ComponentContext" % PORT)
+            break
+        except Exception:
+            time.sleep(0.5)
+    if ctx is None:
+        soffice.kill()
+        print("UNO connect FAILED")
+        sys.exit(2)
+
+    smgr = ctx.ServiceManager
+    desktop = smgr.createInstanceWithContext("com.sun.star.frame.Desktop", ctx)
+    url = uno.systemPathToFileUrl(os.path.abspath(FILE_PATH))
+    doc = desktop.loadComponentFromURL(url, "_blank", 0, (pv("Hidden", True),))
+
+    sheets = doc.Sheets
+    for op in OPS:
+        kind = op.get("op")
+        if kind == "add_sheet":
+            name = op["name"]
+            idx = op.get("index", sheets.Count)
+            if not sheets.hasByName(name):
+                sheets.insertNewByName(name, idx)
+        elif kind == "rename_sheet":
+            if sheets.hasByName(op["old"]):
+                sheets.getByName(op["old"]).Name = op["new"]
+        elif kind == "set":
+            sh = sheets.getByName(op["sheet"])
+            cell = sh.getCellRangeByName(op["cell"]).getCellByPosition(0, 0)
+            if "formula" in op and op["formula"] is not None:
+                cell.setFormula(excel_to_calc(str(op["formula"])))
+            else:
+                v = op.get("value")
+                if isinstance(v, (int, float)):
+                    cell.setValue(float(v))
+                else:
+                    cell.setString("" if v is None else str(v))
+
+    doc.calculateAll()
+    doc.storeToURL(url, (pv("FilterName", "Calc MS Excel 2007 XML"),))
+    doc.close(False)
+    try:
+        desktop.terminate()
+    except Exception:
+        pass
+    soffice.send_signal(signal.SIGTERM)
+    try:
+        soffice.wait(timeout=10)
+    except Exception:
+        soffice.kill()
+    print("APPLIED %d ops" % len(OPS))
+
+
+def reload_into_focus():
+    """Relaunch the corrected file in a GUI Calc on the guest display so the evaluator's
+    activate-by-title + ctrl+s saves the LIVE instance with corrected content (m1_reconcile)."""
+    env = dict(os.environ)
+    env.setdefault("DISPLAY", ":0")
+    subprocess.Popen(
+        ["soffice", "--calc", os.path.abspath(FILE_PATH)],
+        env=env, start_new_session=True,
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    print("RELOADED into GUI")
+
+
+def main():
+    kill_soffice()          # step 1: kill running soffice + clear lock
+    clear_lock()
+    apply_ops()             # step 2: apply ops via UNO, save Excel-2007
+    kill_soffice()          # ensure the headless instance is GONE before the GUI reload attaches
+    reload_into_focus()     # step 3: reload corrected file into GUI for the evaluator
+
+
+if __name__ == "__main__":
+    main()
+LAGADO_GUEST_APPLY_EOF"#;
+
+    TEMPLATE
+        .replace("__LAGADO_FILE_PATH__", file_path)
+        .replace("__LAGADO_OPS_JSON__", ops_json)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -170,6 +339,43 @@ mod tests {
         // missing required slot / unknown verb → None
         assert_eq!(from_call("set_cell", &HashMap::new()), None);
         assert_eq!(from_call("nope", &HashMap::new()), None);
+    }
+
+    #[test]
+    fn build_guest_apply_has_kill_apply_reload_and_embeds_path_and_ops() {
+        let ops = ops_to_json(&[
+            ApiOp::AddSheet { name: "Sheet2".into(), index: Some(0) },
+            ApiOp::SetCell {
+                sheet: "Sheet1".into(), cell: "J2".into(),
+                content: CellContent::Formula("=B2-C2-D2-SUM(F2:H2)".into()),
+            },
+        ]).unwrap().to_string();
+        let path = "/root/spreadsheet.xlsx";
+        let cmd = build_guest_apply(path, &ops);
+
+        // single self-contained command via a quoted heredoc (only the delimiter is shell-interpreted)
+        assert!(cmd.starts_with("python3 - <<'LAGADO_GUEST_APPLY_EOF'"));
+        assert!(cmd.trim_end().ends_with("LAGADO_GUEST_APPLY_EOF"));
+
+        // step 1: kill running soffice + remove the lock file
+        assert!(cmd.contains("pkill -9 soffice"));
+        assert!(cmd.contains(".~lock."));
+
+        // step 2: apply via UNO (uno_apply logic), with the Excel-2007 save filter + syntax conversion
+        assert!(cmd.contains("import uno"));
+        assert!(cmd.contains("loadComponentFromURL"));
+        assert!(cmd.contains("excel_to_calc"));
+        assert!(cmd.contains("calculateAll"));
+        assert!(cmd.contains("Calc MS Excel 2007 XML"));
+
+        // step 3: reload the corrected file into a GUI Calc for the evaluator (m1_reconcile)
+        assert!(cmd.contains("soffice"));
+        assert!(cmd.contains("--calc"));
+
+        // file path + ops JSON embedded verbatim (guest reads them literally)
+        assert!(cmd.contains(path));
+        assert!(cmd.contains(&ops));
+        assert!(cmd.contains("\"op\": \"add_sheet\"") || cmd.contains("\"op\":\"add_sheet\""));
     }
 
     #[test]

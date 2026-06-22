@@ -1584,6 +1584,86 @@ pub fn classify_step_outcome(action_executed: bool, screen_changed: bool) -> cra
     else { StepOutcome::NoChange }
 }
 
+/// API plane: find the target office document on the guest + read its structure (headers + sample rows) so
+/// the model authors native ops against REAL columns. Best-effort (openpyxl if present, else a soffice
+/// csv-peek); returns (file_path, structure_text), or None if no document found.
+fn api_read_target(actuator: &dyn Actuator, _goal: &str) -> Option<(String, String)> {
+    let find = "find \"$HOME\" \"$HOME/Desktop\" \"$HOME/Documents\" -maxdepth 3 \
+                \\( -name '*.xlsx' -o -name '*.ods' -o -name '*.csv' \\) 2>/dev/null | head -1";
+    let path = actuator.run_command(find).lines()
+        .find(|l| !l.starts_with("[exit") && l.trim().starts_with('/'))
+        .map(|s| s.trim().to_string())?;
+    if path.is_empty() { return None; }
+    // headers + 2 sample rows; openpyxl if present, else a csv-convert peek (LibreOffice is on the guest)
+    let dump = format!(
+        "python3 - <<'PY' 2>/dev/null || true\n\
+         try:\n import openpyxl; wb=openpyxl.load_workbook('{p}'); ws=wb.worksheets[0]\n\
+         from openpyxl.utils import get_column_letter\n\
+         h=next(ws.iter_rows(min_row=1,max_row=1,values_only=True),())\n\
+         print('columns:', ', '.join('%s=%r'%(get_column_letter(i+1),v) for i,v in enumerate(h)))\n\
+         print('rows 2..%d sample:'%ws.max_row, list(ws.iter_rows(min_row=2,max_row=3,values_only=True)))\n\
+         except Exception: pass\nPY", p = path);
+    let structure = actuator.run_command(&dump).lines()
+        .filter(|l| !l.starts_with("[exit") && !l.starts_with("[stderr"))
+        .collect::<Vec<_>>().join("\n");
+    Some((path, structure))
+}
+
+/// API plane prompt — the SILVER PLATTER: present the app's native ops (a decoding menu), DO NOT steer to an
+/// answer. The model selects ops + authors the formula itself (its comprehension job).
+fn api_plane_prompt(goal: &str, structure: &str) -> String {
+    format!(
+"You operate a spreadsheet by issuing operations; the application computes formulas for you. Available ops:
+  set_cell(sheet=\"S\", cell=\"A1\", formula=\"=...\")   set a cell to a formula
+  set_cell(sheet=\"S\", cell=\"A1\", value=\"...\")       set a cell to a literal value
+  add_sheet(name=\"S\", index=0)                        add a sheet (index 0 = first)
+  rename_sheet(old=\"S\", new=\"S2\")                     rename a sheet
+Use formulas for any computation (e.g. =B2-C2-D2-SUM(F2:H2), cross-sheet =Sheet1!J2).
+
+Goal: {goal}
+Workbook:
+{structure}
+
+Emit the operations that accomplish the goal, as a list of calls:")
+}
+
+/// Scan a model's output for `verb(k=\"v\", k=N, ...)` op-calls, quote/paren-aware so a `)` inside a formula
+/// (SUM(F2:H2)) doesn't end the call early. Returns (verb, kwargs) for each — typed by `api_plane::from_call`.
+fn scan_op_calls(text: &str) -> Vec<(String, std::collections::HashMap<String, String>)> {
+    let verbs = ["set_cell", "add_sheet", "rename_sheet"];
+    let mut out = Vec::new();
+    let bytes = text.as_bytes();
+    for verb in verbs {
+        let mut from = 0;
+        while let Some(rel) = text[from..].find(&format!("{verb}(")) {
+            let open = from + rel + verb.len() + 1;
+            // find the matching close paren, respecting quotes
+            let (mut i, mut depth, mut in_q, mut esc) = (open, 1i32, false, false);
+            while i < bytes.len() && depth > 0 {
+                let c = bytes[i] as char;
+                if esc { esc = false; }
+                else if c == '\\' { esc = true; }
+                else if c == '"' { in_q = !in_q; }
+                else if !in_q && c == '(' { depth += 1; }
+                else if !in_q && c == ')' { depth -= 1; }
+                i += 1;
+            }
+            let body = &text[open..i.saturating_sub(1)];
+            let mut kw = std::collections::HashMap::new();
+            for cap in regex::Regex::new(r#"(\w+)\s*=\s*"((?:[^"\\]|\\.)*)"|(\w+)\s*=\s*(\d+)"#).unwrap().captures_iter(body) {
+                if let (Some(k), Some(v)) = (cap.get(1), cap.get(2)) {
+                    kw.insert(k.as_str().to_string(), v.as_str().replace("\\\"", "\""));
+                } else if let (Some(k), Some(v)) = (cap.get(3), cap.get(4)) {
+                    kw.insert(k.as_str().to_string(), v.as_str().to_string());
+                }
+            }
+            out.push((verb.to_string(), kw));
+            from = i;
+        }
+    }
+    out
+}
+
 // ── Agent loop ────────────────────────────────────────────────────
 pub async fn agent_loop(
     state: Arc<Mutex<AgentState>>,
@@ -1844,6 +1924,60 @@ pub async fn agent_loop(
         } else {
             verify_or_handback(&goal, actuator.as_ref(), &confirm_tx,
                 "I worked through the steps but couldn't verify the goal was achieved — handing back.").await;
+        }
+        return;
+    }
+
+    // ── API PLANE (in-app-semantic): the model authors the app's NATIVE ops (formulas etc., the silver
+    // platter) and the harness applies them THROUGH the app, instead of GUI-fumbling. Routed by the
+    // plane-governor's task classification; fail-closes FAST (no 200s GUI churn). The model still authors
+    // the formula (its comprehension job); the harness owns the tool + the apply. ──────────────────────
+    if matches!(crate::plane::classify_task(&goal, &crate::plane::Findings::default()),
+                crate::plane::TaskKind::InAppSemantic) {
+        chronos::log("api_plane: in-app-semantic → authoring native ops via the app's tools");
+        let checks = goal_completion_checks(&goal);
+        let verify_now = |act: &dyn Actuator| -> bool {
+            !checks.is_empty() && checks.iter().all(|c| parse_exit_code(&act.run_command(c)) == Some(0))
+        };
+        if let Some((file, structure)) = api_read_target(actuator.as_ref(), &goal) {
+            let prompt = api_plane_prompt(&goal, &structure);
+            let mut ops: Vec<serde_json::Value> = Vec::new();
+            for _try in 0..3 {
+                let ad = adapter.clone();
+                let p = prompt.clone();
+                let raw = tokio::task::spawn_blocking(move || ad.generate(&p, 1400, 0.0).ok())
+                    .await.ok().flatten().unwrap_or_default();
+                ops = scan_op_calls(&raw).into_iter()
+                    .filter_map(|(verb, kw)| crate::api_plane::from_call(&verb, &kw))
+                    .filter_map(|op| crate::api_plane::op_to_json(&op))
+                    .collect();
+                if !ops.is_empty() { break; }
+            }
+            if !ops.is_empty() {
+                let ops_json = serde_json::Value::Array(ops).to_string();
+                let cmd = crate::api_plane::build_guest_apply(&file, &ops_json);
+                let tool_call = ToolCall::Invoke {
+                    name: "vm_command".to_string(),
+                    args: { let mut m = serde_json::Map::new();
+                            m.insert("command".to_string(), serde_json::Value::String(cmd.clone())); m },
+                };
+                if let gate::Verdict::Allow = gate::apply_plan_approval(
+                    gate::confidence_escalate(gate::evaluate_action(&tool_call, &registry), 1.0), plan_approved) {
+                    let out = execute_tool(&tool_call, &actuator, perceptor.as_ref(), &memory_tiers).await;
+                    chronos::log(&format!("api_plane: applied {} ops via the app → {out}", ops_json.len()));
+                    let _ = confirm_tx.send(envelope::make("action_log",
+                        envelope::ActionLogPayload { text: "applied native app operations".to_string() })).await;
+                }
+            } else {
+                chronos::log("api_plane: model authored no valid ops");
+            }
+        }
+        // honest completion check — never the model's say-so; fast handback (no GUI churn)
+        if verify_now(actuator.as_ref()) {
+            complete_goal(&goal, actuator.as_ref(), &confirm_tx).await;
+        } else {
+            verify_or_handback(&goal, actuator.as_ref(), &confirm_tx,
+                "I operated the app's tools but couldn't verify the goal — handing back.").await;
         }
         return;
     }
