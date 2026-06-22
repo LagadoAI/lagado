@@ -30,6 +30,17 @@ pub enum ApiOp {
     AddSheet { name: String, index: Option<usize> },
     /// Rename a sheet.
     RenameSheet { old: String, new: String },
+    /// Forward-fill blank cells in a range along a direction (down/up/left/right) — the GENERAL base
+    /// for the human "Fill Down/Up/Left/Right" gestures. ONE op replaces dozens of per-cell SetCells
+    /// AND removes the need for the model to see which cells are blank — the app carries the value
+    /// along the axis. `range` is an A1 range ("B1:E30"); `direction` ∈ {down,up,left,right}.
+    Fill { sheet: String, range: String, direction: String },
+    /// Apply a formula across a whole range with RELATIVE-REFERENCE adjustment per cell — the app's
+    /// "Fill Down a formula" (=B2-C2 in the seed → =B3-C3 below). The model authors the formula ONCE
+    /// (for the first cell); the app (UNO `fillAuto`) propagates it down/across the range, adjusting
+    /// refs — so a whole computed column is one op, not N. Distinct from `Fill` (which carries VALUES
+    /// into blanks; this OVERWRITES the range with the ref-adjusted formula). `range` e.g. "I2:I30".
+    SetFormulaRange { sheet: String, range: String, formula: String },
 }
 
 /// Map a parsed typed-verb call (verb + kwargs, from the shared Pythonic parser) into an `ApiOp`. The model
@@ -57,6 +68,17 @@ pub fn from_call(verb: &str, kw: &HashMap<String, String>) -> Option<ApiOp> {
             index: kw.get("index").and_then(|i| i.parse().ok()),
         }),
         "rename_sheet" => Some(ApiOp::RenameSheet { old: kw.get("old")?.clone(), new: kw.get("new")?.clone() }),
+        // General fill base + the named-direction gestures layered over it (all → ApiOp::Fill).
+        "fill" | "fill_down" | "fill_up" | "fill_left" | "fill_right" => {
+            let direction = match verb {
+                "fill" => kw.get("direction").map(|d| d.to_lowercase()).unwrap_or_else(|| "down".into()),
+                other => other.trim_start_matches("fill_").to_string(),
+            };
+            if !matches!(direction.as_str(), "down" | "up" | "left" | "right") { return None; }
+            Some(ApiOp::Fill { sheet: kw.get("sheet")?.clone(), range: kw.get("range")?.clone(), direction })
+        }
+        "set_formula_range" => Some(ApiOp::SetFormulaRange {
+            sheet: kw.get("sheet")?.clone(), range: kw.get("range")?.clone(), formula: kw.get("formula")?.clone() }),
         _ => None,
     }
 }
@@ -93,6 +115,19 @@ pub fn op_to_json(op: &ApiOp) -> Option<Value> {
                 return None;
             }
             Some(json!({ "op": "rename_sheet", "old": old, "new": new }))
+        }
+        ApiOp::Fill { sheet, range, direction } => {
+            if sheet.trim().is_empty() || range.trim().is_empty()
+                || !matches!(direction.as_str(), "down" | "up" | "left" | "right") {
+                return None;
+            }
+            Some(json!({ "op": "fill", "sheet": sheet, "range": range, "direction": direction }))
+        }
+        ApiOp::SetFormulaRange { sheet, range, formula } => {
+            if sheet.trim().is_empty() || range.trim().is_empty() || formula.trim().is_empty() {
+                return None;
+            }
+            Some(json!({ "op": "set_formula_range", "sheet": sheet, "range": range, "formula": formula }))
         }
     }
 }
@@ -207,7 +242,24 @@ def apply_ops():
     doc = desktop.loadComponentFromURL(url, "_blank", 0, (pv("Hidden", True),))
 
     sheets = doc.Sheets
-    for op in OPS:
+    def resolve_sheet(name):
+        # Tolerate a placeholder/unknown sheet name (the model often copies the prompt's "S"): exact
+        # match wins; a single-sheet book resolves unambiguously to its only sheet; else active/first.
+        if name and sheets.hasByName(name):
+            return sheets.getByName(name)
+        if sheets.Count == 1:
+            return sheets.getByIndex(0)
+        try:
+            return doc.CurrentController.ActiveSheet
+        except Exception:
+            return sheets.getByIndex(0)
+    # Dependency-correct ordering (deterministic, harness-owned): a container must exist before it's
+    # populated. Apply STRUCTURAL ops (add_sheet, rename_sheet) first — stable within the group — then
+    # content ops. Models author ops in goal-narrative order ("fill the column ... in a new sheet"),
+    # not dependency order; the harness fixes it so a write never lands on a not-yet-created sheet.
+    STRUCTURAL = ("add_sheet", "rename_sheet")
+    ordered = [o for o in OPS if o.get("op") in STRUCTURAL] + [o for o in OPS if o.get("op") not in STRUCTURAL]
+    for op in ordered:
         kind = op.get("op")
         if kind == "add_sheet":
             name = op["name"]
@@ -218,7 +270,7 @@ def apply_ops():
             if sheets.hasByName(op["old"]):
                 sheets.getByName(op["old"]).Name = op["new"]
         elif kind == "set":
-            sh = sheets.getByName(op["sheet"])
+            sh = resolve_sheet(op["sheet"])
             cell = sh.getCellRangeByName(op["cell"]).getCellByPosition(0, 0)
             if "formula" in op and op["formula"] is not None:
                 cell.setFormula(excel_to_calc(str(op["formula"])))
@@ -228,6 +280,49 @@ def apply_ops():
                     cell.setValue(float(v))
                 else:
                     cell.setString("" if v is None else str(v))
+        elif kind == "fill":
+            # The human "Fill Down/Up/Left/Right" gestures, generalized: forward-fill blanks along the
+            # axis, carrying the last non-empty value. The app sees the cells; the model never
+            # enumerates them. getType().value is the enum NAME ("EMPTY"/"VALUE"/"TEXT"/"FORMULA") —
+            # string compare avoids pyuno enum import quirks.
+            sh = resolve_sheet(op["sheet"])
+            addr = sh.getCellRangeByName(op["range"]).getRangeAddress()
+            c0, r0, c1, r1 = addr.StartColumn, addr.StartRow, addr.EndColumn, addr.EndRow
+            direction = op.get("direction", "down")
+            def fill_line(cells):
+                carry = None  # (is_numeric, value)
+                for c in cells:
+                    t = c.getType().value
+                    if t == "EMPTY":
+                        if carry is not None:
+                            if carry[0]:
+                                c.setValue(carry[1])
+                            else:
+                                c.setString(carry[1])
+                    elif t == "VALUE":
+                        carry = (True, c.getValue())
+                    else:
+                        carry = (False, c.getString())
+            if direction in ("down", "up"):
+                for col in range(c0, c1 + 1):
+                    rows = range(r0, r1 + 1) if direction == "down" else range(r1, r0 - 1, -1)
+                    fill_line([sh.getCellByPosition(col, row) for row in rows])
+            else:  # left / right
+                for row in range(r0, r1 + 1):
+                    cols = range(c0, c1 + 1) if direction == "right" else range(c1, c0 - 1, -1)
+                    fill_line([sh.getCellByPosition(col, row) for col in cols])
+        elif kind == "set_formula_range":
+            # Apply a formula across the range with RELATIVE-REF adjustment — the app's "Fill Down a
+            # formula". Set the seed on the top-left cell, then let UNO fillAuto propagate it (adjusting
+            # refs like a fill-handle drag), so a whole computed column is ONE op, not N.
+            sh = resolve_sheet(op["sheet"])
+            rng = sh.getCellRangeByName(op["range"])
+            a = rng.getRangeAddress()
+            sh.getCellByPosition(a.StartColumn, a.StartRow).setFormula(excel_to_calc(str(op["formula"])))
+            if a.EndRow > a.StartRow:
+                rng.fillAuto(uno.Enum("com.sun.star.sheet.FillDirection", "TO_BOTTOM"), 1)
+            elif a.EndColumn > a.StartColumn:
+                rng.fillAuto(uno.Enum("com.sun.star.sheet.FillDirection", "TO_RIGHT"), 1)
 
     doc.calculateAll()
     doc.storeToURL(url, (pv("FilterName", "Calc MS Excel 2007 XML"),))
@@ -339,6 +434,43 @@ mod tests {
         // missing required slot / unknown verb → None
         assert_eq!(from_call("set_cell", &HashMap::new()), None);
         assert_eq!(from_call("nope", &HashMap::new()), None);
+    }
+
+    #[test]
+    fn fill_general_base_and_direction_aliases_map_to_one_op() {
+        let mut g = HashMap::new();
+        g.insert("sheet".into(), "Data".into()); g.insert("range".into(), "B1:E30".into());
+        g.insert("direction".into(), "right".into());
+        // general base: fill(direction=...) → Fill
+        assert_eq!(from_call("fill", &g).unwrap(),
+                   ApiOp::Fill { sheet: "Data".into(), range: "B1:E30".into(), direction: "right".into() });
+        // fill() with no direction defaults to down
+        let mut d = HashMap::new(); d.insert("sheet".into(), "S".into()); d.insert("range".into(), "B1:E30".into());
+        assert_eq!(from_call("fill", &d).unwrap(),
+                   ApiOp::Fill { sheet: "S".into(), range: "B1:E30".into(), direction: "down".into() });
+        // overlay aliases bind the direction → SAME op type
+        assert_eq!(from_call("fill_up", &d).unwrap(),
+                   ApiOp::Fill { sheet: "S".into(), range: "B1:E30".into(), direction: "up".into() });
+        // round-trips to the apply JSON the UNO step consumes
+        assert_eq!(op_to_json(&from_call("fill_left", &d).unwrap()).unwrap(),
+                   json!({"op":"fill","sheet":"S","range":"B1:E30","direction":"left"}));
+        // bad direction → rejected (never a half-formed op)
+        let mut bad = d.clone(); bad.insert("direction".into(), "sideways".into());
+        assert_eq!(from_call("fill", &bad), None);
+    }
+
+    #[test]
+    fn set_formula_range_round_trips() {
+        let mut f = HashMap::new();
+        f.insert("sheet".into(), "Sheet1".into()); f.insert("range".into(), "I2:I30".into());
+        f.insert("formula".into(), "=B2-C2-D2".into());
+        let op = from_call("set_formula_range", &f).unwrap();
+        assert_eq!(op, ApiOp::SetFormulaRange { sheet: "Sheet1".into(), range: "I2:I30".into(), formula: "=B2-C2-D2".into() });
+        assert_eq!(op_to_json(&op).unwrap(),
+                   json!({"op":"set_formula_range","sheet":"Sheet1","range":"I2:I30","formula":"=B2-C2-D2"}));
+        // missing the formula slot → no half-formed op
+        let mut nf = HashMap::new(); nf.insert("sheet".into(), "S".into()); nf.insert("range".into(), "I2:I30".into());
+        assert_eq!(from_call("set_formula_range", &nf), None);
     }
 
     #[test]

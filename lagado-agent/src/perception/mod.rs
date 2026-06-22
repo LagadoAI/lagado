@@ -18,6 +18,13 @@ pub trait Perceptor: Send + Sync {
     /// on. Default no-op (mock/host perceptors with no frame source); `SshPerceptor` does a QMP
     /// screendump. Best-effort: a capture failure leaves CV to fail-open to a11y-only.
     fn capture_frame(&self) {}
+
+    /// Control whether perception PRUNES descent into in-document subtrees (spreadsheet/document cell
+    /// grids). Default ON (fast, bounded) — correct when the API plane owns in-document content. The
+    /// agent flips it OFF when it falls through to the GUI plane for an in-app-semantic task, so the
+    /// selection loop can SEE in-document targets (still bounded by the perception deadline). Default
+    /// no-op (perceptors without a document-heavy a11y tree). See `lagado-perception-latency-bug`.
+    fn set_document_pruning(&self, _on: bool) {}
 }
 
 /// Performs user-input actions on the desktop.

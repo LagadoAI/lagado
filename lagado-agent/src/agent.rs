@@ -1642,6 +1642,7 @@ fn api_read_target(actuator: &dyn Actuator, _goal: &str) -> Option<(String, Stri
         "python3 - <<'PY' 2>/dev/null || true\n\
          try:\n import openpyxl; wb=openpyxl.load_workbook('{p}'); ws=wb.worksheets[0]\n\
          from openpyxl.utils import get_column_letter\n\
+         print('sheets:', wb.sheetnames); print('active sheet:', ws.title)\n\
          h=next(ws.iter_rows(min_row=1,max_row=1,values_only=True),())\n\
          print('columns:', ', '.join('%s=%r'%(get_column_letter(i+1),v) for i,v in enumerate(h)))\n\
          print('rows 2..%d sample:'%ws.max_row, list(ws.iter_rows(min_row=2,max_row=3,values_only=True)))\n\
@@ -1652,28 +1653,40 @@ fn api_read_target(actuator: &dyn Actuator, _goal: &str) -> Option<(String, Stri
     Some((path, structure))
 }
 
-/// API plane prompt — the SILVER PLATTER: present the app's native ops (a decoding menu), DO NOT steer to an
-/// answer. The model selects ops + authors the formula itself (its comprehension job).
-fn api_plane_prompt(goal: &str, structure: &str) -> String {
-    format!(
+/// The app's native-op MENU (the silver platter) — shared by the whole-plan prompt and the per-step
+/// prompt so the vocabulary never drifts between them.
+const API_OPS_MENU: &str =
 "You operate a spreadsheet by issuing operations; the application computes formulas for you. Available ops:
   set_cell(sheet=\"S\", cell=\"A1\", formula=\"=...\")   set a cell to a formula
   set_cell(sheet=\"S\", cell=\"A1\", value=\"...\")       set a cell to a literal value
+  fill(sheet=\"S\", range=\"B1:E30\", direction=\"down\")  fill blank cells in the range with the value before them along the axis
+  fill_down / fill_up / fill_left / fill_right          shorthand for fill(direction=...) — same op
+  set_formula_range(sheet=\"S\", range=\"I2:I30\", formula=\"=B2-C2\")  apply a formula down/across a whole range; the app adjusts relative refs per cell (=B2→=B3). Use this for a computed COLUMN — write the formula once for the first row.
   add_sheet(name=\"S\", index=0)                        add a sheet (index 0 = first)
   rename_sheet(old=\"S\", new=\"S2\")                     rename a sheet
 Use formulas for any computation (e.g. =B2-C2-D2-SUM(F2:H2), cross-sheet =Sheet1!J2).
+Prefer ONE fill/set_formula_range over many set_cell when filling a range — do NOT enumerate cells you can fill.
+Use the actual sheet name from the Workbook structure.";
 
-Goal: {goal}
-Workbook:
-{structure}
+/// API plane prompt — the SILVER PLATTER: present the app's native ops (a decoding menu), DO NOT steer to an
+/// answer. The model selects ops + authors the formula itself (its comprehension job).
+fn api_plane_prompt(goal: &str, structure: &str) -> String {
+    format!("{API_OPS_MENU}\n\nGoal: {goal}\nWorkbook:\n{structure}\n\nEmit the operations that accomplish the goal, as a list of calls:")
+}
 
-Emit the operations that accomplish the goal, as a list of calls:")
+/// PER-STEP authoring prompt (sequencer-routed): ask for the NEXT SINGLE op given the goal, the workbook,
+/// and the ops authored so far. Short output (one op or "done") → tiny generation → low temp-0 variance,
+/// and the loop can't drop a step. The model sees its own running plan so it builds it up incrementally
+/// instead of emitting the whole thing in one fragile 1400-token pass.
+fn api_step_prompt(goal: &str, structure: &str, authored: &[String]) -> String {
+    let so_far = if authored.is_empty() { "(none yet)".to_string() } else { authored.join("\n  ") };
+    format!("{API_OPS_MENU}\n\nGoal: {goal}\nWorkbook:\n{structure}\n\nOps you have authored so far (all will be applied):\n  {so_far}\n\nAuthor the NEXT single operation toward the goal. If the ops above already fully accomplish the goal, reply exactly: done\nNext op:")
 }
 
 /// Scan a model's output for `verb(k=\"v\", k=N, ...)` op-calls, quote/paren-aware so a `)` inside a formula
 /// (SUM(F2:H2)) doesn't end the call early. Returns (verb, kwargs) for each — typed by `api_plane::from_call`.
 fn scan_op_calls(text: &str) -> Vec<(String, std::collections::HashMap<String, String>)> {
-    let verbs = ["set_cell", "add_sheet", "rename_sheet"];
+    let verbs = ["set_cell", "set_formula_range", "fill_down", "fill_up", "fill_left", "fill_right", "fill", "add_sheet", "rename_sheet"];
     let mut out = Vec::new();
     let bytes = text.as_bytes();
     for verb in verbs {
@@ -1730,10 +1743,13 @@ pub async fn agent_loop(
     });
 
     // Screen hash for action-graph state key (read once per goal, used for recovery lookup)
+    let _t_osw = std::env::var("OSW_TRACE").is_ok();
+    let _t0 = std::time::Instant::now();
     let state_hash = {
         let s = read_screen_bg(&perceptor).await;
         format!("{}", blake3::hash(s.as_bytes()))
     };
+    if _t_osw { eprintln!("[timing] read_screen_bg(start-hash) {:.1}s", _t0.elapsed().as_secs_f32()); }
 
     // Recovery manager — graph-backed + LLM-assisted failure recovery
     let recovery_manager: Option<RecoveryManager> = {
@@ -1794,6 +1810,7 @@ pub async fn agent_loop(
     // Board-informed planning (upstream of the memory-isolated executor). For an implicit goal this
     // asks the brain to make preconditions explicit, shaped by learned skills; an explicit "X then Y"
     // stays on the deterministic split. Runs on the blocking pool (sync HTTP generate).
+    let _t_plan = std::time::Instant::now();
     let sub_goals: Vec<SubGoal> = {
         let g = goal.clone();
         let ad = adapter.clone();
@@ -1813,6 +1830,7 @@ pub async fn agent_loop(
         // loop; Type/Key are deterministic.
         strings.iter().map(|s| classify_subgoal(s)).collect()
     };
+    if _t_osw { eprintln!("[timing] plan_goal+discover_env {:.1}s → {} sub-goals", _t_plan.elapsed().as_secs_f32(), sub_goals.len()); }
     let mut current_sub: usize = 0;
     // DEVIATION DETECTION (§2.15): consecutive re-perceptions where NOTHING on screen matches the
     // current sub-goal. The deterministic plan is BLIND and cannot re-plan, so when the world goes
@@ -1874,6 +1892,21 @@ pub async fn agent_loop(
         state: "goal_received".to_string(),
         detail: goal.clone(),
     })).await;
+    if _t_osw { eprintln!("[timing] reached goal_received (pre-loop done) at {:.1}s total", _t0.elapsed().as_secs_f32()); }
+
+    // APP-AWARE PLANE CLASSIFICATION (computed ONCE, up front — perception is bounded/cheap now). A
+    // spreadsheet-focused content goal is InAppSemantic and belongs to the API plane (UNO set_cell),
+    // NOT the file-ops capability loop. plan_goal can hallucinate a bogus Command for such a goal (e.g.
+    // `gsettings set …auto-fill`), which — being all-Command — would otherwise be CAPTURED by the
+    // capability loop below before the API plane (further down) ever sees it. Classify by focused-app
+    // IDENTITY here so the routing is correct regardless of what the planner authored.
+    let _t_focus = std::time::Instant::now();
+    let api_findings = {
+        let focus = screen_focus(&read_screen_bg(&perceptor).await);
+        crate::plane::Findings { focused_app: (!focus.is_empty()).then_some(focus), ..Default::default() }
+    };
+    let api_in_app = matches!(crate::plane::classify_task(&goal, &api_findings), crate::plane::TaskKind::InAppSemantic);
+    if _t_osw { eprintln!("[timing] api focus read_screen_bg {:.1}s → in_app={} (total {:.1}s)", _t_focus.elapsed().as_secs_f32(), api_in_app, _t0.elapsed().as_secs_f32()); }
 
     // ── ReAct COMMAND LOOP ────────────────────────────────────────────────────────────────────────
     // When plan_goal chose an ALL-COMMAND surface (a CLI/file goal), DON'T walk the untrusted upfront
@@ -1881,7 +1914,7 @@ pub async fn agent_loop(
     // → run (gated, capture the OS error) → VERIFY against the real world (deterministic, the judge+stop)
     // → feed back {expected + error}. Completion is the real-world check, never the model's say-so.
     if !sub_goals.is_empty() && sub_goals.iter().all(|sg| matches!(sg.action, SubAction::Command(_)))
-        && capability_expressible(&goal) {
+        && capability_expressible(&goal) && !api_in_app {
         chronos::log("react_capability_loop: engaging (home file-ops goal)");
         // CAPABILITY layer: each step the model SELECTS a typed verb (Pythonic GBNF); the harness builds
         // the deterministic command. DETERMINISTIC goal completion check (the judge); empty ⇒ no derivable
@@ -1980,38 +2013,54 @@ pub async fn agent_loop(
     // platter) and the harness applies them THROUGH the app, instead of GUI-fumbling. Routed by the
     // plane-governor's task classification; fail-closes FAST (no 200s GUI churn). The model still authors
     // the formula (its comprehension job); the harness owns the tool + the apply. ──────────────────────
-    // APP-AWARE classification: read the focused app so a spreadsheet routes here by its IDENTITY, not by
-    // a verb keyword in the goal (the keyword-fragile miss). `screen_focus` parses the `[focused: X]` line.
-    let api_findings = {
-        let focus = screen_focus(&read_screen_bg(&perceptor).await);
-        crate::plane::Findings {
-            focused_app: (!focus.is_empty()).then_some(focus),
-            ..Default::default()
-        }
-    };
-    if matches!(crate::plane::classify_task(&goal, &api_findings), crate::plane::TaskKind::InAppSemantic) {
+    // APP-AWARE classification computed up front (`api_in_app`, above) by focused-app IDENTITY — a
+    // spreadsheet routes here even when the planner authored a bogus Command (which would otherwise be
+    // captured by the capability loop). `screen_focus` parsed the `[focused: X]` line once.
+    if api_in_app {
         // The API plane is feasible ONLY when there's an API-addressable document. If there isn't, this is
         // an in-app-semantic goal on an app the API plane can't address yet (richest-first: API → … → GUI)
         // → FALL THROUGH to the GUI loop below, do NOT hand back (that would regress the GUI path).
         if let Some((file, structure)) = api_read_target(actuator.as_ref(), &goal) {
             chronos::log("api_plane: spreadsheet found → authoring native ops via the app's tools");
+            if _t_osw { eprintln!("[timing] api_read_target done (total {:.1}s)", _t0.elapsed().as_secs_f32()); }
             let checks = goal_completion_checks(&goal);
             let verify_now = |act: &dyn Actuator| -> bool {
                 !checks.is_empty() && checks.iter().all(|c| parse_exit_code(&act.run_command(c)) == Some(0))
             };
-            let prompt = api_plane_prompt(&goal, &structure);
+            // INCREMENTAL per-op authoring (sequencer-routed, the §2.14 primitive applied to the API
+            // plane): author ONE op per SHORT generation against the goal + structure + ops-so-far, until
+            // the model signals done / authors no new op / hits the budget. The list ACCUMULATES and is
+            // applied ONCE below via the proven build_guest_apply (guards the 01b269ae single-op path).
+            // Short gens = the temp-0 variance win; the loop = completeness (no dropped op). Termination is
+            // no-progress + budget (model-"done" is only a weak hint — §2.14 disproved trusting it). Per-op
+            // LIVE effect-verify (self-correction) is the deferred persistent-UNO-session ("app adaptation")
+            // increment; here apply/reconcile stays batched-once.
+            const API_MAX_OPS: usize = 12;
+            let _t_auth = std::time::Instant::now();
             let mut ops: Vec<serde_json::Value> = Vec::new();
-            for _try in 0..3 {
+            let mut authored: Vec<String> = Vec::new();
+            for _step in 0..API_MAX_OPS {
+                let step_prompt = api_step_prompt(&goal, &structure, &authored);
                 let ad = adapter.clone();
-                let p = prompt.clone();
-                let raw = tokio::task::spawn_blocking(move || ad.generate(&p, 1400, 0.0).ok())
+                let raw = tokio::task::spawn_blocking(move || ad.generate(&step_prompt, 96, 0.0).ok())
                     .await.ok().flatten().unwrap_or_default();
-                ops = scan_op_calls(&raw).into_iter()
-                    .filter_map(|(verb, kw)| crate::api_plane::from_call(&verb, &kw))
-                    .filter_map(|op| crate::api_plane::op_to_json(&op))
-                    .collect();
-                if !ops.is_empty() { break; }
+                // first valid op-call this step (one bite)
+                let next = scan_op_calls(&raw).into_iter()
+                    .find_map(|(verb, kw)| crate::api_plane::from_call(&verb, &kw)
+                        .and_then(|op| crate::api_plane::op_to_json(&op)));
+                match next {
+                    // no new op authored → the model is done or stuck → stop (no-progress)
+                    None => break,
+                    Some(op) => {
+                        let op_s = op.to_string();
+                        // duplicate of the immediately-prior op → no-progress → stop
+                        if authored.last() == Some(&op_s) { break; }
+                        authored.push(op_s);
+                        ops.push(op);
+                    }
+                }
             }
+            if _t_osw { eprintln!("[timing] api incremental authoring {:.1}s → {} ops (total {:.1}s)", _t_auth.elapsed().as_secs_f32(), ops.len(), _t0.elapsed().as_secs_f32()); }
             if !ops.is_empty() {
                 let ops_json = serde_json::Value::Array(ops).to_string();
                 let cmd = crate::api_plane::build_guest_apply(&file, &ops_json);
@@ -2022,8 +2071,10 @@ pub async fn agent_loop(
                 };
                 if let gate::Verdict::Allow = gate::apply_plan_approval(
                     gate::confidence_escalate(gate::evaluate_action(&tool_call, &registry), 1.0), plan_approved) {
+                    let _t_apply = std::time::Instant::now();
                     let out = execute_tool(&tool_call, &actuator, perceptor.as_ref(), &memory_tiers).await;
                     chronos::log(&format!("api_plane: applied {} ops via the app → {out}", ops_json.len()));
+                    if _t_osw { eprintln!("[timing] build_guest_apply(reconcile) {:.1}s (total {:.1}s)\n[apply-ops] {}\n[apply-out] {}", _t_apply.elapsed().as_secs_f32(), _t0.elapsed().as_secs_f32(), ops_json, out.replace('\n', " | ")); }
                     let _ = confirm_tx.send(envelope::make("action_log",
                         envelope::ActionLogPayload { text: "applied native app operations".to_string() })).await;
                 }
@@ -2040,6 +2091,10 @@ pub async fn agent_loop(
             return;
         }
         chronos::log("api_plane: in-app-semantic but no API-addressable document → falling through to GUI plane");
+        // The GUI plane now owns this in-document task → let perception SEE in-document targets (cells,
+        // in-text controls) it pruned while the API plane was the candidate. Still bounded by the
+        // perception deadline. (Plane-conditional pruning — `lagado-perception-latency-bug`.)
+        perceptor.set_document_pruning(false);
     }
 
     loop {

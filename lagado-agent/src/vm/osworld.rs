@@ -55,7 +55,7 @@ const READ_TIMEOUT: Duration = Duration::from_secs(20);
 /// bboxes (same discipline as perceive.py). On ANY failure it prints a sentinel
 /// line so the harness degrades to a stale frame rather than panicking.
 const PERCEIVE_PY: &str = r#"
-import sys
+import sys, time
 try:
     import pyatspi
 except Exception:
@@ -69,12 +69,32 @@ INTERACTIVE = {
     'tab','tab list','slider','scroll bar','icon','tool bar','document web',
 }
 
+# Subtrees that are HUGE and hold no useful click targets: spreadsheet/document cell
+# grids. LibreOffice Calc exposes every cell as an a11y node, so descending here is what
+# drove read_screen past the guest's 120s /execute cap. Record the container if it's
+# interactive, but DO NOT descend. 'tree table'/'tree' are NOT pruned (file managers put
+# real targets there). The API plane owns spreadsheet cell content; the GUI agent never
+# needs individual cells as targets.
+PRUNE_DESCENT = {'table','document spreadsheet','document frame','document text','panel viewport'}
+
+# Hard bounds so perception ALWAYS returns fast regardless of tree shape (the fix for the
+# Calc 120s hang). Wall-clock is the bulletproof guard; node budget backstops it. Tuned so
+# menus/toolbars (enumerated early, before the document subtree) are always captured.
+DEADLINE = time.time() + 8.0
+NODE_BUDGET = 2000
+visited = [0]
+
+def bounded():
+    return time.time() > DEADLINE or visited[0] >= NODE_BUDGET
+
 def garbage(x, y, w, h):
     return (x < -32768 or x > 32768 or y < -32768 or y > 32768 or w <= 0 or h <= 0)
 
 def find_active(desktop):
     # The application whose window carries the ACTIVE state is the focused app.
     for app in desktop:
+        if bounded():
+            return None
         try:
             for win in app:
                 st = win.getState()
@@ -85,8 +105,9 @@ def find_active(desktop):
     return None
 
 def walk(node, out, cap=200):
-    if len(out) >= cap:
+    if len(out) >= cap or bounded():
         return
+    visited[0] += 1
     try:
         role = node.getRoleName()
     except Exception:
@@ -103,10 +124,15 @@ def walk(node, out, cap=200):
                     out.append('ref_%d  %s  "%s"  (%d,%d,%d,%d)' % (len(out)+1, role, name, x, y, w, h))
         except Exception:
             pass
+    # PLANE-CONDITIONAL: prune the in-document cell grid only when the API plane owns it (PRUNE_ON, set
+    # by the harness). When the GUI plane handles an in-document task, PRUNE_ON is False so cells/targets
+    # are visible (still bounded by DEADLINE/NODE_BUDGET — the safety floor never depends on this flag).
+    if PRUNE_ON and role in PRUNE_DESCENT:
+        return
     try:
         for child in node:
             walk(child, out, cap)
-            if len(out) >= cap:
+            if len(out) >= cap or bounded():
                 break
     except Exception:
         pass
@@ -132,8 +158,10 @@ try:
         print('[focused: (desktop)]')
         for a in desktop:
             walk(a, out)
-            if len(out) >= 200:
+            if len(out) >= 200 or bounded():
                 break
+    if bounded():
+        print('[perception bounded: partial tree (deadline/budget hit)]')
     if not out:
         print('[no interactive elements]')
     for line in out:
@@ -203,6 +231,10 @@ fn format_execute(json: &serde_json::Value) -> String {
 pub struct OsworldPerceptor {
     client: OsworldClient,
     pub cache: Arc<Mutex<PerceptionCache>>,
+    /// In-document subtree pruning (default ON = fast/API-owns-content). Flipped OFF by the harness
+    /// when the GUI plane handles an in-document task. Atomic: the agent sets it from the loop while
+    /// perception reads it; no lock needed.
+    prune_doc: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl OsworldPerceptor {
@@ -211,13 +243,22 @@ impl OsworldPerceptor {
     }
 
     pub fn with_cache(host: &str, port: u16, cache: Arc<Mutex<PerceptionCache>>) -> Self {
-        Self { client: OsworldClient::new(host, port), cache }
+        Self { client: OsworldClient::new(host, port), cache,
+               prune_doc: Arc::new(std::sync::atomic::AtomicBool::new(true)) }
     }
 }
 
 impl Perceptor for OsworldPerceptor {
+    fn set_document_pruning(&self, on: bool) {
+        self.prune_doc.store(on, std::sync::atomic::Ordering::Relaxed);
+    }
+
     fn read_screen(&self) -> String {
-        let text = match self.client.run_python(PERCEIVE_PY) {
+        // Prepend the plane-conditional pruning flag the script reads (PRUNE_ON). The DEADLINE/NODE_BUDGET
+        // safety bounds inside PERCEIVE_PY are independent of this flag.
+        let prune_on = if self.prune_doc.load(std::sync::atomic::Ordering::Relaxed) { "True" } else { "False" };
+        let script = format!("PRUNE_ON = {prune_on}\n{PERCEIVE_PY}");
+        let text = match self.client.run_python(&script) {
             Ok(out) => {
                 let trimmed = out.trim().to_string();
                 if trimmed.is_empty() { "[perception unavailable]".to_string() } else { trimmed }
