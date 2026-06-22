@@ -1367,7 +1367,33 @@ pub fn equivalence_alternatives(bin: &str) -> Vec<&'static str> {
 /// substitute the first alternative ACTUALLY INSTALLED on the target (verified via `command -v`).
 /// Returns None when there's no class / no installed alternative → the caller falls to the LLM reform.
 /// The result is a pure program SWAP (same args) → inherently conservative (skips the LLM guard).
+/// Reform a `cp [-flags] DIR/<glob> DEST` that matched NOTHING (NoSuchPath — the files are NESTED, so a
+/// top-level glob can't see them) into the correct RECURSIVE form `find DIR -name '<glob>' -exec cp {} DEST/ \;`.
+/// Class-general for "copy all files matching a pattern": the (unreliable) planner names the dir, pattern,
+/// and dest correctly but often picks the wrong FORM (a flat glob) — this makes the form deterministic.
+/// `-name '*.jpg'` also keeps the extension filter exact (excludes a `.png` decoy). Pure; unit-tested.
+fn recursive_copy_reform(failed_cmd: &str) -> Option<String> {
+    let toks: Vec<&str> = failed_cmd.split_whitespace().collect();
+    if toks.first() != Some(&"cp") { return None; }
+    let operands: Vec<&str> = toks[1..].iter().copied().filter(|t| !t.starts_with('-')).collect();
+    if operands.len() != 2 { return None; }                 // exactly source + dest
+    let (src, dest) = (operands[0], operands[1]);
+    if !src.contains('*') { return None; }                  // only a glob source qualifies
+    let slash = src.rfind('/')?;
+    let (dir, pattern) = (&src[..slash], &src[slash + 1..]);
+    if dir.is_empty() || !pattern.contains('*') { return None; }
+    let dest = dest.trim_end_matches('/');
+    Some(format!("find {dir} -name '{pattern}' -exec cp {{}} {dest}/ \\;"))
+}
+
 fn deterministic_reform(failed_cmd: &str, failure: CommandFailure, actuator: &dyn Actuator) -> Option<String> {
+    // A glob `cp` that matched nothing → the files are nested → the recursive find-copy form (deterministic).
+    if failure == CommandFailure::NoSuchPath {
+        if let Some(r) = recursive_copy_reform(failed_cmd) {
+            chronos::log(&format!("deterministic_reform: glob-cp matched nothing → recursive find ({r})"));
+            return Some(r);
+        }
+    }
     if failure != CommandFailure::CommandNotFound {
         return None;
     }
@@ -3244,6 +3270,22 @@ mod distill_tests {
         assert_eq!(classify_subgoal("type the command: touch /tmp/x").action,
                    SubAction::Type("touch /tmp/x".to_string()));
         assert!(matches!(classify_subgoal("Launch the Terminal Emulator").action, SubAction::Click));
+    }
+
+    #[test]
+    fn recursive_copy_reform_rewrites_failed_glob_cp_to_find_exec() {
+        // a flat glob cp that matched nothing → the recursive find form, dir/pattern/dest preserved
+        assert_eq!(
+            recursive_copy_reform("cp -r /home/user/Desktop/photos/*.jpg /home/user/Desktop/cpjpg"),
+            Some("find /home/user/Desktop/photos -name '*.jpg' -exec cp {} /home/user/Desktop/cpjpg/ \\;".to_string()));
+        // trailing slash on dest is normalized (no double slash)
+        assert_eq!(
+            recursive_copy_reform("cp /a/b/*.txt /c/d/"),
+            Some("find /a/b -name '*.txt' -exec cp {} /c/d/ \\;".to_string()));
+        // not a glob cp → no reform (leave single-file/non-cp commands alone)
+        assert_eq!(recursive_copy_reform("cp /a/b/x.jpg /c/d"), None);
+        assert_eq!(recursive_copy_reform("mv /a/*.jpg /c"), None);
+        assert_eq!(recursive_copy_reform("cp a b c d"), None); // too many operands
     }
 
     #[test]
