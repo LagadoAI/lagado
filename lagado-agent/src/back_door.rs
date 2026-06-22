@@ -28,6 +28,35 @@ pub enum BackDoorOp {
     RunSibling { tool: String, input: String, output: String, args: Vec<String> },
 }
 
+use std::collections::HashMap;
+
+/// Map a parsed typed-verb call (verb + kwargs, from the shared Pythonic `parse_capability_call`) into a
+/// `BackDoorOp`. The model SELECTS the verb and fills slots (grammar-constrained); this validates + types
+/// it. `None` = malformed/unknown (the loop re-emits, never runs garbage). Class-general: new backends are
+/// new match arms over a typed slot, not per-app branches.
+pub fn from_call(verb: &str, kw: &HashMap<String, String>) -> Option<BackDoorOp> {
+    match verb {
+        "set_config" => {
+            let key = kw.get("key")?.clone();
+            let value = kw.get("value").cloned().unwrap_or_default();
+            let backend = match kw.get("backend").map(String::as_str) {
+                Some("dconf") => ConfigBackend::Dconf,
+                Some("gsettings") => ConfigBackend::Gsettings { schema: kw.get("schema")?.clone() },
+                Some("file") => ConfigBackend::IniFile { path: kw.get("path")?.clone() },
+                _ => return None,
+            };
+            Some(BackDoorOp::SetConfig { backend, key, value })
+        }
+        "run_sibling" => Some(BackDoorOp::RunSibling {
+            tool: kw.get("tool")?.clone(),
+            input: kw.get("input")?.clone(),
+            output: kw.get("output")?.clone(),
+            args: kw.get("args").map(|a| a.split_whitespace().map(String::from).collect()).unwrap_or_default(),
+        }),
+        _ => None,
+    }
+}
+
 /// Shell-quote a single argument (POSIX single-quote, with `'\''` escaping). Keeps model-supplied values
 /// from breaking out of the command — the `gate` is the authority on whether it RUNS, this just makes the
 /// built string faithful to the typed slots.
@@ -143,6 +172,28 @@ mod tests {
         // a missing required slot → None, never a half-built command
         let bad = BackDoorOp::RunSibling { tool: "".into(), input: "a".into(), output: "b".into(), args: vec![] };
         assert_eq!(to_command(&bad), None);
+    }
+
+    #[test]
+    fn from_call_types_the_verbs() {
+        let mut kw = HashMap::new();
+        kw.insert("backend".into(), "dconf".into());
+        kw.insert("key".into(), "/org/gnome/desktop/interface/color-scheme".into());
+        kw.insert("value".into(), "'prefer-dark'".into());
+        assert_eq!(from_call("set_config", &kw), Some(BackDoorOp::SetConfig {
+            backend: ConfigBackend::Dconf,
+            key: "/org/gnome/desktop/interface/color-scheme".into(), value: "'prefer-dark'".into() }));
+        // gsettings backend without a schema slot → None (malformed, re-emit)
+        let mut g = HashMap::new();
+        g.insert("backend".into(), "gsettings".into()); g.insert("key".into(), "k".into());
+        assert_eq!(from_call("set_config", &g), None);
+        let mut s = HashMap::new();
+        s.insert("tool".into(), "convert".into()); s.insert("input".into(), "a.png".into());
+        s.insert("output".into(), "b.png".into()); s.insert("args".into(), "-colors 256".into());
+        assert_eq!(from_call("run_sibling", &s), Some(BackDoorOp::RunSibling {
+            tool: "convert".into(), input: "a.png".into(), output: "b.png".into(),
+            args: vec!["-colors".into(), "256".into()] }));
+        assert_eq!(from_call("bogus_verb", &HashMap::new()), None);
     }
 
     #[test]

@@ -8,6 +8,7 @@
 //! to be folded fully into Rust as the UNO bridge matures. The op JSON here is the contract between the two.
 
 use serde_json::{json, Value};
+use std::collections::HashMap;
 
 /// What a cell holds. A FORMULA is the app's native tool (the live engine computes it); a literal value is
 /// for data the model writes directly. Whole numbers stay integers (the app assigns the natural type).
@@ -29,6 +30,35 @@ pub enum ApiOp {
     AddSheet { name: String, index: Option<usize> },
     /// Rename a sheet.
     RenameSheet { old: String, new: String },
+}
+
+/// Map a parsed typed-verb call (verb + kwargs, from the shared Pythonic parser) into an `ApiOp`. The model
+/// SELECTS the verb and fills slots; this validates + types it. A `formula` slot → native formula (the live
+/// engine computes it); a `value` slot → literal (numeric if it parses, else text). `None` = malformed.
+pub fn from_call(verb: &str, kw: &HashMap<String, String>) -> Option<ApiOp> {
+    match verb {
+        "set_cell" => {
+            let sheet = kw.get("sheet")?.clone();
+            let cell = kw.get("cell")?.clone();
+            let content = if let Some(f) = kw.get("formula") {
+                CellContent::Formula(f.clone())
+            } else if let Some(v) = kw.get("value") {
+                match v.parse::<f64>() {
+                    Ok(n) => CellContent::Number(n),
+                    Err(_) => CellContent::Text(v.clone()),
+                }
+            } else {
+                return None;
+            };
+            Some(ApiOp::SetCell { sheet, cell, content })
+        }
+        "add_sheet" => Some(ApiOp::AddSheet {
+            name: kw.get("name")?.clone(),
+            index: kw.get("index").and_then(|i| i.parse().ok()),
+        }),
+        "rename_sheet" => Some(ApiOp::RenameSheet { old: kw.get("old")?.clone(), new: kw.get("new")?.clone() }),
+        _ => None,
+    }
 }
 
 /// Render one op as the JSON object the apply step (`uno_apply`) consumes. `None` if a required slot is
@@ -116,6 +146,30 @@ mod tests {
             ApiOp::RenameSheet { old: "".into(), new: "x".into() },
         ];
         assert_eq!(ops_to_json(&batch), None);
+    }
+
+    #[test]
+    fn from_call_types_the_native_ops() {
+        let mut f = HashMap::new();
+        f.insert("sheet".into(), "Sheet1".into()); f.insert("cell".into(), "J2".into());
+        f.insert("formula".into(), "=B2-C2".into());
+        assert_eq!(from_call("set_cell", &f),
+                   Some(ApiOp::SetCell { sheet: "Sheet1".into(), cell: "J2".into(),
+                                         content: CellContent::Formula("=B2-C2".into()) }));
+        // a numeric value slot → Number; a non-numeric → Text
+        let mut n = HashMap::new();
+        n.insert("sheet".into(), "S".into()); n.insert("cell".into(), "A1".into()); n.insert("value".into(), "55000".into());
+        assert_eq!(from_call("set_cell", &n).unwrap(),
+                   ApiOp::SetCell { sheet: "S".into(), cell: "A1".into(), content: CellContent::Number(55000.0) });
+        let mut t = HashMap::new();
+        t.insert("sheet".into(), "S".into()); t.insert("cell".into(), "A1".into()); t.insert("value".into(), "2015_55000".into());
+        assert_eq!(from_call("set_cell", &t).unwrap(),
+                   ApiOp::SetCell { sheet: "S".into(), cell: "A1".into(), content: CellContent::Text("2015_55000".into()) });
+        let mut a = HashMap::new(); a.insert("name".into(), "Sheet2".into()); a.insert("index".into(), "0".into());
+        assert_eq!(from_call("add_sheet", &a).unwrap(), ApiOp::AddSheet { name: "Sheet2".into(), index: Some(0) });
+        // missing required slot / unknown verb → None
+        assert_eq!(from_call("set_cell", &HashMap::new()), None);
+        assert_eq!(from_call("nope", &HashMap::new()), None);
     }
 
     #[test]
