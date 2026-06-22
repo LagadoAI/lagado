@@ -196,8 +196,9 @@ Path:");
         std::process::exit(2);
     }
 
-    // OUR planner decomposes the goal (single-turn-fresh). No skills (keep the bridge deterministic/clean).
-    let steps = agent::plan_goal(&instruction, &[], &adapter);
+    // OUR planner decomposes the goal (single-turn-fresh). No skills, no discovered env (this offline
+    // bridge has no live actuator) — keep it deterministic/clean.
+    let steps = agent::plan_goal(&instruction, "", &[], &adapter);
 
     // Classify each step into a plane: a Command step runs in a guest terminal (our proven plane); a
     // Click/Type/Key step needs the GUI plane (a11y/CV/pixel) — flagged so the Python side + the per-domain

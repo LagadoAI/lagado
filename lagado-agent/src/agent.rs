@@ -604,7 +604,7 @@ fn strip_list_marker(line: &str) -> String {
 ///   untouched (zero regression on tasks that already work).
 /// - The model plan is adopted ONLY if it actually expanded a single goal into >1 step; otherwise,
 ///   or on any model error, it falls back to the original goal.
-pub fn plan_goal(goal: &str, skills: &[Skill], adapter: &Arc<dyn InferenceAdapter>) -> Vec<String> {
+pub fn plan_goal(goal: &str, env: &str, skills: &[Skill], adapter: &Arc<dyn InferenceAdapter>) -> Vec<String> {
     let syntactic = decompose_goal(goal);
     if syntactic.len() > 1 {
         return syntactic; // explicit multi-step → trust the deterministic split
@@ -628,6 +628,10 @@ pub fn plan_goal(goal: &str, skills: &[Skill], adapter: &Arc<dyn InferenceAdapte
 
 Rules:
 - One action per line. Pick the SIMPLEST surface for the goal.
+- GROUND every path in 'Current files' below: when the goal names a file or directory, use its EXACT
+  FULL absolute path from that listing (e.g. a goal saying 'photos' when the listing shows
+  /home/user/Desktop/photos → use /home/user/Desktop/photos). NEVER a bare relative name (the command
+  runs from a different directory) and NEVER an invented /path/to/... placeholder.
 - Output ONLY the steps. No narration, no 'locate'/'wait'/'verify'/'check'/'open the folder'.
 - Do NOT use sudo. Do NOT use interactive programs (nano, vim, less, top, man) — they hang.
 - A 'write to' step authors ONLY the file's real content. Put chmod/run as SEPARATE later steps —
@@ -676,6 +680,8 @@ Steps:
 Click the Applications menu
 Click Web Browser
 {skill_block}
+Current files (the command runs from the user's home directory; use these EXACT absolute paths):
+{env}
 Goal: {goal}
 Steps:"
     );
@@ -912,6 +918,17 @@ pub fn guest_home(env: &str) -> String {
 /// on the raw path. Word-level match (not substring — "transcript" must not trip "script").
 pub fn capability_expressible(goal: &str) -> bool {
     let lo = goal.to_lowercase();
+    // RECURSIVE / GLOB multi-source op → NOT a single-src→dest typed verb. The typed `copy`/`move`
+    // verbs model ONE source → ONE dest; a recursive walk or an extension/glob pattern ("any .jpg
+    // files", "all *.txt") selects MANY sources, which they can't express → the capability loop would
+    // re-author it as a single-file op and fail. Route these to the planned-command path (the planner
+    // already emits `find … -exec cp`, which the main-loop command channel runs directly). Class signal
+    // (recursion/multiplicity), NOT a per-task keyword: triggers on `recursiv*` or a `*` glob or a
+    // `.<ext> file(s)` pattern — deliberately NOT on "all/any/each" alone (too common; they're also in
+    // DISCOVER_STOPWORDS) so a single-file capability task ("copy the report to Documents") is untouched.
+    let ext_pattern = regex::Regex::new(r"\.[a-z0-9]{1,4}\b").unwrap().is_match(&lo)
+        && (lo.contains("file") || lo.contains('*'));
+    if lo.contains("recursiv") || lo.contains('*') || ext_pattern { return false; }
     // verbs/objects the typed vocab does NOT declare → gated raw-command path
     const RAW: &[&str] = &["git","gzip","gunzip","tar","zip","unzip","chmod","chown","compress",
         "commit","repository","executable","compile","make","npm","pip","curl","wget","ssh","gpg","mount"];
@@ -1755,9 +1772,14 @@ pub async fn agent_loop(
         let g = goal.clone();
         let ad = adapter.clone();
         let sl = skill_library.clone();
+        let act = actuator.clone();
         let strings = tokio::task::spawn_blocking(move || {
             let skills = sl.retrieve(&g, 3);
-            plan_goal(&g, &skills, &ad)
+            // GROUND the planner in the real filesystem (the discovered tree) so it emits absolute paths
+            // for goal-named dirs (e.g. 'photos' → /home/user/Desktop/photos) instead of bare relatives
+            // that resolve against the wrong CWD. Sync (run_command); already on the blocking pool here.
+            let env = discover_environment(act.as_ref(), &g);
+            plan_goal(&g, &env, &skills, &ad)
         })
         .await
         .unwrap_or_else(|_| decompose_goal(&goal));
@@ -3222,6 +3244,40 @@ mod distill_tests {
         assert_eq!(classify_subgoal("type the command: touch /tmp/x").action,
                    SubAction::Type("touch /tmp/x".to_string()));
         assert!(matches!(classify_subgoal("Launch the Terminal Emulator").action, SubAction::Click));
+    }
+
+    #[test]
+    fn capability_expressible_routes_recursive_and_glob_to_planned_command() {
+        // single-source file ops → the typed-capability loop (unchanged)
+        assert!(capability_expressible("copy the report to the Documents folder"));
+        assert!(capability_expressible("rename notes.txt to old.txt")); // an extension but no "file"/glob → still typed
+        assert!(capability_expressible("move the budget into Archive"));
+        // recursive / glob / extension-pattern multi-source → NOT a single typed verb → planned-command path
+        assert!(!capability_expressible(
+            "Recursively go through the folders of the 'photos' directory and copy any .jpg files into 'cpjpg'"));
+        assert!(!capability_expressible("copy all *.txt files into backup"));
+        assert!(!capability_expressible("delete every .log file under logs"));
+        // the existing undeclared-op-class routing still holds
+        assert!(!capability_expressible("git init /tmp/repo"));
+    }
+
+    #[test]
+    fn classify_task_no_focus_never_flips_stress_goals_to_in_app() {
+        // REGRESSION GUARD (no VM): with NO focused app, none of the proven file/CLI stress goals may
+        // classify as InAppSemantic (which would divert them to the API plane). App-awareness must be
+        // strictly ADDITIVE — it only activates on a real spreadsheet focus.
+        use crate::plane::{classify_task, Findings, TaskKind};
+        let none = Findings::default();
+        for g in [
+            "create a directory /tmp/proj and an empty file notes.txt inside it",
+            "delete the file /tmp/old.log",
+            "create a git repository in /tmp/repo",
+            "Recursively go through the folders of the 'photos' directory and copy any .jpg files into 'cpjpg'",
+            "turn up to the max volume",
+            "set the terminal size permanently",
+        ] {
+            assert_ne!(classify_task(g, &none), TaskKind::InAppSemantic, "flipped: {g}");
+        }
     }
 
     #[test]
