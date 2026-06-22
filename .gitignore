@@ -20,3 +20,4 @@ vm-images
 # failure (a prior crash already lost the master plan once); the repo is private
 # FOREVER and only the finished binary ships, so disaster-recovery beats secrecy.
 # Do NOT re-ignore docs/plans, and never make the repo public.
+__pycache__/
