@@ -1932,14 +1932,25 @@ pub async fn agent_loop(
     // platter) and the harness applies them THROUGH the app, instead of GUI-fumbling. Routed by the
     // plane-governor's task classification; fail-closes FAST (no 200s GUI churn). The model still authors
     // the formula (its comprehension job); the harness owns the tool + the apply. ──────────────────────
-    if matches!(crate::plane::classify_task(&goal, &crate::plane::Findings::default()),
-                crate::plane::TaskKind::InAppSemantic) {
-        chronos::log("api_plane: in-app-semantic → authoring native ops via the app's tools");
-        let checks = goal_completion_checks(&goal);
-        let verify_now = |act: &dyn Actuator| -> bool {
-            !checks.is_empty() && checks.iter().all(|c| parse_exit_code(&act.run_command(c)) == Some(0))
-        };
+    // APP-AWARE classification: read the focused app so a spreadsheet routes here by its IDENTITY, not by
+    // a verb keyword in the goal (the keyword-fragile miss). `screen_focus` parses the `[focused: X]` line.
+    let api_findings = {
+        let focus = screen_focus(&read_screen_bg(&perceptor).await);
+        crate::plane::Findings {
+            focused_app: (!focus.is_empty()).then_some(focus),
+            ..Default::default()
+        }
+    };
+    if matches!(crate::plane::classify_task(&goal, &api_findings), crate::plane::TaskKind::InAppSemantic) {
+        // The API plane is feasible ONLY when there's an API-addressable document. If there isn't, this is
+        // an in-app-semantic goal on an app the API plane can't address yet (richest-first: API → … → GUI)
+        // → FALL THROUGH to the GUI loop below, do NOT hand back (that would regress the GUI path).
         if let Some((file, structure)) = api_read_target(actuator.as_ref(), &goal) {
+            chronos::log("api_plane: spreadsheet found → authoring native ops via the app's tools");
+            let checks = goal_completion_checks(&goal);
+            let verify_now = |act: &dyn Actuator| -> bool {
+                !checks.is_empty() && checks.iter().all(|c| parse_exit_code(&act.run_command(c)) == Some(0))
+            };
             let prompt = api_plane_prompt(&goal, &structure);
             let mut ops: Vec<serde_json::Value> = Vec::new();
             for _try in 0..3 {
@@ -1971,15 +1982,16 @@ pub async fn agent_loop(
             } else {
                 chronos::log("api_plane: model authored no valid ops");
             }
+            // honest completion check — never the model's say-so; fast handback (no GUI churn)
+            if verify_now(actuator.as_ref()) {
+                complete_goal(&goal, actuator.as_ref(), &confirm_tx).await;
+            } else {
+                verify_or_handback(&goal, actuator.as_ref(), &confirm_tx,
+                    "I operated the app's tools but couldn't verify the goal — handing back.").await;
+            }
+            return;
         }
-        // honest completion check — never the model's say-so; fast handback (no GUI churn)
-        if verify_now(actuator.as_ref()) {
-            complete_goal(&goal, actuator.as_ref(), &confirm_tx).await;
-        } else {
-            verify_or_handback(&goal, actuator.as_ref(), &confirm_tx,
-                "I operated the app's tools but couldn't verify the goal — handing back.").await;
-        }
-        return;
+        chronos::log("api_plane: in-app-semantic but no API-addressable document → falling through to GUI plane");
     }
 
     loop {

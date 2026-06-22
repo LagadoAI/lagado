@@ -101,12 +101,40 @@ fn raw_classify(lo: &str) -> TaskKind {
     TaskKind::Unknown
 }
 
-/// Classify the goal into a `TaskKind`, with the ROUTING-CORRECTION (ported from the Python adapter's
-/// `_is_desktop_config` + focused-app check): a settings-shaped goal, while a real app is focused, that is
-/// NOT desktop-scoped, is really an IN-APP change — the back-door can't config-edit its way to it.
+/// Is the FOCUSED app a spreadsheet — the surface the API plane (UNO/openpyxl set_cell) addresses? The
+/// signal is the APP'S IDENTITY (the App-Intents model: the focused app declares the work surface), NOT a
+/// verb in the goal — so "fill all the blank cells" and "compute the gross profit" route the same way. The
+/// set is the apps the API plane actually serves; it grows as planes are added. Safe to widen because the
+/// api_plane branch falls THROUGH to the GUI plane when no API-addressable document is found.
+fn in_spreadsheet_app(findings: &Findings) -> bool {
+    match &findings.focused_app {
+        Some(app) => {
+            let lo = app.to_lowercase();
+            has_any(&lo, &["calc", "gnumeric", "spreadsheet", "localc"])
+        }
+        None => false,
+    }
+}
+
+/// Classify the goal into a `TaskKind`, with two ROUTING-CORRECTIONS that use GROUND-TRUTH state (the
+/// focused app) over goal phrasing:
+/// 1. APP-AWARE in-app-semantic: when a SPREADSHEET app is focused, content work on its document is
+///    in-app-semantic regardless of how the goal is worded — the app, not a keyword, is the signal. File
+///    ops (create/move a file) and DESKTOP-scoped settings are NOT in-app and keep their classification.
+/// 2. settings-shaped goal + ANY app focused + not desktop-scoped = an IN-APP change (the back-door can't
+///    config-edit its way to it). Ported from the Python adapter's `_is_desktop_config` + focused-app check.
 pub fn classify_task(goal: &str, findings: &Findings) -> TaskKind {
     let lo = goal.to_lowercase();
     let base = raw_classify(&lo);
+    // (1) A spreadsheet is focused → the work is on its document, unless it's plainly a file op or a
+    // desktop-scoped setting. Phrasing-independent (fixes the keyword-fragile miss on "fill all the
+    // blank cells"). GuiInteraction (an explicit on-screen control click) stays GUI.
+    if in_spreadsheet_app(findings)
+        && !matches!(base, TaskKind::FileSystem | TaskKind::GuiInteraction)
+        && !desktop_scoped(&lo) {
+        return TaskKind::InAppSemantic;
+    }
+    // (2) settings-shaped, any app focused, not desktop-scoped → in-app.
     if base == TaskKind::AppSettings && findings.focused_app.is_some() && !desktop_scoped(&lo) {
         return TaskKind::InAppSemantic;
     }
@@ -266,6 +294,22 @@ mod tests {
         assert_eq!(classify_task("configure the desktop wallpaper", &f), TaskKind::AppSettings);
         // and with no app focused it stays AppSettings
         assert_eq!(classify_task("configure the default unit", &Findings::default()), TaskKind::AppSettings);
+    }
+
+    #[test]
+    fn app_aware_routes_content_work_to_in_app_regardless_of_phrasing() {
+        // a spreadsheet is focused → content work is in-app-semantic even when NO verb keyword matches
+        // (the keyword-fragile miss that sent "fill all the blank cells" to Unknown → wrong plane).
+        let calc = Findings { focused_app: Some("Untitled 1 — LibreOffice Calc".into()), ..Default::default() };
+        assert_eq!(classify_task("fill all the blank cells with 0", &calc), TaskKind::InAppSemantic);
+        assert_eq!(classify_task("highlight the duplicate rows", &calc), TaskKind::InAppSemantic);
+        // but a FILE op stays a file op even with calc focused (create a sibling file, not edit content)
+        assert_eq!(classify_task("make a backup copy of the file", &calc), TaskKind::FileSystem);
+        // and an explicit on-screen control click stays GUI (the API plane can't express it)
+        assert_eq!(classify_task("click the Save button", &calc), TaskKind::GuiInteraction);
+        // a NON-spreadsheet app focused does NOT get the upgrade (gimp keeps GUI/Unknown → GUI loop)
+        let gimp = Findings { focused_app: Some("GNU Image Manipulation Program".into()), ..Default::default() };
+        assert_eq!(classify_task("fill all the blank cells with 0", &gimp), TaskKind::Unknown);
     }
 
     #[test]
