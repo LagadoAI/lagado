@@ -154,12 +154,53 @@ pub fn switch(goal: &str, stalled: PlaneId, findings: &Findings, tried: &HashSet
         .find(|&id| id != stalled && !tried.contains(&id) && plane_applicable(id, findings))
 }
 
-/// Does this step outcome mean "switch the PLANE" (vs retry on the same plane)? `PerceptionBlind` is the
-/// canonical "same model on the same read can't help — switch the plane, don't retry" signal. The
-/// supervisor aggregates stall/loop into its own `Escalate(Sense)` directive, which the caller also routes
-/// to `switch()`.
+/// Does THIS single step outcome mean "switch the PLANE now" (vs let the within-plane stepback keep
+/// working)? ONLY `PerceptionBlind` — the structural "same model on the same read can't help, retrying is
+/// pointless" signal. A single `NoChange`/`Failed` must NOT switch: the supervisor accumulates those up to
+/// its stall/retry thresholds (and the loop's settle/re-perceive/re-plan runs) before it emits `Escalate`;
+/// the governor re-aims on THAT escalation, not on one "nothing happened". One no-effect ≠ plane switch.
 pub fn switch_on_outcome(outcome: StepOutcome) -> bool {
     matches!(outcome, StepOutcome::PerceptionBlind)
+}
+
+/// Stateful loop-facing governor: a THIN decision over the stepback machinery the loop ALREADY has. The
+/// loop keeps its own locus (current sub-goal) and its own "nothing happened at the locus → step back"
+/// fallback; the governor only answers **which plane the same stepback re-aims at next**. `start()` picks
+/// the entry plane; `next()` is called when the current plane's stepback exhausts (no effect at the locus /
+/// supervisor escalate) and returns the next FEASIBLE plane, or `None` ⇒ all feasible planes exhausted ⇒
+/// the loop's existing honest handback. It does NOT re-derive targets and does NOT rebuild the stepback.
+pub struct PlaneGovernor {
+    current: PlaneId,
+    tried: HashSet<PlaneId>,
+}
+
+impl PlaneGovernor {
+    /// Pick the entry plane for the goal (a hypothesis; `next()` corrects it).
+    pub fn start(goal: &str, findings: &Findings) -> Self {
+        let current = pick(goal, findings);
+        let tried = [current].into_iter().collect();
+        Self { current, tried }
+    }
+
+    pub fn current(&self) -> PlaneId {
+        self.current
+    }
+
+    /// Re-aim the stepback at the next feasible plane (records the exhausted one). Feasibility is
+    /// re-evaluated against current findings, so a re-pick can land on a cheaper plane if the world changed.
+    /// `None` ⇒ exhausted ⇒ the loop's existing handback.
+    ///
+    /// CALL TIMING (load-bearing): only after the WITHIN-PLANE stepback has EXHAUSTED — i.e. the
+    /// supervisor's `Escalate` (accumulated stalls past its threshold) or `PerceptionBlind`. NEVER on a
+    /// single "nothing happened": one no-effect is normal (slow paint / settle / a retry-able miss), and the
+    /// loop's own settle → re-perceive → re-plan-a-different-op absorbs it first. Jumping planes on one
+    /// no-effect would thrash.
+    pub fn next(&mut self, goal: &str, findings: &Findings) -> Option<PlaneId> {
+        let n = switch(goal, self.current, findings, &self.tried)?;
+        self.tried.insert(n);
+        self.current = n;
+        Some(n)
+    }
 }
 
 #[cfg(test)]
@@ -238,5 +279,25 @@ mod tests {
         assert!(switch_on_outcome(StepOutcome::PerceptionBlind));
         assert!(!switch_on_outcome(StepOutcome::NoChange));
         assert!(!switch_on_outcome(StepOutcome::Progressed));
+    }
+
+    #[test]
+    fn stateful_governor_re_aims_then_exhausts() {
+        // GUI-interaction goal, full GUI surface: start on a11y, step back through CV → pixel → exhausted.
+        let f = gui();
+        let mut gov = PlaneGovernor::start("click the Save button", &f);
+        assert_eq!(gov.current(), PlaneId::A11y);
+        assert_eq!(gov.next("click the Save button", &f), Some(PlaneId::Cv));
+        assert_eq!(gov.next("click the Save button", &f), Some(PlaneId::Pixel));
+        assert_eq!(gov.next("click the Save button", &f), None); // all feasible planes tried → handback
+    }
+
+    #[test]
+    fn stateful_governor_file_goal_has_no_switch() {
+        // A file goal lives on the CLI launch pad; there's nothing to re-aim to → straight to handback.
+        let f = Findings::default();
+        let mut gov = PlaneGovernor::start("create a folder /tmp/x", &f);
+        assert_eq!(gov.current(), PlaneId::Cli);
+        assert_eq!(gov.next("create a folder /tmp/x", &f), None);
     }
 }
