@@ -1,5 +1,6 @@
 pub mod action_graph;
 pub mod agent;
+pub mod api_plane;
 pub mod auth;
 pub mod back_door;
 pub mod board;
