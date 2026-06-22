@@ -1,6 +1,8 @@
 mod action_graph;
 mod agent;
+mod api_plane;
 mod auth;
+mod back_door;
 mod board;
 mod bootstrap;
 mod bracket_parser;
@@ -23,6 +25,7 @@ mod memory;
 mod memory_tiers;
 mod operator;
 mod perception;
+mod plane;
 mod projector;
 mod recovery;
 mod retrieval;
