@@ -106,14 +106,18 @@ environment. The sibling `discover_environment:846` already does `$HOME` correct
 - **#5 planner de-exemplar** — dropped GIMP menu recipes from `--next` and the GNOME/audio tool-list from
   `--verify`; kept the general technique (knowledge-of-the-app menu path; read-only exit-0 check).
 
-**DEFERRED — need LIVE verification (won't change blind; a wrong value is worse than a known-stable one):**
-- **#2 main adapter `CONTEXT_SIZE=32768`** — the correct value is the GOVERNOR'S PLANNED ctx (what the
-  server actually runs at), not the GGUF max (using max would over-budget `assemble_context` if the server
-  runs smaller). Needs the startup sequence wired + an app smoke test.
-- **#2 sampling params** (`GEN2_MIN_P`/`GEN25_TOP_K`/`REPEAT_PENALTY`) — route through `EnginePrefs`
-  (governor/user); plumbing + live inference check.
-- **#4 VM literals → `VmConfig`** (user/host/port/geometry/`DISPLAY`) — runtime VM path; needs a guest boot.
-- **#9 VLM patch grid** — derive from the encoder grid; latent (patch path unwired), needs the FFI path.
+**DEPRIORITIZED (user directive 2026-06-21 — "focus everything on the harness, not the app or our VM; test
+in the OSWorld VM"). These are APP-startup / our-VM concerns, not the harness path under test:**
+- **#2 main adapter `CONTEXT_SIZE=32768`** — APP (Tauri main.rs) path. The correct value is the GOVERNOR'S
+  output: the governor reviews HARDWARE → suggests a model TIER (no-GPU/low-RAM → an edge model, e.g.
+  Liquid) → ctx derived from that computation. `governor::plan_engine` already derives ctx/offload from
+  hardware+GGUF; the genuinely-unbuilt piece is model-SELECTION-by-hardware (`liquid.rs::select_model` is a
+  stub), and the app adapter consuming the governor's planned ctx (the 32768 is that missing consumption).
+  Not the harness — deferred until the app path is the focus.
+- **#2 sampling params** → route through `EnginePrefs` (governor/user). App-config; deferred.
+- **#4 VM literals → `VmConfig`** — OUR VM path; we are NOT building our VM now (testing in the OSWorld VM,
+  where `guest_home`'s discovery already handles `/home/user`). DROPPED for now.
+- **#9 VLM patch grid** — latent (patch path unwired); deferred.
 
 **Re-scoped after closer look (NOT a blind box-tick):**
 - **#8 modal rail in `reload_into_focus`** — a *blanket* post-load dialog-dismiss is UNSAFE (wrong-button:
