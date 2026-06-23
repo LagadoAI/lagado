@@ -12,16 +12,45 @@ USER DIRECTIVE (2026-06-23, the governing thesis for the next phase):
   (hand-iterated) → never in a headline number; test on HELD-OUT (never-opened) tasks. Pre-register
   predictions. Report ALL results incl. failures. Stop OSWorld runs with SIGINT (-2), never kill -9.
 
-## THE LOCATED FAILURE (the concrete moment to build for)
-De-leaded 035f41ba via chat template = 0/3. The model's reasoning began **"Step 1: Calculate Net Sales by
-subtracting Sales Return from Sales…"** — a correct START of a multi-step computation — but the grammar-
-constrained EMIT captured ONLY step 1: gross profit = `{Sales}-{Sales Return}` (=B2-C2), omitting every
-expense. Gold = `=B2-C2-D2-SUM(F2:H2)`.
-⇒ **Failure moment = the reason→emit transition: multi-step reasoning intent COLLAPSES to a single-step
-formula.** The model wasn't incapable (step 1 was right and it signalled "Step 1" implying more); the
-interaction gave it no way to carry/continue the plan. THIS is what to build for — not "make it smarter."
+## THE LOCATED FAILURE — CORRECTED 2026-06-23 (the prior account below was a MISREAD)
+
+⚠️ **SUPERSEDED.** The earlier text said the model "collapsed to step 1 (gross profit = B2-C2), omitting
+every expense." That was wrong — it was a misreading of a one-line log SUMMARY, never the raw reasoning.
+Reading the actual JSONL (`/tmp/lagado_battery/calc_035f41ba.jsonl`, no VM needed) overturns it.
+
+WHAT THE MODEL ACTUALLY DID (de-leaded, chat template, all 3 runs):
+- Reasoning was **complete and correct**: Net Sales = Sales−Returns; Total COGS = Materials+Labor+Overhead;
+  Gross Profit = NetSales−COGS; then Sheet2 = Year & "_" & GrossProfit.
+- Emit (runs 0,2) was **complete**: it authored all of E (Net Sales), I (Total COGS), J (Gross Profit) as a
+  sensible HELPER-COLUMN decomposition, plus Sheet2. No collapse. (Run 1 = a grammar non-termination repeat.)
+
+WHY IT STILL SCORED 0 — three INDEPENDENT factors, NONE of them "comprehension absent":
+1. **Helper-column vs whole-sheet-gold mismatch (dominant/structural).** Gold fills ONLY J
+   (`=B2-C2-D2-SUM(F2:H2)`) and leaves E & I EMPTY. The evaluator (`compare_table` → `sheet_data`) does
+   `df.equals` over the WHOLE sheet, so the model's filled E/I (its correct intermediates) are extra cells →
+   mismatch. The model's good practice is punished by a single-combined-column gold.
+2. **Harness fill bug.** `set_formula_range` (uno_ops.py:137) seeds the top cell then `fillAuto(TO_BOTTOM,1)`;
+   the readback shows `B2-C2 → B2-C3 → B2-C4` — only the LAST ref adjusts per row (looks like series-
+   extension on the trailing number, not a relative formula copy). Every row past the seed is wrong. MASKED
+   on single-reference golds (where "only ref adjusts" == correct), which is why prior golds didn't expose it.
+   SYMPTOM is fact (in the log); fillAuto root-cause is a hypothesis to confirm on the guest.
+3. **One dropped term.** Model omitted column D (Discounts and Allowances) from the expenses → J short by D.
+   A genuine but SINGLE-term comprehension slip — not a collapse.
+
+⇒ **Corrected failure account:** the model COMPREHENDED this task (one-term slip aside). The 0/3 is dominated
+by INTERACTION + a HARNESS DEFECT — exactly the user's thesis. The real levers are now (1) the pure fill-bug
+fix [harness defect, unambiguous], (2) output-SHAPE: write only the requested target as one combined formula
+(or deterministically INLINE the model's own helpers — algebra, not leading), (3) the residual term-
+completeness gap (1 of 6 terms). Iterative ReAct (old "prime suspect #1") would NOT have fixed any of these.
+Full evidence + corrected ranking: this section + PREDICTIONS.md Test 0b CORRECTION.
 
 ## VARIABLE MATRIX — every controllable interaction variable, each to be MEASURED (held-out, ablated one at a time)
+⚠️ RE-AIMED 2026-06-23 by the corrected log read: variable #1 (iterative ReAct) is NO LONGER the prime
+suspect — it would not fix the helper-column shape, the fill bug, or the dropped term. New top priorities:
+**fill-bug fix (pure defect)**, then **#5 output granularity / shape** (single combined target vs helper
+columns — incl. deterministic algebraic INLINING of the model's own helpers), then **#2 reason→emit fidelity
+re-scoped to "term completeness"** (did all required input terms make it in — here D was dropped). The matrix
+below is kept for the remaining variables; re-rank against the corrected failure account above.
 | # | Variable | Hypothesis (why it may be the lever) | How to get hard data |
 |---|---|---|---|
 | 1 | **Loop structure: one-shot vs iterative ReAct** (emit step → OBSERVE result → continue) | PRIME SUSPECT — directly addresses step-1-collapse; let it compute Net Sales, see it, continue to subtract expenses | gold rate one-shot vs iterative, held-out |

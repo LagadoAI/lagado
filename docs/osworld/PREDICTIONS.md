@@ -49,7 +49,20 @@ without the hint. Outcomes: golds 2-3/3 → 0/3 was a malformed-call artifact, m
 stays 0-1/3 → genuine comprehension/narrowness limit in the MODEL (template doesn't rescue) → stop blaming the
 harness, the answer is a better/base model or (b) completed-unverified.
 
-### RESULT (2026-06-23): **0/3 via chat template. Drift FIXED, comprehension ABSENT.**
+### ⚠️ CORRECTION (2026-06-23, after reading the RAW reasoning — the result below was MIS-DIAGNOSED).
+"Comprehension ABSENT" is WRONG. I read a one-line log summary, not the raw reasoning. The actual JSONL shows
+the de-leaded model REASONED CORRECTLY and COMPLETELY (Net Sales=Sales−Returns; COGS=Materials+Labor+Overhead;
+Gross Profit=NetSales−COGS; Sheet2 concat) and EMITTED a complete helper-column decomposition (E, I, J + Sheet2).
+It did NOT "get stuck at step 1." The 0/3 comes from THREE factors, none of them absent comprehension:
+(1) the gold fills ONLY J and leaves Net Sales(E)/Total-COGS(I) EMPTY, but the evaluator `df.equals` the whole
+sheet → the model's correct helper columns are extra cells → mismatch (DOMINANT); (2) a HARNESS fill bug —
+`set_formula_range`'s `fillAuto` produced `B2-C3,B2-C4…` (only the last ref adjusts), wrong for every row past
+the seed, masked on single-ref golds; (3) the model dropped ONE term, column D (Discounts and Allowances).
+NET: the user's thesis (it's our approach + harness, not comprehension) is VINDICATED on this task. The
+"genuine comprehension limit / stronger-or-base-model" conclusion below is WITHDRAWN. See INVESTIGATION_PLAN
+"THE LOCATED FAILURE — CORRECTED 2026-06-23".
+
+### RESULT (2026-06-23): **0/3 via chat template. [MIS-DIAGNOSED — see CORRECTION above.]**
 All 3 runs authored gross profit = `{Sales}-{Sales Return}` (=B2-C2) — subtracted ONLY returns, OMITTED every
 expense (gold = =B2-C2-D2-SUM(F2:H2)). Reasoning got stuck at "Step 1: calculate Net Sales" and called that
 gross profit. ⇒ The chat template removed the drift (coherent reasoning, real ops) — so 0/3 is THE MODEL, not
