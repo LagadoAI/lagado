@@ -206,22 +206,32 @@ def compose_feedback(fails, fired):
             lines.append("- the column %s left %d cells empty — cover every data row." % (f["range"], f.get("empty")))
     return "\n".join(lines)
 
+CHAT = "http://localhost:8080/v1/chat/completions"   # applies the GGUF's own chat template (model-agnostic)
+
+def _chat(content, grammar=None, temperature=0.0, seed=7, max_tokens=800):
+    """Invoke the model via its native chat template (correct way to address an instruct model — the raw
+    /completion call drifts because the model can't find the turn boundary). NO system message added beyond
+    the model's own default; the user content is unmodified. grammar is llama.cpp's passthrough extension."""
+    body = {"messages": [{"role": "user", "content": content}], "temperature": temperature,
+            "seed": seed, "max_tokens": max_tokens}
+    if grammar:
+        body["grammar"] = grammar
+    r = requests.post(CHAT, json=body, timeout=200)
+    return r.json()["choices"][0]["message"]["content"]
+
 def author_B(instr, detected, log, feedback=None, temperature=0.0):
     cards = candidate_cards(detected)
     seed = int(temperature * 1000) + 7            # vary seed with temp so the 2nd derivation is independent
-    # call 1: REASON (no grammar — free reasoning over names)
-    r1 = requests.post(BRAIN, json={"prompt": REASON_PROMPT.format(instr=instr, cards=cards),
-                                    "temperature": temperature, "seed": seed, "n_predict": 400}, timeout=200)
-    reasoning = r1.json().get("content", "").strip()
+    # call 1: REASON (no grammar — free reasoning)
+    reasoning = _chat(REASON_PROMPT.format(instr=instr, cards=cards),
+                      temperature=temperature, seed=seed, max_tokens=400).strip()
     log.setdefault("reasoning", reasoning)
-    # call 2: EMIT (grammar-constrained, names in braces). On retry, prepend the specific fault.
+    # call 2: EMIT (grammar-constrained). On retry, append the specific fault.
     emit = EMIT_PROMPT.format(instr=instr, cards=cards, reasoning=reasoning)
     if feedback:
         emit += ("\n\nYour PREVIOUS attempt had these problems — fix exactly these and re-emit ALL "
                  "operations:\n%s" % feedback)
-    r2 = requests.post(BRAIN, json={"prompt": emit, "grammar": GRAMMAR_B, "seed": seed,
-                                    "temperature": temperature, "n_predict": 800}, timeout=200)
-    raw = r2.json().get("content", "")
+    raw = _chat(emit, grammar=GRAMMAR_B, temperature=temperature, seed=seed, max_tokens=800)
     log.setdefault("emit_raw", [])
     log["emit_raw"].append(raw)
     return parse_B_nameops(raw)

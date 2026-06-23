@@ -39,6 +39,29 @@ Note on EMIT prompt: it lists the available operations + output format (the capa
 signatures") — kept, as the model must know its action set; it carries no answer hint. Flag for the user if
 even that is considered leading.
 
+## Test 0b — de-leaded 035f41ba via the CHAT TEMPLATE, N=3 (mechanical: is 0/3 real or a malformed call?)
+Change: route the (already de-leaded) reasoning+emit calls through the model's chat endpoint
+(/v1/chat/completions — llama.cpp applies the GGUF's own template) instead of raw /completion. Mechanical fix
+applied uniformly to BOTH calls; NO content change, NO hints. One run only (no iterating).
+PREDICTION (committed before run): **fixes the DRIFT (model emits real ops, not dialogue) but comprehension
+stays hard un-led → predict ≤1/3.** Specifically: I lean that it will NOT reliably exclude the E/I subtotals
+without the hint. Outcomes: golds 2-3/3 → 0/3 was a malformed-call artifact, model CAN do it asked correctly;
+stays 0-1/3 → genuine comprehension/narrowness limit in the MODEL (template doesn't rescue) → stop blaming the
+harness, the answer is a better/base model or (b) completed-unverified.
+
+### RESULT (2026-06-23): **0/3 via chat template. Drift FIXED, comprehension ABSENT.**
+All 3 runs authored gross profit = `{Sales}-{Sales Return}` (=B2-C2) — subtracted ONLY returns, OMITTED every
+expense (gold = =B2-C2-D2-SUM(F2:H2)). Reasoning got stuck at "Step 1: calculate Net Sales" and called that
+gross profit. ⇒ The chat template removed the drift (coherent reasoning, real ops) — so 0/3 is THE MODEL, not
+a malformed call. Prediction held on headline (≤1/3 ✓, got 0/3) but my mechanism guess was WRONG: un-led the
+model doesn't double-count subtotals, it UNDER-computes — meaning my leading prompt was supplying the WHOLE
+multi-term formula, not just subtotal-avoidance. The prior gold was mine more than admitted.
+INTEGRITY SURVIVOR: 0/3 but **0 false passes** — corroboration saw der1≠der2 (confused answer VARIED) and
+ABSTAINED. The harness did not claim the wrong answer was done. Net: "conditions not capability" overstated;
+deterministic machinery + integrity layer (resolve/fail-closed/P3/P4/corroboration-abstain) are the real,
+surviving moat; the 7B's un-aided comprehension is not. Next is NOT a better prompt — it's a stronger/base
+model or (b) completed-unverified as the standing stance.
+
 ## Test A — perspective-diverse corroboration, HONEST form
 der2 stays SYMMETRIC with der1 (same neutral prompt, only different temperature/seed — a smarter der2 lens
 would be a lead one level removed). So (a) = sampling-diversity corroboration; it can only catch errors that
