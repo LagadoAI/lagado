@@ -91,9 +91,19 @@ def apply_one_op(doc, resolve_sheet, op):
         if sheets.hasByName(op["old"]):
             sheets.getByName(op["old"]).Name = op["new"]
     elif kind == "copy_sheet":
-        # Duplicate a sheet WITH its data (the app's "Move/Copy Sheet"). UNO copyByName(src, dest, index).
+        # Duplicate a sheet WITH its data (the app's "Move/Copy Sheet"). UNO copyByName(src, dest, index)
+        # inserts the copy AT index. `before` places the copy immediately before a named sheet (the index
+        # of that sheet); tolerant of "Sheet 2"/"Sheet2"/case. Absent/unknown before → append at the end.
         src, dest = op["source"], op["new"]
-        idx = op.get("index", sheets.Count)
+        before = (op.get("before") or "").strip()
+        idx = sheets.Count
+        if before:
+            names = [sheets.getByIndex(i).Name for i in range(sheets.Count)]
+            norm = lambda s: s.replace(" ", "").lower()
+            for i, nm in enumerate(names):
+                if nm == before or norm(nm) == norm(before):
+                    idx = i
+                    break
         if sheets.hasByName(src) and not sheets.hasByName(dest):
             sheets.copyByName(src, dest, idx)
     elif kind == "set":

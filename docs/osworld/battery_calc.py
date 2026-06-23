@@ -152,7 +152,7 @@ GRAMMAR_B = (
     ' | "set_cell(sheet=" str ", cell=" str ", value=" str ")"'
     ' | "add_sheet(name=" str ")"'
     ' | "rename_sheet(old=" str ", new=" str ")"'
-    ' | "copy_sheet(source=" str ", new=" str ")"'
+    ' | "copy_sheet(source=" str ", new=" str ", before=" str ")"'
     ' | "total_row(sheet=" str ", label=" str ", columns=" str ")"'
     ' | "format_cells(sheet=" str ", range=" str ", font_color=" str ", fill_color=" str ", bold=" str ")"'
     ' | "merge_cells(sheet=" str ", range=" str ")"'
@@ -189,7 +189,7 @@ EMIT_PROMPT = (
     "  set_cell(sheet=\"S\", cell=\"A1\", value=\"...\")     set one literal cell\n"
     "  add_sheet(name=\"S\")                                add a sheet\n"
     "  rename_sheet(old=\"S\", new=\"S2\")                   rename a sheet\n"
-    "  copy_sheet(source=\"S\", new=\"S2\")                  duplicate a sheet WITH its data\n"
+    "  copy_sheet(source=\"S\", new=\"S2\", before=\"S3\")    duplicate a sheet WITH its data, placed before sheet S3 (before=\"\" to append)\n"
     "  total_row(sheet=\"S\", label=\"Total\", columns=\"{{Header1}},{{Header2}}\")  add a row that SUMs each named column\n"
     "  format_cells(sheet=\"S\", range=\"A1:C1\", font_color=\"#rrggbb\", fill_color=\"#rrggbb\", bold=\"true\")  style cells (leave a field \"\" to skip it)\n"
     "  merge_cells(sheet=\"S\", range=\"A1:C1\")             merge a cell range\n"
@@ -262,7 +262,8 @@ def parse_B_nameops(text):
         elif verb == "rename_sheet":
             nameops.append({"kind": "rename_sheet", "old": kw.get("old"), "new": kw.get("new")})
         elif verb == "copy_sheet":
-            nameops.append({"kind": "copy_sheet", "source": kw.get("source"), "new": kw.get("new")})
+            nameops.append({"kind": "copy_sheet", "source": kw.get("source"), "new": kw.get("new"),
+                            "before": kw.get("before", "")})
         elif verb == "set_cell" and "value" in kw:
             nameops.append({"kind": "set_cell", "sheet": kw.get("sheet"), "cell": kw.get("cell"),
                             "value": coerce(kw["value"])})
@@ -304,7 +305,8 @@ def apply_B(g, nameops, log):
                 live = live_detect(g)
         elif k == "copy_sheet":
             if nop.get("source") in live and nop.get("new") not in live:   # idempotent (safe on retry)
-                g.client("apply", {"op": {"op": "copy_sheet", "source": nop["source"], "new": nop["new"]}})
+                g.client("apply", {"op": {"op": "copy_sheet", "source": nop["source"], "new": nop["new"],
+                                          "before": nop.get("before", "")}})
                 live = live_detect(g)
         elif k == "set_cell":
             g.client("apply", {"op": {"op": "set", "sheet": nop["sheet"], "cell": nop["cell"],
