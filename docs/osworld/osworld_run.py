@@ -22,8 +22,13 @@ specs = sys.argv[1:] or ["libreoffice_calc:2"]
 plan = []
 for s in specs:
     dom, _, n = s.partition(":")
-    for tf in sorted(glob.glob(f"{EXDIR}/{dom}/*.json"))[:int(n or 3)]:
-        plan.append((dom, tf))
+    # `dom:<task-id-prefix>` (non-digit or >=5 chars) targets a specific task; else `dom:<count>`.
+    if n and (not n.isdigit() or len(n) >= 5):
+        for tf in sorted(glob.glob(f"{EXDIR}/{dom}/{n}*.json")):
+            plan.append((dom, tf))
+    else:
+        for tf in sorted(glob.glob(f"{EXDIR}/{dom}/*.json"))[:int(n or 3)]:
+            plan.append((dom, tf))
 print(f"=== WHOLE Lagado HARNESS × OSWorld | {len(plan)} tasks ===", flush=True)
 
 env = DesktopEnv(provider_name="docker", action_space="pyautogui", screen_size=(1920, 1080),
@@ -42,6 +47,13 @@ for dom, tf in plan:
         agent_out = (r.stdout or "").strip()[-300:]
         if r.returncode != 0:
             agent_out += f"  [rc={r.returncode}] {(r.stderr or '')[-200:]}"
+        # With OSW_TRACE, surface the bin's stderr tail (the timing/plane trace, incl.
+        # reconciled_via_session=) so we can see which plane handled the task.
+        if os.environ.get("OSW_TRACE") and r.stderr:
+            for ln in r.stderr.splitlines():
+                if any(k in ln for k in ("reconciled_via_session", "native session", "one-shot floor",
+                                         "session deploy", "api session", "api_plane")):
+                    print(f"   trace: {ln.strip()}", flush=True)
         score = env.evaluate() or 0.0
     except subprocess.TimeoutExpired:
         agent_out = "(agent timed out)"
