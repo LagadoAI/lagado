@@ -23,6 +23,7 @@ mod liquid;
 mod mcp;
 mod memory;
 mod memory_tiers;
+mod native_session;
 mod operator;
 mod perception;
 mod plane;

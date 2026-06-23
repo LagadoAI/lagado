@@ -23,6 +23,7 @@ pub mod liquid;
 pub mod mcp;
 pub mod memory;
 pub mod memory_tiers;
+pub mod native_session;
 pub mod operator;
 pub mod perception;
 pub mod plane;
