@@ -165,12 +165,13 @@ def candidate_cards(detected):
     return "\n".join(lines)
 
 REASON_PROMPT = (
-    "You are filling in a spreadsheet. Reason BEFORE acting.\n\n"
+    # NEUTRAL to the bone: goal + observed data + a generic "think" trigger. NO solution schema (no "which
+    # are inputs / target / computation" — that decomposes the problem FOR the model = leading). The model
+    # must derive the entire approach itself. Anything beyond a task-agnostic CoT trigger is cheating.
+    "You are operating a spreadsheet.\n\n"
     "Goal: {instr}\n\n"
     "Columns present (read from the sheet itself):\n{cards}\n\n"
-    "Think step by step IN THE COLUMN NAMES (not letters): which columns are the inputs, which is the "
-    "target, and what is the exact arithmetic? Watch for columns that are themselves SUBTOTALS of others "
-    "(do not double-count a subtotal with its parts). Write 2-5 sentences of reasoning, then stop.")
+    "Think step by step, then stop.")
 
 EMIT_PROMPT = (
     "Goal: {instr}\n\n"
