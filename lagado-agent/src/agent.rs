@@ -2045,47 +2045,63 @@ pub async fn agent_loop(
                     let session = std::sync::Arc::new(ns);
                     let mut s_authored: Vec<String> = Vec::new();
                     let mut s_oplog: usize = 0;
-                    let mut live_structure = structure.clone();
-                    {
-                        let s = session.clone();
-                        if let Ok(Ok(st)) = tokio::task::spawn_blocking(move || s.structure()).await {
-                            live_structure = format!("{structure}\n[live doc] {st}");
-                        }
-                    }
+                    // Author against the CLEAN structure (same as the floor). Earlier this appended a raw
+                    // live `structure()` JSON dump as "observation" — but that made the model reply "done"
+                    // at step 0 (a populated-looking doc reads as "already complete"), authoring 0 ops and
+                    // REGRESSING below the floor. The live read still gates apply/health/reconcile; feeding
+                    // observation into AUTHORING usefully (so it beats the floor on completeness without
+                    // triggering false-"done") is the observed_complete research, deferred. Progress is
+                    // tracked via s_authored, which api_step_prompt already shows the model.
+                    let live_structure = structure.clone();
                     let mut wedged = false;
+                    let mut last_attempt: Option<String> = None;
+                    let mut consecutive_bad = 0u8;
                     for _step in 0..SESSION_MAX_OPS {
                         let step_prompt = api_step_prompt(&goal, &live_structure, &s_authored);
                         let ad = adapter.clone();
                         let raw = tokio::task::spawn_blocking(move || ad.generate(&step_prompt, 96, 0.0).ok())
                             .await.ok().flatten().unwrap_or_default();
+                        // INSTRUMENT: log the model's raw authoring output so a 0-op session is diagnosable.
+                        chronos::log(&format!("api session step {_step} raw: {}",
+                            raw.replace('\n', " ").chars().take(180).collect::<String>()));
                         let next = scan_op_calls(&raw).into_iter()
                             .find_map(|(verb, kw)| crate::api_plane::from_call(&verb, &kw)
                                 .and_then(|op| crate::api_plane::op_to_json(&op)));
-                        let Some(op) = next else { break };          // done / no new op → stop
+                        let Some(op) = next else {
+                            chronos::log(&format!("api session step {_step}: no op parsed → stop (s_oplog={s_oplog})"));
+                            break;                                   // model done / unparseable → stop
+                        };
                         let op_s = op.to_string();
-                        if s_authored.last() == Some(&op_s) { break; } // no-progress
+                        // No-progress: an already-applied op or an immediate re-author of the last attempt.
+                        if s_authored.contains(&op_s) || last_attempt.as_deref() == Some(op_s.as_str()) {
+                            chronos::log(&format!("api session step {_step}: repeat op (no-progress) → stop"));
+                            break;
+                        }
+                        last_attempt = Some(op_s.clone());
                         let s = session.clone();
                         let op_j = op.clone();
                         let applied = tokio::task::spawn_blocking(move || s.apply(&op_j)).await
                             .unwrap_or_else(|_| Err("join".to_string()));
                         match applied {
                             Ok(()) => {
+                                chronos::log(&format!("api session step {_step} apply ok: {op_s}"));
                                 s_authored.push(op_s);
                                 s_oplog += 1;
-                                // OBSERVE: re-read the live doc so the NEXT op is authored against what's
-                                // actually present now (kills premature-"done" + dropped ops).
-                                let s = session.clone();
-                                if let Ok(Ok(st)) = tokio::task::spawn_blocking(move || s.structure()).await {
-                                    live_structure = format!("{structure}\n[live doc] {st}");
-                                }
+                                consecutive_bad = 0;
                             }
                             Err(e) => {
-                                // daemon alive → bad op: stop, reconcile what applied. Dead → wedge→floor.
+                                // Daemon DEAD → wedge → floor. Daemon ALIVE → bad op: log, SKIP it, and
+                                // CONTINUE authoring (one rejected op must NOT abort the whole session);
+                                // last_attempt guards an identical re-author, consecutive_bad bounds a run.
                                 let s = session.clone();
                                 let healthy = tokio::task::spawn_blocking(move || s.healthy()).await.unwrap_or(false);
-                                chronos::log(&format!("api session op error (healthy={healthy}): {e}"));
-                                if !healthy { wedged = true; }
-                                break;
+                                chronos::log(&format!("api session step {_step} apply REJECTED (healthy={healthy}): {e} | op={op_s}"));
+                                if !healthy { wedged = true; break; }
+                                consecutive_bad += 1;
+                                if consecutive_bad >= 3 {
+                                    chronos::log("api session: 3 consecutive bad ops → stop");
+                                    break;
+                                }
                             }
                         }
                     }
