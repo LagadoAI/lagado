@@ -93,3 +93,27 @@ are EXPECTED op-vocab failures — they must fail-closed / not false-pass, and a
 PREDICTION (committed before run): held-out gold rate is LOW (single digits %); the dominant failure is
 authored-but-wrong + false-pass on compute tasks, plus op-vocab fail on chart/pivot/format. I do NOT expect
 the 035f41ba result to generalize.
+
+### Test C-fix — HELD-OUT sweep WITH the leading-'=' fill fix (committed BEFORE the run, 2026-06-23)
+Set: the 30 NEVER-opened calc tasks (`battery_breadth.py heldout` — 47 minus the 16 keyword-SAMPLE minus
+12382c62; validated: clean partition, no overlap, all resolve). Change vs the prior breadth run: the fill
+fix (commit 5852a52) is now IN — every multi-reference formula and concatenation actually computes instead
+of silently storing text. This is the FIRST clean measurement of where the calc loop stands once the
+mechanical fill defect is removed; it ranks the NEXT bottleneck.
+What the fix should move: tasks whose ONLY problem was the missing '=' (multi-ref formula columns) →
+WRONG/ABSTAIN → GOLD. What it does NOT touch: (1) helper-column-vs-whole-sheet-gold shape (model fills
+intermediates the gold leaves empty), (2) genuine comprehension (dropped/extra terms), (3) op-vocab ceiling
+(chart/pivot/format/sort have no verb → must FAIL-CLOSED, never false-pass).
+PREDICTION (committed before run):
+- GOLD: **3–8 / 30** (10–27%). Honestly uncertain; lean low end. The fill fix is real but helper-shape +
+  comprehension + op-vocab cap most tasks. A result of 0–2 would say the fix barely generalizes; ≥10 would
+  surprise me (re-examine for any contamination).
+- DOMINANT non-gold buckets (predicted order): helper-shape/whole-sheet mismatch ≈ WRONG(authored,oracle=0)
+  and ABSTAIN(uncorroborated); op-vocab FAIL-CLOSED on chart/pivot/format; then genuine comprehension.
+- FALSE PASSES (the integrity line): **≤ 2 / 30**, ideally 0. Any false pass is the most important thing to
+  inspect — corroboration + falsifiers are supposed to hold this near zero even when the model is wrong.
+- I do NOT expect a single task's behavior to dominate; report per-task attribution in full, failures included.
+FALSIFIERS for my own claims: if GOLD ≫ prediction with no contamination → the fill bug was a bigger share of
+all calc failure than I think (good, but re-scope). If FALSE PASSES > 2 → the integrity layer has a hole the
+fill fix exposed (formulas now compute, so wrong-but-plausible values can slip the falsifiers) → integrity
+work jumps the queue ahead of comprehension.

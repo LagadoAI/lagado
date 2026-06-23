@@ -24,6 +24,15 @@ SAMPLE = ["01b269ae", "035f41ba", "04d9aeaf", "0bf05a7d", "1273e544", "1e8df695"
           "357ef137", "42e0a640", "4de54231", "4e6fcf72", "7e429b8d", "7efeb4b1", "d681960f",
           "ecb0df7a", "f9584479"]
 
+# HELD-OUT = the 30 calc tasks NEVER opened/referenced in any driver/doc (the 47-task suite minus the 16
+# keyword-SAMPLE above and 12382c62, the known chart-break). The clean transfer set: no task here informed
+# any prompt, threshold, or fix. Run with `battery_breadth.py heldout`. (anti-cherry-pick: the WHOLE set,
+# chart/pivot/format included — those are EXPECTED op-vocab fails, reported not hidden.)
+HELDOUT = ["0326d92d", "0a2e43bf", "0cecd4f3", "1334ca3e", "1954cced", "1d17d234", "1de60575", "21ab7b40",
+           "21df9241", "2bd59342", "30e3e107", "347ef137", "37608790", "3a7c8185", "3aaa4e37", "4172ea6e",
+           "4188d3a4", "4f07fbe9", "51719eea", "51b11269", "535364ea", "6054afcb", "6e99a1ad", "7a4e4bc8",
+           "8b1ce5f2", "a01fbce3", "a9f325aa", "aa3a8974", "abed40dc", "eb03d19a"]
+
 def attribution(score, log):
     if score >= 1.0:
         return "GOLD"
@@ -40,7 +49,11 @@ def attribution(score, log):
     return "WRONG(authored, oracle=0)"
 
 def main():
-    ids = sys.argv[1:] or SAMPLE
+    argv = sys.argv[1:]
+    if argv == ["heldout"]:
+        ids = HELDOUT
+    else:
+        ids = argv or SAMPLE
     files = []
     for i in ids:
         g = sorted(glob.glob("%s/%s*.json" % (EX, i)))
