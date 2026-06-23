@@ -2027,6 +2027,88 @@ pub async fn agent_loop(
             let verify_now = |act: &dyn Actuator| -> bool {
                 !checks.is_empty() && checks.iter().all(|c| parse_exit_code(&act.run_command(c)) == Some(0))
             };
+            // RICHEST RUNG — NATIVE SESSION (P2c, ADDITIVE): try the resident UNO daemon FIRST, driving
+            // the doc one op at a time WITH per-op observation (the completeness signal; proven on the
+            // real bench in P2a). SELF-CONTAINED — it shares no state with the proven block below. On ANY
+            // wedge (deploy fail, op error with a dead daemon, reconcile fail) it leaves
+            // reconciled_via_session=false and the PROVEN one-shot block runs UNCHANGED (byte-identical,
+            // only guarded). The floor (build_guest_apply) is never modified.
+            let mut reconciled_via_session = false;
+            {
+                let act = actuator.clone();
+                let f = file.clone();
+                let session = tokio::task::spawn_blocking(move || crate::native_session::NativeSession::deploy_and_open(act, &f))
+                    .await.ok()
+                    .and_then(|r| r.map_err(|e| chronos::log(&format!("api session deploy failed (→ floor): {e}"))).ok());
+                if let Some(ns) = session {
+                    const SESSION_MAX_OPS: usize = 12;
+                    let session = std::sync::Arc::new(ns);
+                    let mut s_authored: Vec<String> = Vec::new();
+                    let mut s_oplog: usize = 0;
+                    let mut live_structure = structure.clone();
+                    {
+                        let s = session.clone();
+                        if let Ok(Ok(st)) = tokio::task::spawn_blocking(move || s.structure()).await {
+                            live_structure = format!("{structure}\n[live doc] {st}");
+                        }
+                    }
+                    let mut wedged = false;
+                    for _step in 0..SESSION_MAX_OPS {
+                        let step_prompt = api_step_prompt(&goal, &live_structure, &s_authored);
+                        let ad = adapter.clone();
+                        let raw = tokio::task::spawn_blocking(move || ad.generate(&step_prompt, 96, 0.0).ok())
+                            .await.ok().flatten().unwrap_or_default();
+                        let next = scan_op_calls(&raw).into_iter()
+                            .find_map(|(verb, kw)| crate::api_plane::from_call(&verb, &kw)
+                                .and_then(|op| crate::api_plane::op_to_json(&op)));
+                        let Some(op) = next else { break };          // done / no new op → stop
+                        let op_s = op.to_string();
+                        if s_authored.last() == Some(&op_s) { break; } // no-progress
+                        let s = session.clone();
+                        let op_j = op.clone();
+                        let applied = tokio::task::spawn_blocking(move || s.apply(&op_j)).await
+                            .unwrap_or_else(|_| Err("join".to_string()));
+                        match applied {
+                            Ok(()) => {
+                                s_authored.push(op_s);
+                                s_oplog += 1;
+                                // OBSERVE: re-read the live doc so the NEXT op is authored against what's
+                                // actually present now (kills premature-"done" + dropped ops).
+                                let s = session.clone();
+                                if let Ok(Ok(st)) = tokio::task::spawn_blocking(move || s.structure()).await {
+                                    live_structure = format!("{structure}\n[live doc] {st}");
+                                }
+                            }
+                            Err(e) => {
+                                // daemon alive → bad op: stop, reconcile what applied. Dead → wedge→floor.
+                                let s = session.clone();
+                                let healthy = tokio::task::spawn_blocking(move || s.healthy()).await.unwrap_or(false);
+                                chronos::log(&format!("api session op error (healthy={healthy}): {e}"));
+                                if !healthy { wedged = true; }
+                                break;
+                            }
+                        }
+                    }
+                    if !wedged && s_oplog > 0 {
+                        let s = session.clone();
+                        match tokio::task::spawn_blocking(move || s.reconcile()).await.unwrap_or_else(|_| Err("join".to_string())) {
+                            Ok(()) => {
+                                reconciled_via_session = true;
+                                chronos::log(&format!("api_plane: native session applied+reconciled {s_oplog} ops"));
+                                let _ = confirm_tx.send(envelope::make("action_log",
+                                    envelope::ActionLogPayload { text: "applied native app operations (live session)".to_string() })).await;
+                            }
+                            Err(e) => chronos::log(&format!("api session reconcile failed (→ floor): {e}")),
+                        }
+                    }
+                    let s = session.clone();
+                    let _ = tokio::task::spawn_blocking(move || s.close()).await;
+                }
+            }
+
+            // PROVEN FLOOR PATH (build_guest_apply) — byte-identical to the pre-P2c code, only guarded so
+            // it runs unless the native session already reconciled. Additive: what works is untouched.
+            if !reconciled_via_session {
             // INCREMENTAL per-op authoring (sequencer-routed, the §2.14 primitive applied to the API
             // plane): author ONE op per SHORT generation against the goal + structure + ops-so-far, until
             // the model signals done / authors no new op / hits the budget. The list ACCUMULATES and is
@@ -2081,6 +2163,7 @@ pub async fn agent_loop(
             } else {
                 chronos::log("api_plane: model authored no valid ops");
             }
+            } // end PROVEN FLOOR PATH guard (if !reconciled_via_session) — additive wrap only
             // honest completion check — never the model's say-so; fast handback (no GUI churn)
             if verify_now(actuator.as_ref()) {
                 complete_goal(&goal, actuator.as_ref(), &confirm_tx).await;
