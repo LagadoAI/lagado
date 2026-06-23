@@ -1,0 +1,9 @@
+[
+  {"op": "add_sheet", "name": "Sheet2"},
+  {"op": "set", "sheet": "Sheet2", "cell": "A1", "formula": "=Sheet1!A1"},
+  {"op": "set", "sheet": "Sheet2", "cell": "B1", "formula": "=Sheet1!B1"},
+  {"op": "set", "sheet": "Sheet2", "cell": "C1", "formula": "=Sheet1!C1"},
+  {"op": "set_formula_range", "sheet": "Sheet2", "range": "A2:A11", "formula": "=Sheet1!A2"},
+  {"op": "set_formula_range", "sheet": "Sheet2", "range": "B2:B11", "formula": "=Sheet1!B2"},
+  {"op": "set_formula_range", "sheet": "Sheet2", "range": "C2:C11", "formula": "=Sheet1!C2"}
+]
