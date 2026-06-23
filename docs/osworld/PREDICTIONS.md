@@ -94,6 +94,28 @@ PREDICTION (committed before run): held-out gold rate is LOW (single digits %); 
 authored-but-wrong + false-pass on compute tasks, plus op-vocab fail on chart/pivot/format. I do NOT expect
 the 035f41ba result to generalize.
 
+### PRE-COMMITTED CRITERION — the anti-treadmill rule (written 2026-06-23 BEFORE Wave-1 results)
+The failure mode the user explicitly fears: an infinite verb-treadmill where every miss → "build another
+verb," never reaching the real comprehension/emission question. So, committed in advance:
+- A task that fails **with its required verb built AND the model actually emitting that verb with correct
+  args** is a COMPREHENSION or EMISSION signal — report it as such, do NOT defer it to "yet another verb."
+- Two distinct, separately-reported axes: (1) CAPABILITY (is the verb built + does it pass the scorer) vs
+  (2) EMISSION (does the 7B pick the verb with right args — UNTESTED so far; the op-probe HAND-FED ops).
+- Every sweep MUST tag each task by the capability its evaluator checks and report "addressable-with-built-
+  verbs: gold X/Y" — never a raw gold count (which conflates "verb not built" with "built but failed").
+- Wave-1 verbs are MECHANISM-verified (op-probe: they execute), NOT evaluator-verified (none has passed a
+  real scorer yet). Color round-trip (ARGB/theme) is a known-unverified silent-fail risk.
+
+### CAPABILITY MAP of the 30 held-out tasks (by evaluator rule, 2026-06-23, no-VM):
+chart(W2)=4 · pivot(W3)=5 · format(W1)=4 · sheet_print(number/print fmt)=4 · sheet_name/zoom/freeze/
+row_props/transpose/reorder/max-locate/pdf/infeasible = the long tail. Genuinely Wave-1-completable
+(compute+sort+format, no missing sub-capability) ≈ only **3–6 tasks** (e.g. 51b11269 sort, 37608790 split,
+4172ea6e maturity, abed40dc duplicates). NOTE: 2bd59342 is OSWorld-INFEASIBLE → must ABSTAIN (integrity
+test). Even "format" tasks are bundled with unbuilt sub-caps (21ab7b40 needs max-cell-locate; 30e3e107
+needs a pivot). ⇒ a full 30-task sweep after Wave-1 ALONE would show ~0–6 movement and muddy attribution
+unless tagged. Build the cheap remaining verbs (sheet_print/number-format, max-locate helper) + Waves 2–3,
+OR run a TARGETED mini-sweep on the 3–6 completable tasks to evaluator-verify the Wave-1 verbs first.
+
 ### Test C-fix — HELD-OUT sweep WITH the leading-'=' fill fix (committed BEFORE the run, 2026-06-23)
 Set: the 30 NEVER-opened calc tasks (`battery_breadth.py heldout` — 47 minus the 16 keyword-SAMPLE minus
 12382c62; validated: clean partition, no overlap, all resolve). Change vs the prior breadth run: the fill
