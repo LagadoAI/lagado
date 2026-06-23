@@ -24,7 +24,7 @@ import json, os, re, sys, time, statistics
 import requests
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from run_session_task import (Guest, deploy_daemon, pick_uno_python, task_input_path)
+from run_session_task import (Guest, deploy_daemon, pick_uno_python, task_input_path, memory_ok)
 from desktop_env.desktop_env import DesktopEnv
 
 BRAIN = "http://localhost:8080/completion"
@@ -731,6 +731,8 @@ def main():
     print("=== BATTERY P1 A/B | task %s | N=%d | conds=%s ===" % (task["id"][:8], N, conds), flush=True)
     print("    instruction: %s" % task["instruction"][:100], flush=True)
 
+    if not memory_ok():                               # FAIL FAST before any boot — never thrash toward OOM
+        raise SystemExit(1)
     env = DesktopEnv(provider_name="docker", action_space="pyautogui", screen_size=(1920, 1080),
                      headless=True, os_type="Ubuntu", require_a11y_tree=False)
     results = {"A": [], "B": []}
@@ -739,6 +741,8 @@ def main():
         for cond in [c for c in "AB" if c in conds]:
             for run in range(N):
                 print("\n--- cond %s run %d/%d ---" % (cond, run + 1, N), flush=True)
+                if not memory_ok():
+                    print("    stopping early — memory floor breached.", flush=True); break
                 env.reset(task_config=task)
                 time.sleep(2)
                 score, log = run_condition(env, task, cond, file_path, run)

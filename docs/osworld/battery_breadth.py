@@ -12,7 +12,7 @@ Usage (OSWorld dir, its venv, podman sock):
 import json, os, sys, glob, time, traceback, signal
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from battery_calc import run_condition
-from run_session_task import task_input_path
+from run_session_task import task_input_path, memory_ok
 from desktop_env.desktop_env import DesktopEnv
 
 PER_TASK = 420                                    # hard per-task ceiling so one hang can't wedge the sweep
@@ -67,6 +67,9 @@ def main():
         for tf in files:
             task = json.load(open(tf)); tid = task["id"][:8]
             print("\n── [%s] %s" % (tid, task.get("instruction", "")[:78]), flush=True)
+            if not memory_ok():               # FAIL FAST before each boot — never thrash toward OOM
+                print("   stopping sweep early — memory floor breached (see message above).", flush=True)
+                break
             score, log, attr = 0.0, {}, "?"
             try:
                 file_path = task_input_path(task)

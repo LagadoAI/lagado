@@ -32,6 +32,37 @@ DAEMON_FILES = ["uno_ops.py", "uno_daemon.py", "uno_client.py"]
 GUEST_DIR = "/tmp"
 SOCK = "/tmp/lagado_session.sock"
 
+# OOM PREVENTION (2026-06-23): a 3G nested VM on a 15Gi host will thrash zram → OOM if the host is
+# already tight (the classic cause: llama-server mmap'ing 7GB of weights it doesn't need with full GPU
+# offload — launch the brain with --no-mmap, see start_brain.sh). The runners call preflight_memory()
+# before every boot so they FAIL FAST with a clear message instead of driving the box into OOM.
+MIN_FREE_MB = 4500   # 3G guest + container/qemu overhead + margin
+
+
+def free_memory_mb():
+    """Host MemAvailable in MB (kernel's estimate of reclaimable+free), or None if unreadable."""
+    try:
+        with open("/proc/meminfo") as f:
+            for line in f:
+                if line.startswith("MemAvailable:"):
+                    return int(line.split()[1]) // 1024
+    except Exception:
+        pass
+    return None
+
+
+def memory_ok(min_mb=MIN_FREE_MB):
+    """True if there's enough headroom to boot a VM without OOM risk. Prints a diagnosis when not."""
+    avail = free_memory_mb()
+    if avail is not None and avail < min_mb:
+        print("\n*** MEMORY PRE-FLIGHT FAIL: only %d MB available (<%d MB floor) — booting a 3G VM here "
+              "will thrash zram toward OOM. Free memory first:\n"
+              "    - relaunch the brain lean:  docs/osworld/start_brain.sh   (--no-mmap frees ~7GB)\n"
+              "    - reclaim stale VM disk:    podman volume prune -f\n"
+              "    - close heavy apps.\n*** Aborting before boot (no OOM)." % (avail, min_mb), flush=True)
+        return False
+    return True
+
 
 def task_input_path(task):
     """The guest path of the input doc: prefer the 'open' config, fall back to the download."""
