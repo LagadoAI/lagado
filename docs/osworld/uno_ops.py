@@ -179,19 +179,44 @@ def apply_one_op(doc, resolve_sheet, op):
         rng.NumberFormat = key
     elif kind == "sort_range":
         # Sort a range by one key column. `key_index` = 0-based column WITHIN the range; `has_header`
-        # keeps row 0 fixed; `ascending` toggles order. Uses UNO's own sort (stable, deterministic).
+        # keeps the first row fixed; `ascending` toggles order. Done by VALUE read->sort->write (the UNO
+        # SortDescriptor silently no-ops on this LO build); deterministic, numbers-before-text, and it
+        # matches exactly what the evaluator compares (computed cell values).
         sh = resolve_sheet(op["sheet"])
-        rng = sh.getCellRangeByName(op["range"])
-        sf = uno.createUnoStruct("com.sun.star.util.SortField")
-        sf.Field = int(op.get("key_index", 0))
-        sf.SortAscending = str(op.get("ascending", "true")).strip().lower() in ("1", "true", "yes", "asc")
-        desc = list(rng.createSortDescriptor())
-        for pv in desc:
-            if pv.Name == "SortFields":
-                pv.Value = (sf,)
-            elif pv.Name == "ContainsHeader":
-                pv.Value = str(op.get("has_header", "true")).strip().lower() in ("1", "true", "yes")
-        rng.sort(tuple(desc))
+        a = sh.getCellRangeByName(op["range"]).getRangeAddress()
+        c0, r0, c1, r1 = a.StartColumn, a.StartRow, a.EndColumn, a.EndRow
+        has_header = str(op.get("has_header", "true")).strip().lower() in ("1", "true", "yes")
+        key = int(op.get("key_index", 0))
+        asc = str(op.get("ascending", "true")).strip().lower() in ("1", "true", "yes", "asc")
+        dr0 = r0 + (1 if has_header else 0)
+        rows = []
+        for r in range(dr0, r1 + 1):
+            row = []
+            for c in range(c0, c1 + 1):
+                cell = sh.getCellByPosition(c, r)
+                t = cell.getType().value
+                if t == "VALUE":
+                    row.append((1, cell.getValue()))
+                elif t == "EMPTY":
+                    row.append((2, None))
+                else:
+                    row.append((0, cell.getString()))
+            rows.append(row)
+
+        def keyf(row):
+            typ, val = row[key]
+            return (0, val) if typ == 1 else (1, str(val if val is not None else ""))
+        rows.sort(key=keyf, reverse=not asc)
+        for i, row in enumerate(rows):
+            r = dr0 + i
+            for j, (typ, val) in enumerate(row):
+                cell = sh.getCellByPosition(c0 + j, r)
+                if typ == 1:
+                    cell.setValue(val)
+                elif typ == 2:
+                    cell.setString("")
+                else:
+                    cell.setString(val)
     else:
         raise ValueError("unknown op kind: %r" % kind)
 

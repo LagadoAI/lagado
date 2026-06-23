@@ -339,20 +339,28 @@ def apply_B(g, nameops, log):
         elif k == "total_row":
             # HARNESS-LEVEL verb (expands into existing `set` ops — daemon untouched): write the label in
             # the first column of the row UNDER the data, then SUM each named column over the data span.
+            # Find the TRUE last data row by scanning a sum column (detect's row count can overshoot into
+            # blank rows, which would place the total one row too low — verified on the op-probe).
             sheet = nop.get("sheet")
             info = live.get(sheet, {})
             ds = info.get("data_start", 2)
-            last = ds + info.get("rows", 1) - 1
-            trow = last + 1
             cinfo = info.get("cols", [])
             first_letter = cinfo[0]["letter"] if cinfo else "A"
+            toks = [t.strip().strip("{}").strip() for t in (nop.get("columns") or "").split(",") if t.strip()]
+            letters = [l for l in (resolve_name(sheet, t, live, fails) for t in toks) if l]
+            probe_col = letters[0] if letters else first_letter
+            rb = g.client("read", {"sheet": sheet, "range": "%s%d:%s%d" % (probe_col, ds, probe_col, ds + 500)})
+            vals = [row[0] if row else None for row in rb.get("cells", [])] if rb.get("ok") else []
+            last = ds - 1
+            for i, v in enumerate(vals):
+                if v is not None and v != "":
+                    last = ds + i
+            if last < ds:                                   # nothing read — fall back to detect's count
+                last = ds + info.get("rows", 1) - 1
+            trow = last + 1
             g.client("apply", {"op": {"op": "set", "sheet": sheet, "cell": "%s%d" % (first_letter, trow),
                                       "value": nop.get("label", "Total")}})
-            toks = [t.strip().strip("{}").strip() for t in (nop.get("columns") or "").split(",") if t.strip()]
-            for tok in toks:
-                letter = resolve_name(sheet, tok, live, fails)
-                if not letter:
-                    continue
+            for letter in letters:
                 f = "=SUM(%s%d:%s%d)" % (letter, ds, letter, last)
                 cell = "%s%d" % (letter, trow)
                 rr = g.client("apply", {"op": {"op": "set", "sheet": sheet, "cell": cell, "formula": f}})
