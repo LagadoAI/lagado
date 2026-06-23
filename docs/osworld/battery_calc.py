@@ -287,6 +287,13 @@ def apply_B(g, nameops, log):
             ds = live.get(sheet, {}).get("data_start", 2)   # header-row-aware first data row
             refsheets = set()
             a1 = substitute_names(formula, sheet, live, fails, row=ds, refsheets=refsheets)
+            # HARNESS OWNS SYNTAX: a compute_column body is ALWAYS a formula. The model inconsistently
+            # omits the leading '=' (e.g. "{Sales}-{Sales Return}"); without it setFormula stores the
+            # string as TEXT and fillAuto then series-increments the trailing digit ("B2-C2"→"B2-C3"…),
+            # so the column never computes. Guarantee the '='. (VM-verified 2026-06-23: '=' present →
+            # correct relative fill 75000,69539,…; absent → text series. fillAuto itself is fine.)
+            if a1 is not None and not a1.lstrip().startswith("="):
+                a1 = "=" + a1.lstrip()
             if a1 is None:
                 continue  # fail-closed: a referenced name didn't resolve
             # Extent = data rows of the target OR any sheet the formula references (row-aligned). A
