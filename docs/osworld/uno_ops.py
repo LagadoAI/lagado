@@ -91,21 +91,21 @@ def apply_one_op(doc, resolve_sheet, op):
         if sheets.hasByName(op["old"]):
             sheets.getByName(op["old"]).Name = op["new"]
     elif kind == "copy_sheet":
-        # Duplicate a sheet WITH its data (the app's "Move/Copy Sheet"). UNO copyByName(src, dest, index)
-        # inserts the copy AT index. `before` places the copy immediately before a named sheet (the index
-        # of that sheet); tolerant of "Sheet 2"/"Sheet2"/case. Absent/unknown before → append at the end.
+        # Duplicate a sheet WITH its data (the app's "Move/Copy Sheet"). Append the copy (copyByName's
+        # index arg proved unreliable for mid-list inserts), THEN moveByName it into place — explicit
+        # reposition, deterministic. `before` puts the copy immediately before a named sheet (tolerant of
+        # "Sheet 2"/"Sheet2"/case). Absent/unknown before → leave appended at the end.
         src, dest = op["source"], op["new"]
         before = (op.get("before") or "").strip()
-        idx = sheets.Count
-        if before:
-            names = [sheets.getByIndex(i).Name for i in range(sheets.Count)]
-            norm = lambda s: s.replace(" ", "").lower()
-            for i, nm in enumerate(names):
-                if nm == before or norm(nm) == norm(before):
-                    idx = i
-                    break
         if sheets.hasByName(src) and not sheets.hasByName(dest):
-            sheets.copyByName(src, dest, idx)
+            sheets.copyByName(src, dest, sheets.Count)         # append (reliable)
+            if before:
+                norm = lambda s: s.replace(" ", "").lower()
+                names = [sheets.getByIndex(i).Name for i in range(sheets.Count)]
+                tgt = next((i for i, nm in enumerate(names)
+                            if nm == before or norm(nm) == norm(before)), None)
+                if tgt is not None:
+                    sheets.moveByName(dest, tgt)               # move the copy to just before the target
     elif kind == "set":
         sh = resolve_sheet(op["sheet"])
         cell = sh.getCellRangeByName(op["cell"]).getCellByPosition(0, 0)

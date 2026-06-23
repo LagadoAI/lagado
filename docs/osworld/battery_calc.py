@@ -698,8 +698,11 @@ def run_condition(env, task, cond, file_path, run_idx):
             written, resolve_fails = apply_B(g, nameops, log)
             fired = falsify(g, written)
             log["n_ops"] = len(nameops)
-            if written and not resolve_fails and not fired:
-                break                            # no detected fault — stop (NOT a correctness claim)
+            if nameops and not resolve_fails and not fired:
+                break                            # emitted ops, no detected fault — stop (NOT a correctness
+                                                 # claim). Covers STRUCTURAL-only tasks (rename/copy/format)
+                                                 # which write no compute_column → empty `written` → used to
+                                                 # retry needlessly. (no_fault below still gates self-report.)
             feedback = compose_feedback(resolve_fails, fired)
             log.setdefault("feedbacks", []).append(feedback)
         log["attempts"] = attempt + 1

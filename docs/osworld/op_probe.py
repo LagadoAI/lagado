@@ -57,15 +57,17 @@ def main():
         r5 = op("sort_range", {"op": "sort_range", "sheet": "Sheet1", "range": "A1:J10",
                                "key_index": 1, "ascending": "true", "has_header": "true"})
         b_sorted = col(g, "B2:B10"); step("sort read B2:B10 -> %s" % b_sorted)
-        # copy_sheet: duplicate Sheet1 WITH data, placed BEFORE Sheet1 (so the copy lands at index 0)
-        r6 = op("copy_sheet", {"op": "copy_sheet", "source": "Sheet1", "new": "DupSheet", "before": "Sheet1"})
+        # copy_sheet MID-INSERT (the case that actually failed on 0cecd4f3): build [Sheet1,S2,S3], then copy
+        # Sheet1 -> DupSheet BEFORE S3 → must land at index 2, i.e. [Sheet1, S2, DupSheet, S3].
+        op("add_sheet", {"op": "add_sheet", "name": "S2"})
+        op("add_sheet", {"op": "add_sheet", "name": "S3"})
+        r6 = op("copy_sheet", {"op": "copy_sheet", "source": "Sheet1", "new": "DupSheet", "before": "S3"})
         names = g.client("structure").get("sheets", [])
         rd = g.client("read", {"sheet": "DupSheet", "range": "B2:B2"})
         dup_val = (rd.get("cells", [[None]])[0][0]) if rd.get("ok") else None
-        # data-copied = B2 is numeric (Sheet1 was sorted earlier, so don't assert a fixed value); position
-        # = DupSheet lands at index 0 (before Sheet1).
-        copy_ok = (names[:1] == ["DupSheet"]) and isinstance(dup_val, (int, float))
-        step("copy_sheet -> sheet order=%s  DupSheet!B2=%s  positioned+data OK=%s" % (names, dup_val, copy_ok))
+        # position: DupSheet immediately before S3 (index 2); data: B2 numeric (Sheet1 was sorted earlier)
+        copy_ok = (names == ["Sheet1", "S2", "DupSheet", "S3"]) and isinstance(dup_val, (int, float))
+        step("copy_sheet MID -> order=%s  DupSheet!B2=%s  mid-insert+data OK=%s" % (names, dup_val, copy_ok))
 
         b_sum = next((x for x in b if isinstance(x, (int, float)) and x > 100000), None)
         nums = [x for x in b_sorted if isinstance(x, (int, float))]
