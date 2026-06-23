@@ -80,9 +80,47 @@ headline claims · kill -9 on OSWorld runs (leaks root qemu → boots hang).
 
 ## CURRENT STATE (for resume)
 Drivers: docs/osworld/battery_calc.py (main loop, chat endpoint, read-only corroboration, neutral prompts),
-battery_breadth.py (sweep + timeout + attribution), battery_p3.py, battery_p4_resolver.py. Records:
-BATTERY_FINDINGS_2026-06-22.md, PREDICTIONS.md (Test 0/0b results). Last pushed commit: 2b9fbcf (+ uncommitted
-chat-endpoint change in battery_calc.py + PREDICTIONS 0b result at compaction time → commit before clear).
-Honest headline: the deterministic + integrity harness is the moat and holds; the 035f41ba "gold" was
-scaffold-supplied; un-led failure is a single-shot multi-step COLLAPSE (interaction), and the model limit is
-NOT yet established — that is what the variable matrix is for.
+battery_breadth.py (sweep + timeout + attribution), battery_p3.py, battery_p4_resolver.py.
+
+## ════ RESUME HERE — TURN-2 DONE, 2026-06-23 (read THIS first after a /clear) ════
+**THE LOOP** (user doctrine): build the next-cheapest capability increment → verify it against the REAL
+evaluator on the tasks it addresses (tagged) → repeat, EASY→HARD, test between each. Failures are HOW-
+problems, never IF (see [[osworld-ceiling-mindset]] greed/always-HOW). Honest data is the engine.
+
+**OPERATIONAL MUST-KNOWS (or you'll waste hours):**
+- **Brain MUST launch via `docs/osworld/start_brain.sh`** (`--no-mmap -c 2048`). Without `--no-mmap` it pins
+  ~7GB of GGUF weights in zram on the 15Gi host → a 3G VM can't boot (hangs past 900s). This bit us hard.
+- Runners now FAIL-FAST below 4500MB MemAvailable (`run_session_task.memory_ok()`), wired into both batteries.
+- VM trimmed to RAM_SIZE=3G/CPU=2 in OSWorld `desktop_env/providers/docker/provider.py` (on-disk, not in repo).
+- Stop OSWorld runs with **SIGINT (`pkill -INT`), NEVER kill -9** (leaks root qemu → boots hang). If 343GB of
+  podman volumes accrue (`podman system df`), prune them (user-gated): `podman volume prune -f`.
+- Run cmd: `cd /home/alucard/projects/OSWorld && DOCKER_HOST=unix:///run/podman/podman.sock
+  PYTHONPATH=/home/alucard/projects/OSWorld .venv/bin/python <driver> <task-ids…>`. Logs: /tmp/lagado_battery/
+  (breadth.json = summary w/ emitted_verbs; breadth_logs.jsonl = full per-task logs incl reasoning/emit).
+
+**WHAT'S BUILT + VERIFIED (commit history e965ad1..32a85d2):**
+- Fill-bug fix: compute_column formulas get a guaranteed leading `=` (was stored as text → fillAuto series).
+- Wave-1 op-vocab, all VM-verified: `format_cells`(font/fill/bold) · `merge_cells` · `set_number_format` ·
+  `total_row`(SUM at true last data row) · `sort_range`(value read→sort→write; UNO SortDescriptor no-ops) ·
+  `copy_sheet`(source/new/before; append+`moveByName` for mid-insert).
+- **GOLDs against the real evaluator: 51b11269 (sort), 0cecd4f3 (rename+copy+place).** 0 false-pass throughout.
+
+**DISCIPLINE (pre-committed, do NOT violate):**
+- DECLINED bare/unbraced column-name resolution: a missing brace is an EMISSION failure to MEASURE, not
+  paper over (would hide the emission axis + move interpretation into the harness). If brace-friction
+  dominates, fix it AT THE GRAMMAR (make an unbraced ref unemittable), not a post-hoc resolver guess.
+- Anti-treadmill: a task failing WITH its verb built AND emitted = comprehension/emission signal, reported
+  as such — not "build another verb." Always tag tasks by required capability; never a raw gold count.
+
+**EASY→HARD QUEUE (next pulls, test between each):**
+1. **#3 placement** — `37608790` (split): split values are correct but land in E/F/G while headers set in
+   B/C/D. Root-cause compute_column target resolution when headers are set same-batch. EASY, likely golds it.
+2. **Emission brace-friction** — `4172ea6e`,`a9f325aa`: model writes correct formulas with BARE column names.
+   Disciplined fix = GRAMMAR-level (force braces around refs), NOT resolver. MEDIUM.
+3. **Wave 2 — charts** — `0326d92d`,`0a2e43bf`,`347ef137` (+ `2bd59342` is OSWorld-INFEASIBLE → must abstain).
+   chart insertion (bar/line/column; evaluator checks type/title/direction; known 12382c62 break risk). HARD.
+4. **Wave 3 — pivots** — `1de60575`,`30e3e107`. UNO DataPilot. HARD.
+5. **abed40dc dedup** — order-preserving dedup, no clean single-fill formula. Possibly genuine difficulty.
+Capability map of all 30 held-out tasks is in PREDICTIONS.md (chart=4,pivot=5,format=4,sheet_print=4,+tail).
+Honest headline: every NON-comprehension failure touched so far has been OUR gap; closing it golds the task.
+The model's comprehension+emission have been right at each step — thesis holding on real data.
