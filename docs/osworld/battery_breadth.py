@@ -85,10 +85,16 @@ def main():
             except Exception as e:
                 attr = "EXC(%s)" % str(e)[:50]
                 log = {"exc": traceback.format_exc()[-300:]}
+            # EMISSION axis (advisor): capture WHICH verbs the model emitted + the ops, so a non-gold can be
+            # split into "verb not built" vs "verb built but model emitted wrong/none" vs "emitted+wrong answer".
+            nameops = log.get("nameops") or []
+            verbs = sorted({o.get("kind") for o in nameops if isinstance(o, dict)})
             results.append({"id": tid, "score": score, "attr": attr,
-                            "instr": task.get("instruction", "")[:70]})
-            print("   score=%s  %s" % (score, attr), flush=True)
+                            "instr": task.get("instruction", "")[:70],
+                            "emitted_verbs": verbs, "n_ops": len(nameops)})
+            print("   score=%s  %s  emitted=%s" % (score, attr, verbs), flush=True)
             json.dump(results, open("/tmp/lagado_battery/breadth.json", "w"), indent=1, default=str)
+            open("/tmp/lagado_battery/breadth_logs.jsonl", "a").write(json.dumps(log, default=str) + "\n")
     finally:
         env.close()
 
