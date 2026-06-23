@@ -151,7 +151,12 @@ GRAMMAR_B = (
     'op ::= "compute_column(sheet=" str ", target=" str ", formula=" str ")"'
     ' | "set_cell(sheet=" str ", cell=" str ", value=" str ")"'
     ' | "add_sheet(name=" str ")"'
-    ' | "rename_sheet(old=" str ", new=" str ")"\n'
+    ' | "rename_sheet(old=" str ", new=" str ")"'
+    ' | "total_row(sheet=" str ", label=" str ", columns=" str ")"'
+    ' | "format_cells(sheet=" str ", range=" str ", font_color=" str ", fill_color=" str ", bold=" str ")"'
+    ' | "merge_cells(sheet=" str ", range=" str ")"'
+    ' | "sort_range(sheet=" str ", range=" str ", key=" str ", order=" str ")"'
+    ' | "set_number_format(sheet=" str ", range=" str ", format=" str ")"\n'
     'str ::= "\\"" [^"\\\\]* "\\""\n'
 )
 
@@ -182,8 +187,14 @@ EMIT_PROMPT = (
     "  compute_column(sheet=\"S\", target=\"Header\", formula=\"={{A}}-{{B}}-...\")  fill the target column\n"
     "  set_cell(sheet=\"S\", cell=\"A1\", value=\"...\")     set one literal cell\n"
     "  add_sheet(name=\"S\")                                add a sheet\n"
-    "  rename_sheet(old=\"S\", new=\"S2\")                   rename a sheet\n\n"
-    "Emit the operations as a list of calls:")
+    "  rename_sheet(old=\"S\", new=\"S2\")                   rename a sheet\n"
+    "  total_row(sheet=\"S\", label=\"Total\", columns=\"{{Header1}},{{Header2}}\")  add a row that SUMs each named column\n"
+    "  format_cells(sheet=\"S\", range=\"A1:C1\", font_color=\"#rrggbb\", fill_color=\"#rrggbb\", bold=\"true\")  style cells (leave a field \"\" to skip it)\n"
+    "  merge_cells(sheet=\"S\", range=\"A1:C1\")             merge a cell range\n"
+    "  sort_range(sheet=\"S\", range=\"A1:D9\", key=\"{{Header}}\", order=\"asc\")  sort a range by a column (order asc|desc)\n"
+    "  set_number_format(sheet=\"S\", range=\"E2:E9\", format=\"0.00\")  set a number-format code on a range\n\n"
+    "Refer to columns by {{Header}} name where a name is asked; use A1 cell refs for ranges. "
+    "Emit ONLY the operations the goal needs, as a list of calls:")
 
 def compose_feedback(fails, fired):
     """Turn read-back faults into a concrete correction note for the next emit (the retry condition)."""
@@ -240,7 +251,9 @@ def parse_B_nameops(text):
     """Parse name-level calls (UNRESOLVED — names stay in {braces}). Resolution happens at APPLY time
     against the live re-detected structure, so new sheets / just-set headers resolve."""
     nameops = []
-    for verb, body in scan_calls(text, ("compute_column", "set_cell", "add_sheet", "rename_sheet")):
+    verbs = ("compute_column", "set_cell", "add_sheet", "rename_sheet", "total_row",
+             "format_cells", "merge_cells", "sort_range", "set_number_format")
+    for verb, body in scan_calls(text, verbs):
         kw = parse_kv(body)
         if verb == "add_sheet":
             nameops.append({"kind": "add_sheet", "name": kw.get("name")})
@@ -252,6 +265,21 @@ def parse_B_nameops(text):
         elif verb == "compute_column":
             nameops.append({"kind": "compute_column", "sheet": kw.get("sheet"),
                             "target": kw.get("target"), "formula": kw.get("formula", "")})
+        elif verb == "total_row":
+            nameops.append({"kind": "total_row", "sheet": kw.get("sheet"),
+                            "label": kw.get("label", "Total"), "columns": kw.get("columns", "")})
+        elif verb == "format_cells":
+            nameops.append({"kind": "format_cells", "sheet": kw.get("sheet"), "range": kw.get("range"),
+                            "font_color": kw.get("font_color", ""), "fill_color": kw.get("fill_color", ""),
+                            "bold": kw.get("bold", "")})
+        elif verb == "merge_cells":
+            nameops.append({"kind": "merge_cells", "sheet": kw.get("sheet"), "range": kw.get("range")})
+        elif verb == "sort_range":
+            nameops.append({"kind": "sort_range", "sheet": kw.get("sheet"), "range": kw.get("range"),
+                            "key": kw.get("key", ""), "order": kw.get("order", "asc")})
+        elif verb == "set_number_format":
+            nameops.append({"kind": "set_number_format", "sheet": kw.get("sheet"),
+                            "range": kw.get("range"), "format": kw.get("format", "")})
     return nameops
 
 def apply_B(g, nameops, log):
@@ -307,6 +335,53 @@ def apply_B(g, nameops, log):
                 fails.append({"name": a1, "range": rng, "why": "apply error: %s" % rr.get("error", "")[:80]})
                 continue
             written.append((sheet, rng, a1))
+            live = live_detect(g)
+        elif k == "total_row":
+            # HARNESS-LEVEL verb (expands into existing `set` ops — daemon untouched): write the label in
+            # the first column of the row UNDER the data, then SUM each named column over the data span.
+            sheet = nop.get("sheet")
+            info = live.get(sheet, {})
+            ds = info.get("data_start", 2)
+            last = ds + info.get("rows", 1) - 1
+            trow = last + 1
+            cinfo = info.get("cols", [])
+            first_letter = cinfo[0]["letter"] if cinfo else "A"
+            g.client("apply", {"op": {"op": "set", "sheet": sheet, "cell": "%s%d" % (first_letter, trow),
+                                      "value": nop.get("label", "Total")}})
+            toks = [t.strip().strip("{}").strip() for t in (nop.get("columns") or "").split(",") if t.strip()]
+            for tok in toks:
+                letter = resolve_name(sheet, tok, live, fails)
+                if not letter:
+                    continue
+                f = "=SUM(%s%d:%s%d)" % (letter, ds, letter, last)
+                cell = "%s%d" % (letter, trow)
+                rr = g.client("apply", {"op": {"op": "set", "sheet": sheet, "cell": cell, "formula": f}})
+                if rr.get("ok"):
+                    written.append((sheet, cell, f))
+            live = live_detect(g)
+        elif k in ("format_cells", "merge_cells", "set_number_format"):
+            op = {"op": k}
+            op.update({kk: vv for kk, vv in nop.items() if kk != "kind"})
+            rr = g.client("apply", {"op": op})
+            if not rr.get("ok"):
+                fails.append({"name": nop.get("range"), "why": "apply error: %s" % rr.get("error", "")[:80]})
+            live = live_detect(g)
+        elif k == "sort_range":
+            sheet = nop.get("sheet")
+            rng = (nop.get("range") or "").replace("$", "")
+            key = (nop.get("key") or "").strip().strip("{}").strip()
+            op = {"op": "sort_range", "sheet": sheet, "range": nop.get("range"),
+                  "ascending": "true" if (nop.get("order", "asc") or "asc").lower().startswith("a") else "false"}
+            m = re.match(r"([A-Za-z]+)(\d+):([A-Za-z]+)\d+$", rng)
+            if m:
+                start_col = _col_idx(m.group(1))
+                op["has_header"] = "true" if int(m.group(2)) == 1 else "false"
+                kl = resolve_name(sheet, key, live, [])
+                if kl:
+                    op["key_index"] = _col_idx(kl) - start_col
+            rr = g.client("apply", {"op": op})
+            if not rr.get("ok"):
+                fails.append({"name": key or rng, "why": "apply error: %s" % rr.get("error", "")[:80]})
             live = live_detect(g)
     log["resolve_fails"] = fails
     log["written_regions"] = written

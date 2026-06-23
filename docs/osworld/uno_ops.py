@@ -147,6 +147,51 @@ def apply_one_op(doc, resolve_sheet, op):
             rng.fillAuto(uno.Enum("com.sun.star.sheet.FillDirection", "TO_BOTTOM"), 1)
         elif a.EndColumn > a.StartColumn:
             rng.fillAuto(uno.Enum("com.sun.star.sheet.FillDirection", "TO_RIGHT"), 1)
+    elif kind == "format_cells":
+        # ADDITIVE op-vocab (Wave 1): cell STYLE — font color / fill color / bold over a range.
+        # Colors are hex ("#00ff00" or "00ff00"); empty/absent => leave that property untouched.
+        # The evaluator's `style`/`check_cell` rules read these (font_color, bgcolor, font_bold).
+        sh = resolve_sheet(op["sheet"])
+        rng = sh.getCellRangeByName(op["range"])
+        fc = (op.get("font_color") or "").lstrip("#").strip()
+        bg = (op.get("fill_color") or "").lstrip("#").strip()
+        bold = str(op.get("bold", "")).strip().lower() in ("1", "true", "yes", "bold")
+        if fc:
+            rng.CharColor = int(fc, 16)
+        if bg:
+            rng.CellBackColor = int(bg, 16)
+        if bold:
+            rng.CharWeight = 150.0   # com.sun.star.awt.FontWeight.BOLD
+    elif kind == "merge_cells":
+        sh = resolve_sheet(op["sheet"])
+        sh.getCellRangeByName(op["range"]).merge(True)
+    elif kind == "set_number_format":
+        # Apply a number-format code (e.g. "0.00", "0.00%", "0") to a range so values render/compare
+        # as the expected numeric type.
+        sh = resolve_sheet(op["sheet"])
+        rng = sh.getCellRangeByName(op["range"])
+        fmts = doc.getNumberFormats()
+        loc = uno.createUnoStruct("com.sun.star.lang.Locale")
+        code = str(op["format"])
+        key = fmts.queryKey(code, loc, False)
+        if key == -1:
+            key = fmts.addNew(code, loc)
+        rng.NumberFormat = key
+    elif kind == "sort_range":
+        # Sort a range by one key column. `key_index` = 0-based column WITHIN the range; `has_header`
+        # keeps row 0 fixed; `ascending` toggles order. Uses UNO's own sort (stable, deterministic).
+        sh = resolve_sheet(op["sheet"])
+        rng = sh.getCellRangeByName(op["range"])
+        sf = uno.createUnoStruct("com.sun.star.util.SortField")
+        sf.Field = int(op.get("key_index", 0))
+        sf.SortAscending = str(op.get("ascending", "true")).strip().lower() in ("1", "true", "yes", "asc")
+        desc = list(rng.createSortDescriptor())
+        for pv in desc:
+            if pv.Name == "SortFields":
+                pv.Value = (sf,)
+            elif pv.Name == "ContainsHeader":
+                pv.Value = str(op.get("has_header", "true")).strip().lower() in ("1", "true", "yes")
+        rng.sort(tuple(desc))
     else:
         raise ValueError("unknown op kind: %r" % kind)
 
