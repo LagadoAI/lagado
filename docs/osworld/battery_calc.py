@@ -152,6 +152,7 @@ GRAMMAR_B = (
     ' | "set_cell(sheet=" str ", cell=" str ", value=" str ")"'
     ' | "add_sheet(name=" str ")"'
     ' | "rename_sheet(old=" str ", new=" str ")"'
+    ' | "copy_sheet(source=" str ", new=" str ")"'
     ' | "total_row(sheet=" str ", label=" str ", columns=" str ")"'
     ' | "format_cells(sheet=" str ", range=" str ", font_color=" str ", fill_color=" str ", bold=" str ")"'
     ' | "merge_cells(sheet=" str ", range=" str ")"'
@@ -188,6 +189,7 @@ EMIT_PROMPT = (
     "  set_cell(sheet=\"S\", cell=\"A1\", value=\"...\")     set one literal cell\n"
     "  add_sheet(name=\"S\")                                add a sheet\n"
     "  rename_sheet(old=\"S\", new=\"S2\")                   rename a sheet\n"
+    "  copy_sheet(source=\"S\", new=\"S2\")                  duplicate a sheet WITH its data\n"
     "  total_row(sheet=\"S\", label=\"Total\", columns=\"{{Header1}},{{Header2}}\")  add a row that SUMs each named column\n"
     "  format_cells(sheet=\"S\", range=\"A1:C1\", font_color=\"#rrggbb\", fill_color=\"#rrggbb\", bold=\"true\")  style cells (leave a field \"\" to skip it)\n"
     "  merge_cells(sheet=\"S\", range=\"A1:C1\")             merge a cell range\n"
@@ -251,7 +253,7 @@ def parse_B_nameops(text):
     """Parse name-level calls (UNRESOLVED — names stay in {braces}). Resolution happens at APPLY time
     against the live re-detected structure, so new sheets / just-set headers resolve."""
     nameops = []
-    verbs = ("compute_column", "set_cell", "add_sheet", "rename_sheet", "total_row",
+    verbs = ("compute_column", "set_cell", "add_sheet", "rename_sheet", "copy_sheet", "total_row",
              "format_cells", "merge_cells", "sort_range", "set_number_format")
     for verb, body in scan_calls(text, verbs):
         kw = parse_kv(body)
@@ -259,6 +261,8 @@ def parse_B_nameops(text):
             nameops.append({"kind": "add_sheet", "name": kw.get("name")})
         elif verb == "rename_sheet":
             nameops.append({"kind": "rename_sheet", "old": kw.get("old"), "new": kw.get("new")})
+        elif verb == "copy_sheet":
+            nameops.append({"kind": "copy_sheet", "source": kw.get("source"), "new": kw.get("new")})
         elif verb == "set_cell" and "value" in kw:
             nameops.append({"kind": "set_cell", "sheet": kw.get("sheet"), "cell": kw.get("cell"),
                             "value": coerce(kw["value"])})
@@ -297,6 +301,10 @@ def apply_B(g, nameops, log):
         elif k == "rename_sheet":
             if nop.get("old") != nop.get("new"):
                 g.client("apply", {"op": {"op": "rename_sheet", "old": nop["old"], "new": nop["new"]}})
+                live = live_detect(g)
+        elif k == "copy_sheet":
+            if nop.get("source") in live and nop.get("new") not in live:   # idempotent (safe on retry)
+                g.client("apply", {"op": {"op": "copy_sheet", "source": nop["source"], "new": nop["new"]}})
                 live = live_detect(g)
         elif k == "set_cell":
             g.client("apply", {"op": {"op": "set", "sheet": nop["sheet"], "cell": nop["cell"],
@@ -497,8 +505,12 @@ def resolve_ref(token, default_sheet, detected, fails):
 
 def substitute_names(formula, default_sheet, detected, fails, row, refsheets=None):
     """Replace {Header} / {Sheet.Header} with A1 refs at the given row. Cross-sheet refs use the proven
-    Excel `Sheet!Cell` syntax. Fail-closed: any token that doesn't uniquely resolve aborts (returns None).
-    refsheets (if given) collects every sheet the resolved formula references (for extent alignment)."""
+    Excel `Sheet!Cell` syntax. Fail-closed: any braced token that doesn't uniquely resolve aborts (None).
+    NOTE (2026-06-23): we deliberately do NOT resolve BARE (unbraced) column names. A bare name is an
+    EMISSION failure (the model didn't emit a valid reference); rescuing it in the resolver would (a) move
+    interpretation into the harness and (b) hide the emission axis we pre-committed to MEASURE. If brace-
+    friction proves to dominate, the disciplined fix is at the GRAMMAR (make an unbraced ref unemittable),
+    not a post-hoc guess here. refsheets (if given) collects every sheet the formula references."""
     aborted = [False]
     def repl(m):
         res = resolve_ref(m.group(1).strip(), default_sheet, detected, fails)

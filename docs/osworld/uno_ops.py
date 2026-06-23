@@ -24,7 +24,7 @@ import uno
 
 
 # Structural ops create the containers content ops write into; they must land first.
-STRUCTURAL = ("add_sheet", "rename_sheet")
+STRUCTURAL = ("add_sheet", "rename_sheet", "copy_sheet")
 
 
 def excel_to_calc(f):
@@ -90,6 +90,12 @@ def apply_one_op(doc, resolve_sheet, op):
     elif kind == "rename_sheet":
         if sheets.hasByName(op["old"]):
             sheets.getByName(op["old"]).Name = op["new"]
+    elif kind == "copy_sheet":
+        # Duplicate a sheet WITH its data (the app's "Move/Copy Sheet"). UNO copyByName(src, dest, index).
+        src, dest = op["source"], op["new"]
+        idx = op.get("index", sheets.Count)
+        if sheets.hasByName(src) and not sheets.hasByName(dest):
+            sheets.copyByName(src, dest, idx)
     elif kind == "set":
         sh = resolve_sheet(op["sheet"])
         cell = sh.getCellRangeByName(op["cell"]).getCellByPosition(0, 0)
