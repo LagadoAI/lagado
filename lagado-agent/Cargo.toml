@@ -38,6 +38,11 @@ path = "src/bin/osworld_run.rs"
 test = false
 
 [[bin]]
+name = "session_drive"
+path = "src/bin/session_drive.rs"
+test = false
+
+[[bin]]
 name = "first_walk"
 path = "src/bin/first_walk.rs"
 test = false
