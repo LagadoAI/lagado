@@ -222,10 +222,40 @@ class Daemon:
             headers = []
             for c in range(addr.StartColumn, addr.EndColumn + 1):
                 headers.append(sh.getCellByPosition(c, addr.StartRow).getString())
+            # PERCEIVE each column's number-format CATEGORY from a representative data cell, so the harness
+            # can GROUND a result's type (a column of dates is date-typed) instead of reverse-engineering it
+            # from a bare serial. com.sun.star.util.NumberFormat: DATE bit = 2 (DATETIME=6 also has it set).
+            coltypes, colfmt = [], []
+            drow = addr.StartRow + 1 if addr.EndRow > addr.StartRow else addr.StartRow
+            try:
+                nfmts = self.doc.getNumberFormats()
+            except Exception:
+                nfmts = None
+            for c in range(addr.StartColumn, addr.EndColumn + 1):
+                cat, dbg = "text", None
+                try:
+                    cell = sh.getCellByPosition(c, drow)
+                    if cell.getType().value in ("VALUE", "FORMULA") and nfmts is not None:
+                        props = nfmts.getByKey(cell.NumberFormat)
+                        ftype = int(props.Type)
+                        fstr = str(props.FormatString)
+                        dbg = [ftype, fstr]
+                        # Robust date test: the UNO Type bit (DATE=2) OR the format STRING carries date tokens
+                        # (what openpyxl effectively keys on). Belt-and-suspenders — the Type bitmask has been
+                        # observed to miss imported xlsx date formats ("mm-dd-yy" came back non-date).
+                        u = fstr.upper()
+                        is_date = bool(ftype & 2) or ("MMM" in u) or ("YY" in u) or ("D" in u and "Y" in u)
+                        cat = "date" if is_date else "number"
+                except Exception as e:
+                    cat, dbg = "text", ["err", str(e)[:60]]
+                coltypes.append(cat)
+                colfmt.append(dbg)
             out.append({
                 "name": sh.Name,
                 "extent": {"cols": addr.EndColumn + 1, "rows": addr.EndRow + 1},
                 "headers": headers,
+                "coltypes": coltypes,
+                "colfmt": colfmt,
             })
         return {"sheets": [s["name"] for s in out], "detail": out}
 

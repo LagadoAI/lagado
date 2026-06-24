@@ -82,6 +82,112 @@ headline claims · kill -9 on OSWorld runs (leaks root qemu → boots hang).
 Drivers: docs/osworld/battery_calc.py (main loop, chat endpoint, read-only corroboration, neutral prompts),
 battery_breadth.py (sweep + timeout + attribution), battery_p3.py, battery_p4_resolver.py.
 
+## ════ RESUME HERE — TURN-3 IN PROGRESS, 2026-06-23 (read THIS FIRST after compact/clear) ════
+**COMPACT-PROTECTION HANDOFF (authoritative; full detail is in the TURN-3 blocks lower in this file + FUTURE_RESEARCH.md R1).**
+DONE this turn (all real-evaluator verified, 0 false-pass throughout):
+- GROUNDING applied at 3 seams (battery_calc.py): `ground_bare_refs` (column refs), `ground_result_date_type`
+  (output date-type via declared "…Date" header + value-range), `ground_sheet` (sheet refs "Sheet 1"→live
+  "Sheet1"). Plus `clamp_range_to_data` (format ranges clamped to data extent, kills phantom-row CSV failures).
+  All via REMOVING coercion — no prompt/grammar/retry/training (user doctrine: meet the model, ground its
+  natural output; see [[lagado-prompt-brittleness]]).
+- Tasks golded this turn: 37608790 (free), 4172ea6e (L1 braces + L2 date-type), a9f325aa (grounded bare ref).
+- HELDOUT sweep = **6/30 GOLD, 0 false-pass**; the 24 misses are MISSING OP-VOCAB (charts/pivots/format/
+  freeze/csv/transpose), NOT comprehension.
+- #3 membrane rung PROBED (FUTURE_RESEARCH R1b): one Qwen serves chat+grammar+embeddings; last-token pooling
+  binds distinctive fuzzy refs in the brain's OWN space with strong margins; fail-closed on ambiguity. VIABLE.
+
+**TURN-3 CHART EMISSION RESOLVED via GROUNDING (the reason→emit bridge) — 0a2e43bf GOLD, no regression.**
+Three grounding pieces: (1) `emit_gaps`/`gap_feedback` — EMIT-COMPLETENESS: if the reasoning commits to a chart
+but no create_chart op is emitted, feed a targeted "ALSO emit create_chart" into the ReAct retry (holds the
+model to its OWN reasoning, not leading). (2) `ground_chart_ranges` — grounds the model's SLOPPY A1 ranges
+("B1:B12;C12:G12") to canonical header-categories;data-values ("B1:G1;B12:G12") by extracting col-span + data
+row. (3) create_chart UNO op. REGRESSION SCARE + FIX: a stray `import uno` INSIDE the create_chart branch made
+`uno` function-local → UnboundLocalError in every set_formula_range (poisoned compute_column) → a9f325aa/4172ea6e/
+37608790 fell to WRONG. FIX = use the module-level uno (removed the in-function import). RE-TEST: a9f325aa/
+4172ea6e/37608790/51b11269/0cecd4f3/0a2e43bf = **6/6 GOLD, 0 false-pass.** (The global EMIT_PROMPT create_chart
+line was INNOCENT — the uno bug was the whole regression; lesson: not every regression is prompt brittleness,
+read the resolve_fail.) **EXTREME STRESS TEST DONE (full heldout 30, 2026-06-23): 7/30 GOLD, 0 FALSE-PASS** (was 6/30 pre-turn;
++0a2e43bf via chart grounding). **THE FRACTURE LINE = OP-VOCAB COVERAGE, NOT comprehension/grounding/integrity.**
+All 23 non-golds attribute to: PIVOTS (1954cced,1de60575,535364ea — DataPilot, unbuilt); ADVANCED CHARTS
+(2bd59342 sparkline, 3a7c8185 sort+chart, 0326d92d 2-chart+growth — ABSTAINED, sound); VERBS UNBUILT (4188d3a4
+freeze, 3aaa4e37 csv-export, eb03d19a transpose, 7a4e4bc8 col-reorder, aa3a8974 resize, 6054afcb fill-NA,
+8b1ce5f2 conditional-highlight, a01fbce3 locale-decimal); SHEET_PRINT RENDER nuance (6e99a1ad 2dp, 21df9241
+millions — op applies, CSV render mismatches); CROSS-SHEET/MULTI-STEP (51719eea,21ab7b40,347ef137,4f07fbe9);
+DEDUP (abed40dc, no single-fill); sheet-flow edge (30e3e107); +1 INFRA FLAKE (1334ca3e EXC "Setup step 2
+_open_setup failed" — OSWorld env, NOT us). **CRITICAL: 0 grounding mis-fires, 0 false-pass** — semantic
+binding, chart completeness+range grounding all held under stress. ⇒ the thesis holds under full stress: the
+limit is CAPABILITY coverage (build verbs), not comprehension or grounding soundness. NEXT highest-leverage =
+pivots (3) + chart variants (sparkline/multi-chart, 3) = ~6 tasks; then cross-sheet (4); render-nuance is finicky.
+
+## ════ POST-CLEAR RESUME PLAN (user 2026-06-23, near weekly limit — locked in before /clear) ════
+**THE GOAL:** solve the FRACTURE LINE (= op-vocab coverage; comprehension+grounding already proven sound, 0
+false-pass) → re-run the EXTREME STRESS TEST (full heldout 30) → **if it resolves to ALL GOLDS = massive win,
+strong support for the thesis that the harness lets a 7B (Qwen2.5-Coder-7B) reach the ~72% OSWorld floor**
+(see [[osworld-ceiling-mindset]]: 72% = a FLOOR not a ceiling; the limit is build-effort, not the model).
+**METHOD (unchanged doctrine):** build the next-cheapest verb → verify on the tasks it addresses → repeat,
+EASY→HARD, test between each, honest numbers, 0 false-pass is non-negotiable.
+
+**FRACTURE-CLOSING QUEUE (build these verbs; each maps to tagged heldout tasks):**
+1. **PIVOT TABLES** (≈3: 1954cced, 1de60575, 535364ea) — UNO DataPilot (`sheet.DataPilotTables.createDataPilotDescriptor`).
+   Evaluator likely compares the pivot's output cells (sheet_data) — inspect each gold first. Highest leverage.
+2. **CHART VARIANTS** (≈3: 2bd59342 sparkline, 3a7c8185 sort+chart, 0326d92d 2-chart+growth) — extend create_chart:
+   multiple charts per task, titles (chart_props may include "title"), sparklines (a different mechanism — may need
+   openpyxl-side or a cell-embedded approach; inspect the 2bd59342 gold). create_chart + ground_chart_ranges +
+   emit_gaps completeness already work for the single-chart case (0a2e43bf gold).
+3. **SIMPLE VERBS** (1 each): freeze panes (4188d3a4), csv-export (3aaa4e37), transpose (eb03d19a),
+   col-reorder (7a4e4bc8), resize (aa3a8974), fill-NA-with-above (6054afcb), conditional-highlight weekends
+   (8b1ce5f2), locale-decimal-comma (a01fbce3). Each is a small UNO op + harness verb.
+4. **CROSS-SHEET / MULTI-STEP** (≈4: 51719eea, 21ab7b40, 347ef137, 4f07fbe9) — formula chains across sheets;
+   the {Sheet.Header} resolver exists; likely emission/multi-step, inspect each.
+5. **SHEET_PRINT RENDER nuance** (6e99a1ad 2dp, 21df9241 millions) — FINICKY: op applies but the in-VM CSV render
+   differs from gold. Host has /usr/bin/soffice to reproduce CSV diffs (HINT, render defaults differ from VM).
+6. **DEDUP** (abed40dc) — order-preserving unique; no single-fill formula (genuinely hard).
+   (1334ca3e = OSWorld infra flake "Setup step 2 _open_setup failed", NOT us — re-run; ignore if it recurs.)
+
+**OPERATIONAL MUST-KNOWS for resume (or you'll waste hours):**
+- Brain: `docs/osworld/start_brain.sh` (canonical) OR currently left on `--embeddings --pooling last` (needed by
+  #3 semantic binding — chat+grammar verified fine). GPU-SETTLE: wait ~5s after `pkill llama-server` before
+  relaunch or the new server dies (exit 144). Brain MUST be up on :8080 before any battery run.
+- Run cmd: `cd /home/alucard/projects/OSWorld && DOCKER_HOST=unix:///run/podman/podman.sock
+  PYTHONPATH=/home/alucard/projects/OSWorld .venv/bin/python docs/osworld/battery_breadth.py <ids…|heldout>`.
+  Logs: /tmp/lagado_battery/breadth_logs.jsonl (per-task reasoning/emit/nameops/resolve_fails/readback).
+- Stop OSWorld with SIGINT, never kill -9. memory_ok() fail-fast <4500MB. Daemon redeploys per run (uno_daemon.py
+  + uno_ops.py pushed fresh) → daemon edits take effect next run. Host HAS libreoffice for local CSV/chart inspection.
+- ⚠️ `import uno` ONLY at uno_ops.py module top — NEVER inside a function (poisons the whole apply_one_op).
+- After ANY change: regression-test the 7 current golds (0a2e43bf 0cecd4f3 1d17d234 37608790 4172ea6e 51b11269
+  a9f325aa) + confirm 0 false-pass BEFORE re-stressing. A regression is usually a real bug (read the resolve_fail),
+  not always prompt brittleness.
+
+**TURN-3 done (#3→#1→#2, all real-evaluator verified, the detail):**
+- **#3 DONE (WIRED + TESTED).** `semantic_col` + `_embed`/`_cos` in battery_calc.py; wired as the LAST fallback
+  in `resolve_name` AND `resolve_ref` (after exact/letter/index lexical, before fail-closed). Margin gate
+  SEM_THETA=0.08, lone-header floor 0.30, graceful no-op if embeddings endpoint absent. Component-tested via
+  live brain: "the movie titles to clean"→A, "amount spent"→C(Spent), "start date"(3 date cols)→None abstain.
+  VM REGRESSION: a9f325aa/4172ea6e/37608790 stay 3/3 GOLD, 0 false-pass (semantic never fires when lexical
+  wins). NO natural fuzzy new-gold in the heldout set (only resolve-fail = eb03d19a, a UNO apply error not a
+  name miss) → it's insurance for harder cases, mechanism proven by the component test. SEPARATE resolver,
+  not prompt context (inv #10 honored).
+- **#1 CHARTS — CAPABILITY SOLVED (mechanism + verb), residual = EMISSION gap.** create_chart UNO op
+  (uno_ops.py: Charts.addNewByName + LineDiagram/BarDiagram + DataRowSource orientation) + wired as a harness
+  verb (grammar/EMIT_PROMPT/parse_B_nameops/apply_B). **ROUND-TRIP PROVEN** (the 12382c62 risk is AVOIDED):
+  a UNO lineChart saves to xlsx and openpyxl reads it back as tagname=lineChart; with `ranges="B1:G1;B12:G12"
+  type=line data_in=rows` it produces series `val=$B$12:$G$12 cat=$B$1:$G$1` = BYTE-IDENTICAL to 0a2e43bf's
+  gold chart key. So the capability is real. **0a2e43bf still 0.0 = EMISSION gap, comprehension INTACT:** the
+  model's REASONING fully described the chart ("Create a Line Chart, select B12 to G12, x-axis = months") but
+  the EMIT produced only total_row — it reasons in GUI terms ("Insert tab → click Line") and didn't bridge to
+  the create_chart verb. Anti-treadmill: verb built+available+mechanism-golds → this is an EMISSION signal, NOT
+  "build another verb". NEXT (emission, not capability): get the model to EMIT create_chart when it reasons a
+  chart (reason→emit bridge; the GUI-mental-model→verb gap). 0 false-pass.
+- **#2 total_row tasks = CHART-GATED → same emission gap** (total_row + chart mechanism both work; model emits
+  total_row, not create_chart). Unblocked at the CAPABILITY level; blocked on the chart-EMISSION bridge.
+  0326d92d additionally needs growth-row + 2 charts w/ titles (harder).
+
+**OPERATIONAL (or you'll waste hours):** brain on :8080 currently has `--embeddings --pooling last` (chat+grammar
+verified fine). GPU-settle: wait ~5s for VRAM to free between `pkill llama-server` and relaunch or the new
+server dies (exit 144). Host HAS libreoffice (`/usr/bin/soffice`) — use it to reproduce sheet_print CSV diffs
+locally (HINT not ground truth: its render defaults differ from the in-VM converter). Run cmd + must-knows are
+in the TURN-2 RESUME block just below.
+
 ## ════ RESUME HERE — TURN-2 DONE, 2026-06-23 (read THIS first after a /clear) ════
 **THE LOOP** (user doctrine): build the next-cheapest capability increment → verify it against the REAL
 evaluator on the tasks it addresses (tagged) → repeat, EASY→HARD, test between each. Failures are HOW-
@@ -112,11 +218,140 @@ problems, never IF (see [[osworld-ceiling-mindset]] greed/always-HOW). Honest da
 - Anti-treadmill: a task failing WITH its verb built AND emitted = comprehension/emission signal, reported
   as such — not "build another verb." Always tag tasks by required capability; never a raw gold count.
 
+**TURN-3 (2026-06-23):** `37608790` **GOLD on a fresh real-evaluator run, ZERO new work** (score=1.0,
+emitted=[compute_column]×3, 0 resolve_fails, 0 false-pass). The queue's "lands in E/F/G" framing came from a
+STALE polluted cache file (headers `B2`/`C2`/`D2` in E/F/G) — the turn-2 fill-bug fix (guaranteed leading
+`=`) already closed it. Model emitted PERFECT: target by header name (First Name→B, Last Name→C, Rank→D) +
+correct LEFT/MID/RIGHT/FIND split formulas (bare A2 refs, single-quotes normalized to "). ⇒ LESSON: the
+mini_sweep.log statuses are pre-fill-bug-fix and UNTRUSTWORTHY — re-run each queue item FRESH before building.
+
 **EASY→HARD QUEUE (next pulls, test between each):**
-1. **#3 placement** — `37608790` (split): split values are correct but land in E/F/G while headers set in
-   B/C/D. Root-cause compute_column target resolution when headers are set same-batch. EASY, likely golds it.
+1. ~~**#3 placement** — `37608790`~~ **DONE — GOLD (turn-3, no new work, see above).**
 2. **Emission brace-friction** — `4172ea6e`,`a9f325aa`: model writes correct formulas with BARE column names.
    Disciplined fix = GRAMMAR-level (force braces around refs), NOT resolver. MEDIUM.
+   **TURN-3 FRESH CONFIRM (real evaluator, both 0.0 ABSTAIN, 0 resolve_fails):**
+   - `4172ea6e` emitted `=Loan Issue Date + Length of Loan in Days` (bare names) → readback all 0.0.
+   - `a9f325aa` emitted `=PROPER(TRIM(SUBSTITUTE(Garbage Movie titles,'  ',' ')))` (bare name) → all 0.0.
+   KEY CONTRAST: the GOLD `37608790` used bare *CELL* refs (`A2`) which WORK — so the gap is specifically
+   header-name-BY-TEXT, never wrapped in `{}`. A per-task formula grammar that offers `{Header}` + A1 cell
+   refs + functions/literals but makes a bare multi-word header UNEMITTABLE would push the model to a working
+   form WITHOUT a resolver guess. Open fork (taking to advisor): grammar-force-braces vs sound exact-unique
+   bare-name resolver. NOTE: the resolver was declined to keep the emission axis measurable — that measurement
+   is now DONE (2/2 emit bare names), which weakens (not erases) the original objection.
+   **TURN-3 INJECTION PROBE (`brace_inject_probe.py`, hand-injected BRACED nameops, real evaluator) — the
+   advisor's blocking "is braces the SOLE gap?" check. DECISIVE:**
+   - `a9f325aa` braced → **GOLD**. Braces ARE the sole gap (model's PROPER(TRIM(SUBSTITUTE)) == gold PROPER(TRIM)).
+   - `4172ea6e` braced-only → **0.0** (readback `40557.0` = correct date SERIAL, but stored General → pandas
+     reads float; gold col is date-formatted → Timestamp; `df.equals` is dtype-sensitive → mismatch).
+   - `4172ea6e` braced + `set_number_format(C2:C10,"MM/DD/YYYY")` → **GOLD**.
+   ⇒ TWO levers needed: (L1) force braces around header refs [golds a9f325aa, prereq for 4172ea6e]; (L2)
+   date-result number-formatting [4172ea6e-only SECOND gap — model emitted NO set_number_format]. Both gold
+   once the real gap closes; comprehension intact. NEXT = build L1 (the dominant, shared gap) then L2.
+   **TURN-3 L1 BUILT + TESTED (battery_calc.py: sound bare-name falsifier in apply_B compute_column +
+   brace-specific compose_feedback). Emission-honest (harness never binds the name; model must re-emit). Unit:
+   detects bare, ignores braced + cell-refs (37608790 regression-safe). REAL run:**
+   - `4172ea6e`: model COMPLIED on retry → `{Loan Issue Date}+{Length of Loan in Days}`, readback=correct
+     serials. Brace gap CLOSED by L1. Still 0.0 = pure L2 (date-format) now. ✓ L1 works.
+   - `a9f325aa`: model braced on retry BUT REGRESSED the verb (compute_column→set_cell C2 value) — the
+     "re-emit ALL operations" retry re-derives the whole plan and picks a worse shape. Attempt-0 was an
+     EXACT-UNIQUE-FULL-header bare ref (sound to auto-wrap; the advisor's mis-bind objection targets greedy
+     PARTIAL matching, not exact-unique). OPEN: surgical "only add braces, keep ops identical" feedback vs
+     sound exact-unique auto-wrap vs hard per-task formula grammar. L2 (date-format for 4172ea6e) still TODO.
+   **TURN-3 PROMPT-BRITTLENESS LESSON (user: "that is why I fear prompt engineering" — VINDICATED by clean A/B):**
+   I tried 2 fixes for a9f325aa at once: (a) GLOBAL EMIT_PROMPT brace example, (b) LOCAL surgical retry. v2
+   (both) → a9f325aa GOLD but `0cecd4f3` REGRESSED gold→WRONG: the formula-brace example made the model write
+   SHEET NAMES with spaces ("Sheet 1" vs real "Sheet1") → rename no-ops → whole chain collapses. A formula
+   prompt edit silently broke an unrelated sheet-rename task. v3 (REVERTED the global example, kept the local
+   surgical retry) → `0cecd4f3` GOLD again (emit back to "Sheet1"), `a9f325aa` WRONG again (model STILL swaps
+   compute_column→set_cell on retry, ignoring "keep ops exactly"). ⇒ CLEAN ATTRIBUTION: the global example was
+   the ONLY thing that golded a9f325aa AND the thing that broke 0cecd4f3 — a single global knob trading one gold
+   for another. DOCTRINE: a prompt is a global, non-local, unattributable knob — every "fix" is an uncontrolled
+   experiment on all 47 tasks. The deterministic detector + surgical retry are LOCAL (fire only on a real bare-
+   name fault, can't touch sheet tasks) = the GOOD kind. **a9f325aa's real fix = force braces at EMISSION
+   (attempt-0) via a hard per-task formula GBNF (bare ref UNEMITTABLE), NOT a prompt nudge and NOT the flaky
+   retry — attempt-0 braces ⇒ no retry ⇒ no verb-swap ⇒ gold. This is the next build.** KEPT in code: local
+   bare-name detector + surgical retry (both deterministic, harmless when not firing). REVERTED: EMIT_PROMPT example.
+   **TURN-3 GROUNDING — the user's direction, REAL-EVALUATOR PROVEN (battery_calc.ground_bare_refs).** User
+   2026-06-23: "we are NOT training the model" (= the frontier's trap at small scale); "GROUNDING is the only
+   way"; "meet it where it works best, not try to have it work as a human would"; neuromorphic = reflexive
+   compute grounded in PRESENT state, not symbolic procedure recalled from memory. REFRAME: the model emitting
+   bare `Loan Issue Date` is NOT an error — it names the column it PERCEIVED (grounded, correct); {braces} are
+   OUR dialect. Every prior fix (prompt-teach / grammar-force / retry-nag / emitter-train) = COERCION toward us.
+   GROUNDING inverts: the model names → the HARNESS binds the name to the live-detected header. `ground_bare_refs`
+   wraps SOUND bare occurrences in braces (guards = the whole mis-bind surface: skip inside "literals", in
+   function position `name(`, already-braced; LONGEST-header-first) → existing notation-robust resolver binds
+   (unique-or-fail-closed; soundness unchanged). REPLACED the fail-closed bare-detector; removed dead brace
+   feedback. Unit-tested incl BOTH advisor break cases (header "Left"+LEFT(, header "Black" inside literal) →
+   correctly skipped. REAL RUN: **a9f325aa GOLD attempts=1** (natural first emission grounded, NO retry/verb-
+   swap), 37608790/51b11269/0cecd4f3 stay GOLD, 0 false-pass. 4172ea6e still 0.0 = pure L2 (date-format) now.
+   DURABILITY WHY: couples ONLY to live-detected headers (model-swap-proof) + the model's natural semantic
+   output (its strength); no function-vocab enumeration (grammar's rot), no prompt (global brittleness), no
+   training. NEXT = L2 as the SAME grounding move on OUTPUT.
+   **TURN-3 L2 GROUNDING (OUTPUT TYPE) — DONE, 4172ea6e GOLD (3/3 with a9f325aa+37608790, 0 false-pass).**
+   Same move applied to the result: the model computes a maturity DATE but stores a bare serial; evaluator
+   compares by pandas dtype (Timestamp≠float) → correct value, wrong type → mismatch. GET-DATA-FIRST surfaced
+   a TWIST: added daemon number-format perception (`_structure` coltypes via getByKey(NumberFormat).Type|fmt-
+   string; detect() attaches `ntype`), but column A "Loan Issue Date" reads as **[16,"General"]** in LibreOffice
+   — it DROPS the xlsx date format on import (openpyxl sees mm-dd-yy; UNO sees General). So NO structural source
+   signal exists. GROUNDED on the DECLARED semantic instead: `ground_result_date_type` formats the target as a
+   date when the target/a-referenced header carries a date word ("…Date") OR a referenced col's live format is
+   date-typed (belt-and-suspenders), AND the result values are valid non-trivial date serials (≥1000 floor →
+   date−days≈120 correctly stays numeric; self-falsifying on values). Parses RESOLVED A1 refs (covers braced-
+   then-resolved + raw A2). Reacts to present state; only ACTS on a positive match. Daemon redeploys per run so
+   the perception ships. **BOTH brace-friction tasks now GOLD via GROUNDING — input refs (ground_bare_refs) AND
+   output type (ground_result_date_type) — no prompt, grammar, retry, or training.** NEXT = broader regression
+   sweep (sample/heldout) for the honest updated gold count + confirm no spurious date-formatting elsewhere.
+   **TURN-3 HELDOUT SWEEP (all 30, real evaluator): 6/30 GOLD, 0 FALSE-PASS.** Golds: 0cecd4f3, 1d17d234,
+   37608790, 4172ea6e, 51b11269, a9f325aa (this turn ADDED 4172ea6e + a9f325aa via grounding + the free
+   37608790). The 24 non-golds are DOMINATED BY MISSING OP-VOCAB (charts/sparklines 2bd59342,3a7c8185; pivots
+   1954cced,1de60575,535364ea,30e3e107; freeze 4188d3a4; csv 3aaa4e37; number-format/decimal 6e99a1ad,21df9241,
+   a01fbce3; cell-resize/zoom 1334ca3e,aa3a8974; col-reorder 7a4e4bc8; conditional-highlight 8b1ce5f2; transpose
+   eb03d19a; dedup abed40dc; fill-NA 6054afcb; cross-sheet 51719eea,21ab7b40) — predicted capability gaps, NOT
+   comprehension. NOTE 0326d92d/0a2e43bf (total_row tasks) WRONG — worth a look. Integrity intact (0 false-pass).
+   **TURN-3 DIRECT APPLICATION ① — GROUND SHEET-NAME REFS (battery_calc.ground_sheet + EXISTING_SHEET_FIELDS,
+   wired at apply_B loop top).** Same grounding move for sheet identifiers: the daemon's make_resolve_sheet does
+   EXACT-only hasByName then silently falls back to active/first sheet → "Sheet 1" (prompt spelling) ≠ live
+   "Sheet1" mis-resolves (the 0cecd4f3-class fragility; it golds now only because the model happens to emit the
+   exact spelling). ground_sheet binds existing-sheet refs (old/source/before/sheet — NEVER new-name fields) by
+   exact-or-unique-normalized(whitespace/case)-match, fail-OPEN (keeps the daemon's "S"→lone-sheet tolerance).
+   Unit-tested. Hardening (robustness, not new golds in this sample). REAL-EVALUATOR REGRESSION CLEAN: 0cecd4f3
+   + 1d17d234 stay GOLD, 0 false-pass. **GROUNDING now applied at THREE seams: column refs (ground_bare_refs) +
+   output type (ground_result_date_type) + sheet refs (ground_sheet) — one principle, three places the text
+   codec was losing structure.** Remaining gold-gap = capability surface (charts/pivots/format/freeze/csv/
+   transpose), NOT comprehension. Latent/semantic binding (② — embedder-based fuzzy ref) parked in FUTURE_RESEARCH
+   R1 gradient, gated on a deliberately-fuzzy-reference task to stay falsifiable.
+   **TURN-3 "DO 1-3" (capability surface / total_row / semantic-binding) — HONEST PARTIAL:**
+   - **#2 total_row near-misses (0326d92d, 0a2e43bf) = NOT a total_row bug.** Both evaluators have a `chart`
+     rule (bar/line); 0a2e43bf's total_row emitted CORRECTLY (sums right) — it fails purely on the missing
+     chart. So #2 FOLDS INTO #1/charts. Anti-treadmill verdict: the verb works; the gap is chart vocab.
+   - **#1 number-format: shipped a real, general fix — `clamp_range_to_data`.** ROOT-CAUSED 6e99a1ad (host
+     libreoffice CSV diff): the model formatted `C2:C9` one row past the 7-row data; formatting an EMPTY cell
+     EXTENDS the used area → CSV export gains a phantom trailing row → sheet_print row-count mismatch. Clamp
+     binds format/number-format range bottoms to the live data extent (shrink-only, fail-open). VM-verified it
+     removed the phantom row (output now A1:D8). BUT 6e99a1ad STILL 0: residual is a `sheet_print` DISPLAY-
+     RENDER match (our Spent renders raw `40` vs gold `40.00`; Date 4-digit vs 2-digit) — finicky CSV-export
+     semantics, NOT op-application (the 0.00 format DID apply). Honest: clamp is a keeper (removes a real
+     failure class); 6e99a1ad needs display-render parity I couldn't nail without the in-VM CSV. Charts (the
+     dominant #1 lever, unlocks 0326d92d/0a2e43bf/2bd59342/3a7c8185 + the chart-gated pivots) = a LARGE
+     separate build (UNO chart insertion + evaluator chart-prop match + known 12382c62 break) — NOT attempted.
+   - **#3 semantic/latent binding: PROBED (the membrane's first inward rung) — real, nuanced finding.**
+     Full record FUTURE_RESEARCH R1b. Headline: ONE unified Qwen2.5-Coder-7B serves chat+grammar+embeddings
+     (verified) → the brain IS the encoder, binding in ITS OWN latent space (the membrane requirement, no
+     separate/foreign embedder). LFM-ColBERT mean-pool useless (user caught the family mismatch; 0.96-0.98
+     cluster confirmed). Qwen mean-pool poor (3/6 wrong). **Qwen LAST-TOKEN pool = the lever**: distinctive
+     refs bind with strong margins, distractors go NEGATIVE ("the movie titles"→Garbage Movie titles m=0.19;
+     "amount spent"→Spent($) m=0.55). Fails on genuine overlap (3 loan-DATE cols) + terse single words (Rank) —
+     exactly where margin-θ FAIL-CLOSED should abstain (sound). Training-free binding in the brain's own space
+     is VIABLE for distinctive refs → lowers the R1 wall. NOT yet wired (needs a fuzzy-ref eval task for a new-
+     gold demo; safe-by-construction on existing lexical golds). Resolver design = lexical-first → margin-gated
+     semantic-fallback → fail-closed; SEPARATE resolver, never prompt-injected (inv #10).
+   **OPERATIONAL NOTE (2026-06-23):** the :8080 brain is now running WITH `--embeddings --pooling last` (chat +
+   grammar verified unaffected — pooling only changes the embeddings endpoint). Harmless to the harness and
+   leaves the encoder ready for semantic binding. To return to canonical, use docs/osworld/start_brain.sh.
+   GPU-settle gotcha: wait for VRAM to free (~5s) between pkill and relaunch or the new server dies (exit 144).
+   KEEPERS this sub-turn: clamp_range_to_data (sound, general). NOTE for sheet_print tasks: the host HAS
+   libreoffice (`/usr/bin/soffice`) — usable to reproduce CSV-export diffs locally, BUT its render defaults
+   differ from the in-VM converter (formats/date-width), so it's a HINT not ground truth.
 3. **Wave 2 — charts** — `0326d92d`,`0a2e43bf`,`347ef137` (+ `2bd59342` is OSWorld-INFEASIBLE → must abstain).
    chart insertion (bar/line/column; evaluator checks type/title/direction; known 12382c62 break risk). HARD.
 4. **Wave 3 — pivots** — `1de60575`,`30e3e107`. UNO DataPilot. HARD.

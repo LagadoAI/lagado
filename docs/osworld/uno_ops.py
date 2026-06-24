@@ -233,6 +233,50 @@ def apply_one_op(doc, resolve_sheet, op):
                     cell.setString("")
                 else:
                     cell.setString(val)
+    elif kind == "create_chart":
+        # Insert a chart so openpyxl reads it back with the right tagname (lineChart/barChart) + series refs.
+        # `ranges` = ";"-joined A1 ranges (e.g. "B1:G1;B12:G12") → category + value; `type` line|bar|column.
+        # NOTE: `uno` is already module-level (line ~23); a local `import uno` here would make uno function-
+        # local and break every OTHER branch that uses it (UnboundLocalError). Import only Rectangle locally.
+        from com.sun.star.awt import Rectangle
+        sh = resolve_sheet(op["sheet"])
+        charts = sh.Charts
+        name = op.get("name", "Chart1")
+        addrs = []
+        for rname in (op.get("ranges") or "").split(";"):
+            rname = rname.strip()
+            if rname:
+                addrs.append(sh.getCellRangeByName(rname).getRangeAddress())
+        rect = Rectangle(); rect.X = 9000; rect.Y = 500; rect.Width = 14000; rect.Height = 9000
+        col_headers = str(op.get("col_headers", "false")).lower() in ("1", "true", "yes")
+        row_headers = str(op.get("row_headers", "true")).lower() in ("1", "true", "yes")
+        if charts.hasByName(name):
+            charts.removeByName(name)
+        charts.addNewByName(name, rect, tuple(addrs), col_headers, row_headers)
+        chart = charts.getByName(name).getEmbeddedObject()
+        ctype = (op.get("type") or "line").lower()
+        svc = {"line": "com.sun.star.chart.LineDiagram", "bar": "com.sun.star.chart.BarDiagram",
+               "column": "com.sun.star.chart.BarDiagram"}.get(ctype, "com.sun.star.chart.LineDiagram")
+        diag = chart.createInstance(svc)
+        # series orientation: ROWS = one series spanning a row (matches a total-row chart B12:G12). Default
+        # auto-detect gave column-wise series; force it. com.sun.star.chart.ChartDataRowSource.ROWS = 0.
+        rowsrc = str(op.get("data_in", "rows")).lower()
+        try:
+            diag.DataRowSource = 0 if rowsrc == "rows" else 1
+        except Exception:
+            pass
+        if ctype == "column":
+            try: diag.Vertical = True
+            except Exception: pass
+        elif ctype == "bar":
+            try: diag.Vertical = False
+            except Exception: pass
+        chart.setDiagram(diag)
+        if op.get("title"):
+            try:
+                chart.HasMainTitle = True; chart.Title.String = op["title"]
+            except Exception:
+                pass
     else:
         raise ValueError("unknown op kind: %r" % kind)
 

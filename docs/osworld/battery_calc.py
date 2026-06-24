@@ -72,11 +72,15 @@ def detect(g, sheets_detail):
         hrow = find_header_row(top)                       # 1-based
         headers = top[hrow - 1] if len(top) >= hrow else []
         samples = top[hrow:hrow + 3] if len(top) > hrow else []
+        coltypes = sd.get("coltypes", [])
+        colfmt = sd.get("colfmt", [])
         cands = []
         for c in range(ncols):
             hdr = headers[c] if c < len(headers) and headers[c] is not None else ""
             colsamp = [row[c] for row in samples if c < len(row)]
-            cands.append({"letter": col_letter(c), "header": str(hdr), "samples": colsamp, "idx0": c})
+            ntype = coltypes[c] if c < len(coltypes) else "number"
+            cands.append({"letter": col_letter(c), "header": str(hdr), "samples": colsamp,
+                          "idx0": c, "ntype": ntype, "fmt": colfmt[c] if c < len(colfmt) else None})
         out[name] = {"cols": cands, "rows": nrows, "data_start": hrow + 1, "header_row": hrow}
     return out
 
@@ -157,7 +161,8 @@ GRAMMAR_B = (
     ' | "format_cells(sheet=" str ", range=" str ", font_color=" str ", fill_color=" str ", bold=" str ")"'
     ' | "merge_cells(sheet=" str ", range=" str ")"'
     ' | "sort_range(sheet=" str ", range=" str ", key=" str ", order=" str ")"'
-    ' | "set_number_format(sheet=" str ", range=" str ", format=" str ")"\n'
+    ' | "set_number_format(sheet=" str ", range=" str ", format=" str ")"'
+    ' | "create_chart(sheet=" str ", ranges=" str ", type=" str ", title=" str ", data_in=" str ")"\n'
     'str ::= "\\"" [^"\\\\]* "\\""\n'
 )
 
@@ -194,9 +199,33 @@ EMIT_PROMPT = (
     "  format_cells(sheet=\"S\", range=\"A1:C1\", font_color=\"#rrggbb\", fill_color=\"#rrggbb\", bold=\"true\")  style cells (leave a field \"\" to skip it)\n"
     "  merge_cells(sheet=\"S\", range=\"A1:C1\")             merge a cell range\n"
     "  sort_range(sheet=\"S\", range=\"A1:D9\", key=\"{{Header}}\", order=\"asc\")  sort a range by a column (order asc|desc)\n"
-    "  set_number_format(sheet=\"S\", range=\"E2:E9\", format=\"0.00\")  set a number-format code on a range\n\n"
+    "  set_number_format(sheet=\"S\", range=\"E2:E9\", format=\"0.00\")  set a number-format code on a range\n"
+    "  create_chart(sheet=\"S\", ranges=\"A1:D1;A9:D9\", type=\"line\", title=\"\", data_in=\"rows\")  insert a chart;"
+    " ranges=\"categories;values\" as A1 cell ranges (semicolon-separated), type=line|bar|column, data_in=rows|columns\n\n"
     "Refer to columns by {{Header}} name where a name is asked; use A1 cell refs for ranges. "
     "Emit ONLY the operations the goal needs, as a list of calls:")
+
+def emit_gaps(reasoning, nameops):
+    """EMIT-COMPLETENESS GROUNDING (2026-06-23, the reason→emit bridge — membrane: the reasoning is the model's
+    rich representation; the emit is a lossy conversion that can DROP a committed action). Detect actions the
+    model's OWN reasoning commits to but the emitted ops don't cover. NOT leading (the model already reasoned
+    it) — we hold the model to its own analysis. Returns a list of gap tags. Charts first (the observed gap:
+    reasoning describes a 'line chart over B12:G12' but emits only total_row)."""
+    r = (reasoning or "").lower()
+    gaps = []
+    if any(w in r for w in ("chart", "graph", "plot", "sparkline")) and \
+       not any(n.get("kind") == "create_chart" for n in nameops):
+        gaps.append("chart")
+    return gaps
+
+def gap_feedback(gaps):
+    lines = []
+    if "chart" in gaps:
+        lines.append("- your analysis describes a CHART but you did NOT emit create_chart(...). Keep your other "
+                     "operations and ALSO emit: create_chart(sheet=\"S\", ranges=\"<categories>;<values>\", "
+                     "type=\"line|bar|column\", data_in=\"rows\") — ranges are A1 cell ranges (the category/label "
+                     "range, then the value range, semicolon-separated), e.g. the header row then the data row.")
+    return "\n".join(lines)
 
 def compose_feedback(fails, fired):
     """Turn read-back faults into a concrete correction note for the next emit (the retry condition)."""
@@ -242,8 +271,8 @@ def author_B(instr, detected, log, feedback=None, temperature=0.0):
     # call 2: EMIT (grammar-constrained). On retry, append the specific fault.
     emit = EMIT_PROMPT.format(instr=instr, cards=cards, reasoning=reasoning)
     if feedback:
-        emit += ("\n\nYour PREVIOUS attempt had these problems — fix exactly these and re-emit ALL "
-                 "operations:\n%s" % feedback)
+        emit += ("\n\nYour PREVIOUS attempt had these problems. Keep your operations EXACTLY as written "
+                 "(same verbs, same targets, same structure) and change ONLY what these notes say:\n%s" % feedback)
     raw = _chat(emit, grammar=GRAMMAR_B, temperature=temperature, seed=seed, max_tokens=800)
     log.setdefault("emit_raw", [])
     log["emit_raw"].append(raw)
@@ -254,7 +283,7 @@ def parse_B_nameops(text):
     against the live re-detected structure, so new sheets / just-set headers resolve."""
     nameops = []
     verbs = ("compute_column", "set_cell", "add_sheet", "rename_sheet", "copy_sheet", "total_row",
-             "format_cells", "merge_cells", "sort_range", "set_number_format")
+             "format_cells", "merge_cells", "sort_range", "set_number_format", "create_chart")
     for verb, body in scan_calls(text, verbs):
         kw = parse_kv(body)
         if verb == "add_sheet":
@@ -285,6 +314,10 @@ def parse_B_nameops(text):
         elif verb == "set_number_format":
             nameops.append({"kind": "set_number_format", "sheet": kw.get("sheet"),
                             "range": kw.get("range"), "format": kw.get("format", "")})
+        elif verb == "create_chart":
+            nameops.append({"kind": "create_chart", "sheet": kw.get("sheet"),
+                            "ranges": kw.get("ranges", ""), "type": kw.get("type", "line"),
+                            "title": kw.get("title", ""), "data_in": kw.get("data_in", "rows")})
     return nameops
 
 def apply_B(g, nameops, log):
@@ -295,6 +328,9 @@ def apply_B(g, nameops, log):
     written, fails = [], []
     for nop in nameops:
         k = nop["kind"]
+        for f in EXISTING_SHEET_FIELDS.get(k, []):       # ground existing-sheet refs to live tabs (grounding)
+            if nop.get(f):
+                nop[f] = ground_sheet(nop[f], live)
         if k == "add_sheet":
             if nop["name"] not in live:                 # idempotent (safe to re-run on retry)
                 g.client("apply", {"op": {"op": "add_sheet", "name": nop["name"]}})
@@ -318,6 +354,12 @@ def apply_B(g, nameops, log):
             # ('_'), which silently evaluates to 0. The model's quotes are only ever string literals here
             # (sheet refs come from {braces}→`!`), so normalizing ' → " is safe and general.
             formula = formula.replace("'", '"')
+            # GROUND the model's NATURAL column references (2026-06-23): it names columns by the header it
+            # perceived; we bind those names against the LIVE structure rather than demand the {brace} dialect.
+            # ground_bare_refs braces only SOUND occurrences (guarded for literals/function-position/longest-
+            # first); the resolver below still owns binding soundness (unique-or-fail-closed). No prompt, no
+            # grammar, no retry-nag, no training — the model's first natural emission is accepted as-is.
+            formula = ground_bare_refs(formula, sheet, live)
             tcol = resolve_name(sheet, target, live, [])     # throwaway fails — unresolved target → create
             if tcol is None:
                 tcol = create_target_column(g, sheet, target, live)
@@ -345,6 +387,7 @@ def apply_B(g, nameops, log):
                 fails.append({"name": a1, "range": rng, "why": "apply error: %s" % rr.get("error", "")[:80]})
                 continue
             written.append((sheet, rng, a1))
+            ground_result_date_type(g, sheet, a1, rng, live)
             live = live_detect(g)
         elif k == "total_row":
             # HARNESS-LEVEL verb (expands into existing `set` ops — daemon untouched): write the label in
@@ -380,6 +423,8 @@ def apply_B(g, nameops, log):
         elif k in ("format_cells", "merge_cells", "set_number_format"):
             op = {"op": k}
             op.update({kk: vv for kk, vv in nop.items() if kk != "kind"})
+            if k in ("format_cells", "set_number_format"):       # not merge (a merge range is intentional)
+                op["range"] = clamp_range_to_data(op.get("range"), nop.get("sheet"), live)
             rr = g.client("apply", {"op": op})
             if not rr.get("ok"):
                 fails.append({"name": nop.get("range"), "why": "apply error: %s" % rr.get("error", "")[:80]})
@@ -401,11 +446,70 @@ def apply_B(g, nameops, log):
             if not rr.get("ok"):
                 fails.append({"name": key or rng, "why": "apply error: %s" % rr.get("error", "")[:80]})
             live = live_detect(g)
+        elif k == "create_chart":
+            grounded = ground_chart_ranges(nop.get("ranges", ""), nop.get("sheet"), live)
+            op = {"op": "create_chart", "sheet": nop.get("sheet"), "ranges": grounded,
+                  "type": nop.get("type", "line"), "title": nop.get("title", ""),
+                  "data_in": nop.get("data_in", "rows")}
+            rr = g.client("apply", {"op": op})
+            if not rr.get("ok"):
+                fails.append({"name": nop.get("ranges"), "why": "apply error: %s" % rr.get("error", "")[:80]})
+            live = live_detect(g)
     log["resolve_fails"] = fails
     log["written_regions"] = written
     return written, fails
 
 NAME_TOK = re.compile(r"\{([^}]*)\}")
+
+EMB_URL = "http://localhost:8080/v1/embeddings"   # the brain serves embeddings too (--embeddings --pooling last)
+SEM_THETA = 0.08                                  # min top1-top2 cosine margin to bind (else fail-closed/abstain)
+_emb_cache = {}
+
+def _embed(text):
+    """Embed via the BRAIN's OWN latent space (last-token pooling). Returns a vector or None if embeddings are
+    not enabled on the server (graceful degradation → semantic fallback simply no-ops, lexical path unchanged)."""
+    if text in _emb_cache:
+        return _emb_cache[text]
+    try:
+        r = requests.post(EMB_URL, json={"input": text}, timeout=20).json()
+        v = r["data"][0]["embedding"]
+    except Exception:
+        v = None
+    _emb_cache[text] = v
+    return v
+
+def _cos(a, b):
+    d = sum(x * y for x, y in zip(a, b)); na = sum(x * x for x in a) ** 0.5; nb = sum(y * y for y in b) ** 0.5
+    return d / (na * nb) if na and nb else 0.0
+
+def semantic_col(sheet, name, live):
+    """LATENT-BINDING FALLBACK (2026-06-23, the membrane's first inward rung — FUTURE_RESEARCH R1b). Fires ONLY
+    after lexical resolution (exact header / letter / index) has FAILED. Binds the model's natural reference to
+    the nearest live header IN THE BRAIN'S OWN EMBEDDING SPACE (cosine), but ONLY when the top match is UNIQUE
+    and beats the runner-up by SEM_THETA — else returns None (FAIL-CLOSED, abstain, exactly where overlapping or
+    terse headers make it ambiguous). SEPARATE deterministic resolver, NEVER injected into the action prompt
+    (inv #10). No-ops cleanly if the server has no embeddings endpoint. Returns a column letter or None."""
+    info = live.get(sheet)
+    if not info:
+        return None
+    cols = [(c["letter"], c["header"].strip()) for c in info["cols"] if c["header"].strip()]
+    if not cols:
+        return None
+    qv = _embed(name.strip())
+    if qv is None:
+        return None
+    scored = []
+    for letter, hdr in cols:
+        hv = _embed(hdr)
+        if hv is None:
+            return None
+        scored.append((_cos(qv, hv), letter))
+    scored.sort(reverse=True)
+    if len(scored) == 1:
+        return scored[0][1] if scored[0][0] >= 0.30 else None      # lone header: absolute floor
+    if scored[0][0] - scored[1][0] >= SEM_THETA:
+        return scored[0][1]
+    return None
 
 def resolve_name(sheet, name, detected, fails):
     """Exact, unique header match → column letter. Ambiguous/missing → None (fail-closed, logged)."""
@@ -424,6 +528,9 @@ def resolve_name(sheet, name, detected, fails):
     lc = _letter_col(sheet, name.strip(), detected)    # column-letter target notation
     if lc:
         return lc[1]
+    sem = semantic_col(sheet, name, detected)          # latent-binding fallback (margin-gated, fail-closed)
+    if sem:
+        return sem
     fails.append({"name": name, "sheet": sheet, "why": "%d header matches (need exactly 1)" % len(hits)})
     return None
 
@@ -503,7 +610,135 @@ def resolve_ref(token, default_sheet, detected, fails):
     lc = _letter_col(default_sheet, token, detected)   # column-letter notation, default sheet
     if lc:
         return lc
+    sem = semantic_col(default_sheet, token, detected)  # latent-binding fallback (margin-gated, fail-closed)
+    if sem:
+        return (default_sheet, sem)
     fails.append({"name": token, "why": "%d workbook matches (need exactly 1)" % len(allhits)}); return None
+
+CELLREF = re.compile(r"(?:([^\s!(){}'\"+\-*/,=<>]+)!)?\$?([A-Za-z]{1,3})\$?(\d+)")
+
+def ground_result_date_type(g, sheet, a1, rng, live):
+    """GROUND THE OUTPUT TYPE (L2, 2026-06-23, user direction — the same move as ground_bare_refs, applied to
+    the RESULT). The model correctly computes a maturity DATE but stores a bare serial; the evaluator compares
+    by dtype (pandas Timestamp vs float), so a correct value in the wrong type mismatches. Rather than make the
+    model remember to format (human-like procedure-recall) or parse the operation symbolically, we REACT TO
+    PRESENT STATE: a result column the sheet DECLARES as a date (target or a referenced source header carries a
+    date word, OR a referenced column's live number-format is date-typed) whose values are valid non-trivial
+    date serials IS a date → format it so. NOTE this file imports its dates as General serials (LibreOffice
+    drops the xlsx date format on load), so the DECLARED NAME is the surviving signal — the structural format
+    perception stays as belt-and-suspenders for files that keep it. Self-falsifying on values: date−days→~120
+    fails the ≥1000 floor → correctly stays numeric. Reads the RESOLVED A1 refs (covers braced-then-resolved
+    header refs and raw A2-style refs). Only ACTS on a positive match; silent + harmless otherwise."""
+    seen = set()
+    def hdr_of(s2, l2):
+        col = next((c for c in live.get(s2, {}).get("cols", []) if c["letter"] == l2), None)
+        return (col.get("header") if col else "") or ""
+    def is_date_word(h):
+        return "date" in h.lower()
+    target_letter = re.match(r"([A-Za-z]+)", rng).group(1)
+    # GROUND on what the sheet DECLARES + what it PERCEIVES: a column named "…Date" (target or a referenced
+    # source) is a date column, OR a referenced column whose live number-format is date-typed (when LibreOffice
+    # preserves it — this file imports the dates as General, so the declared name is the surviving signal).
+    declared_date = is_date_word(hdr_of(sheet, target_letter))
+    for m in CELLREF.finditer(a1):
+        s2 = (m.group(1) or sheet).strip()
+        l2 = m.group(2).upper()
+        if (s2, l2) in seen:
+            continue
+        seen.add((s2, l2))
+        col = next((c for c in live.get(s2, {}).get("cols", []) if c["letter"] == l2), None)
+        if col and (col.get("ntype") == "date" or is_date_word(col.get("header") or "")):
+            declared_date = True
+    if not declared_date:
+        return
+    rbres = g.client("read", {"sheet": sheet, "range": rng})
+    resvals = [row[0] for row in rbres.get("cells", []) if row and isinstance(row[0], (int, float))]
+    # value plausibility: every result is a valid, non-trivial date serial (≥1000 ≈ year 1902, ≤ Excel max).
+    # Keeps YEAR(date)→2010 (passes range — but a "…Date" column of years is itself a date-ish col; acceptable)
+    # and especially date−date→~120 (FAILS the ≥1000 floor) correctly NUMERIC.
+    if resvals and all(1000 <= v <= 2958465 for v in resvals):
+        g.client("apply", {"op": {"op": "set_number_format", "sheet": sheet, "range": rng,
+                                  "format": "MM/DD/YYYY"}})
+
+def clamp_range_to_data(rng, sheet, live):
+    """GROUND a format/style range's BOTTOM row to the perceived data extent (2026-06-23). The model guesses
+    the row count and often over-reaches by a row ("C2:C9" on 7-row data); formatting an EMPTY cell EXTENDS the
+    used area, so the CSV/sheet_print export gains a phantom trailing ",,," row → row-count mismatch → 0 (the
+    6e99a1ad failure). Clamp the end row to the live last used row. Only shrinks an over-reach; never grows a
+    range. Leaves non-rectangular / unparseable ranges untouched (fail-open)."""
+    m = re.match(r"([A-Za-z]+)(\d+):([A-Za-z]+)(\d+)$", (rng or "").replace("$", ""))
+    last = live.get(sheet, {}).get("rows")
+    if not m or not last:
+        return rng
+    if int(m.group(4)) > last:
+        return "%s%s:%s%d" % (m.group(1), m.group(2), m.group(3), last)
+    return rng
+
+def ground_sheet(name, live):
+    """GROUND a SHEET reference (2026-06-23): the model names a sheet the way it perceived/read it — often
+    copied from the prompt ("Sheet 1", "Sheet 2") — while the live tab is "Sheet1"/"Sheet2". Same move as
+    ground_bare_refs, for sheet identifiers: bind the model's natural spelling to the actual live sheet.
+    Exact match wins; else a UNIQUE whitespace/case-insensitive match binds; else leave as-is (fail-OPEN to the
+    daemon's own placeholder tolerance — e.g. "S"→the lone sheet). Sound: only a unique normalized match binds,
+    and it can only ever bind to a REAL live sheet. Applied to EXISTING-sheet refs only, never NEW-name fields
+    (a sheet being CREATED must keep the name the model chose). Fixes the silent mis-resolve where the daemon's
+    exact-only hasByName fell back to the active/first sheet (the 0cecd4f3-class fragility)."""
+    if not name or name in live:
+        return name
+    def norm(s):
+        return "".join(str(s).split()).casefold()
+    hits = [s for s in live if norm(s) == norm(name)]
+    return hits[0] if len(hits) == 1 else name
+
+# Op fields that REFERENCE an existing sheet (to be grounded). NEW-name fields (add/rename/copy "new",
+# "name") are deliberately absent — a sheet being created keeps the model's chosen name.
+EXISTING_SHEET_FIELDS = {
+    "rename_sheet": ["old"], "copy_sheet": ["source", "before"], "set_cell": ["sheet"],
+    "compute_column": ["sheet"], "total_row": ["sheet"], "format_cells": ["sheet"],
+    "merge_cells": ["sheet"], "set_number_format": ["sheet"], "sort_range": ["sheet"],
+}
+
+def ground_chart_ranges(ranges, sheet, live):
+    """GROUND imprecise chart ranges to the structured chart (2026-06-23, the reason→emit bridge for args). The
+    model gestures at 'the totals row over these columns with the header as categories' but encodes sloppy A1
+    ranges (e.g. 'B1:B12;C12:G12' for what should be cat=B1:G1, val=B12:G12). Extract the COLUMN SPAN + the DATA
+    ROW (the referenced row that isn't the header) from whatever it emitted, and rebuild canonical
+    'headerRow ; dataRow' over the full span. Fires only when a header row + a distinct data row + ≥2 columns are
+    present; else leaves the ranges untouched (fail-open). Grounds the intent, not the typo."""
+    refs = re.findall(r"([A-Za-z]+)(\d+)", ranges or "")
+    if not refs:
+        return ranges
+    cols = sorted({_col_idx(c) for c, _ in refs})
+    rows = sorted({int(r) for _, r in refs})
+    hrow = live.get(sheet, {}).get("header_row", 1)
+    datarows = [r for r in rows if r != hrow]
+    if not datarows or len(cols) < 2:
+        return ranges
+    drow = max(datarows)
+    c0, c1 = col_letter(cols[0]), col_letter(cols[-1])           # both 0-based (_col_idx returns n-1)
+    return "%s%d:%s%d;%s%d:%s%d" % (c0, hrow, c1, hrow, c0, drow, c1, drow)
+
+def ground_bare_refs(formula, sheet, live):
+    """GROUNDING (2026-06-23, user direction): meet the model where it works. The model names a column by the
+    header it PERCEIVED ("Loan Issue Date") — that is the grounded, correct thing to do; the {braces} are OUR
+    dialect. Instead of coercing the dialect (prompt/grammar/retry/training — all bend the model toward us),
+    we GROUND the natural reference: wrap each SOUND bare occurrence of a live-detected header in braces so the
+    existing notation-robust resolver binds it (unique-or-fail-closed — soundness stays where it already is).
+    This pass only RECOGNIZES the reference form; it does not decide bindings. The GUARDS are the entire mis-
+    bind surface (the advisor's break cases): skip a name inside a "string literal", in function position
+    (name immediately followed by '('), or already braced; match the LONGEST header first so a short header
+    ("Sales") never lands inside a longer one ("Sales Tax"). Returns the formula with natural refs braced."""
+    cols = live.get(sheet, {}).get("cols", [])
+    headers = sorted({c["header"].strip() for c in cols if c["header"].strip()}, key=len, reverse=True)
+    out = formula
+    for h in headers:
+        pat = re.compile(r"(?<![\w{])" + re.escape(h) + r"(?![\w}])(?!\s*\()", re.I)
+        spans = [m.span() for m in re.finditer(r'"[^"]*"', out)]   # string-literal spans on CURRENT text
+        for m in reversed(list(pat.finditer(out))):                # right-to-left keeps indices valid
+            if any(a <= m.start() < b for a, b in spans):          # inside a literal → never ground
+                continue
+            out = out[:m.start()] + "{" + m.group(0) + "}" + out[m.end():]
+    return out
 
 def substitute_names(formula, default_sheet, detected, fails, row, refsheets=None):
     """Replace {Header} / {Sheet.Header} with A1 refs at the given row. Cross-sheet refs use the proven
@@ -673,7 +908,7 @@ def run_condition(env, task, cond, file_path, run_idx):
     resolve_fails, fired, written = [], [], []
     if cond == "A":
         detected = detect(g, detail)               # SAME fixed detector as B → A sees real headers too
-        log["detected"] = {s: [(c["letter"], c["header"]) for c in i["cols"]] for s, i in detected.items()}
+        log["detected"] = {s: [(c["letter"], c["header"], c.get("ntype")) for c in i["cols"]] for s, i in detected.items()}
         ops, ainfo = author_A(instr, detected)
         log["author"] = ainfo
         log["ops"] = ops
@@ -688,7 +923,7 @@ def run_condition(env, task, cond, file_path, run_idx):
         fired = falsify(g, written)
     else:
         detected = detect(g, detail)
-        log["detected"] = {s: [(c["letter"], c["header"]) for c in i["cols"]] for s, i in detected.items()}
+        log["detected"] = {s: [(c["letter"], c["header"], c.get("ntype")) for c in i["cols"]] for s, i in detected.items()}
         feedback = None
         attempt = 0
         for attempt in range(2):                  # reason→emit, then ONE read-back retry (the ReAct condition)
@@ -697,13 +932,14 @@ def run_condition(env, task, cond, file_path, run_idx):
             log["nameops"] = nameops
             written, resolve_fails = apply_B(g, nameops, log)
             fired = falsify(g, written)
+            gaps = emit_gaps(log.get("reasoning", ""), nameops)   # reason→emit completeness (membrane bridge)
             log["n_ops"] = len(nameops)
-            if nameops and not resolve_fails and not fired:
+            if nameops and not resolve_fails and not fired and not gaps:
                 break                            # emitted ops, no detected fault — stop (NOT a correctness
                                                  # claim). Covers STRUCTURAL-only tasks (rename/copy/format)
                                                  # which write no compute_column → empty `written` → used to
                                                  # retry needlessly. (no_fault below still gates self-report.)
-            feedback = compose_feedback(resolve_fails, fired)
+            feedback = (compose_feedback(resolve_fails, fired) + "\n" + gap_feedback(gaps)).strip()
             log.setdefault("feedbacks", []).append(feedback)
         log["attempts"] = attempt + 1
 
