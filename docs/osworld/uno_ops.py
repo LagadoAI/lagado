@@ -277,6 +277,45 @@ def apply_one_op(doc, resolve_sheet, op):
                 chart.HasMainTitle = True; chart.Title.String = op["title"]
             except Exception:
                 pass
+    elif kind == "create_pivot":
+        # Build a DataPilot (the app's Pivot Table) so the saved xlsx carries an OOXML pivotTable part the
+        # evaluator reads back via worksheet._pivots. Field columns are 0-based indices INTO the source range
+        # (which always starts at column A=0). A column index appearing in BOTH row_fields and data_fields is
+        # the count-by-self case (group by a column AND count it) — emitted as two specs on the same field
+        # (ROW then DATA), which UNO accepts and openpyxl reads as row_fields=[i] + data_fields=["i;;..."].
+        # The source range is auto-detected from the source sheet's used area (matches the gold's full A1:G..
+        # range; the evaluator's left/right-bias trimming then normalizes both to the used columns).
+        # NOTE: `uno` stays module-level (see create_chart note); only struct imports are local.
+        from com.sun.star.table import CellRangeAddress, CellAddress
+        src = resolve_sheet(op["source_sheet"])
+        dest_name = op.get("dest_sheet") or "Sheet2"
+        if not sheets.hasByName(dest_name):
+            sheets.insertNewByName(dest_name, sheets.Count)
+        dest = sheets.getByName(dest_name)
+        cur = src.createCursor(); cur.gotoEndOfUsedArea(False)
+        used = cur.RangeAddress
+        sa = CellRangeAddress()
+        sa.Sheet = src.RangeAddress.Sheet
+        sa.StartColumn = 0; sa.StartRow = 0
+        sa.EndColumn = used.EndColumn; sa.EndRow = used.EndRow
+        dp = dest.DataPilotTables
+        name = op.get("name") or ("PivotTable%d" % (dp.Count + 1))
+        if dp.hasByName(name):
+            dp.removeByName(name)
+        out_col = dp.Count * 10                          # separate band per pivot (location is not scored)
+        desc = dp.createDataPilotDescriptor()
+        desc.setSourceRange(sa)
+        fields = desc.DataPilotFields
+        ORI = lambda v: uno.Enum("com.sun.star.sheet.DataPilotFieldOrientation", v)
+        func = uno.Enum("com.sun.star.sheet.GeneralFunction", (op.get("data_func") or "sum").upper())
+        for ci in op.get("row_fields", []):
+            fields.getByIndex(int(ci)).Orientation = ORI("ROW")
+        for ci in op.get("col_fields", []):
+            fields.getByIndex(int(ci)).Orientation = ORI("COLUMN")
+        for ci in op.get("data_fields", []):
+            f = fields.getByIndex(int(ci)); f.Orientation = ORI("DATA"); f.Function = func
+        oa = CellAddress(); oa.Sheet = dest.RangeAddress.Sheet; oa.Column = out_col; oa.Row = 0
+        dp.insertNewByName(name, oa, desc)
     else:
         raise ValueError("unknown op kind: %r" % kind)
 

@@ -49,6 +49,18 @@ DEFAULT_SOCK = "/tmp/lagado_uno_daemon.sock"
 DEFAULT_UNO_PORT = 2002
 XLSX_FILTER = "Calc MS Excel 2007 XML"
 
+# Pre-seeded into our owned profile to turn crash recovery + autosave OFF (kills the "Document Recovery"
+# dialog on a VISIBLE relaunch after a hard kill). Owned-profile only — never touches the user's LibreOffice.
+_RECOVERY_OFF_XCU = (
+    '<?xml version="1.0" encoding="UTF-8"?>\n'
+    '<oor:items xmlns:oor="http://openoffice.org/2001/registry" '
+    'xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">\n'
+    ' <item oor:path="/org.openoffice.Office.Recovery/RecoveryInfo">'
+    '<prop oor:name="Enabled" oor:op="fput"><value>false</value></prop></item>\n'
+    ' <item oor:path="/org.openoffice.Office.Recovery/AutoSave">'
+    '<prop oor:name="Enabled" oor:op="fput"><value>false</value></prop></item>\n'
+    '</oor:items>\n')
+
 
 def _pv(name, value):
     p = PropertyValue()
@@ -75,8 +87,23 @@ class Daemon:
     def _start_soffice(self):
         if self.proc is not None and self.proc.poll() is None:
             return
+        # Suppress the "Document Recovery" dialog: we may hard-kill a prior soffice, which otherwise makes the
+        # next (VISIBLE) launch open on a recovery prompt instead of the doc. Pre-seed a registrymodifications.xcu
+        # that turns crash recovery + autosave OFF. Harmless headless; only matters when a human is watching.
+        try:
+            _udir = os.path.join(self.profile_dir, "user")
+            os.makedirs(_udir, exist_ok=True)
+            _rmf = os.path.join(_udir, "registrymodifications.xcu")
+            if not os.path.exists(_rmf):
+                open(_rmf, "w").write(_RECOVERY_OFF_XCU)
+        except Exception:
+            pass
+        # VISIBLE mode (opt-in via LAGADO_VISIBLE, host-only) shows the real LibreOffice window so a human can
+        # WATCH the agent drive the app. Default stays headless/invisible (the VM path never sets the var).
+        visible = bool(os.environ.get("LAGADO_VISIBLE"))
+        vis_flags = [] if visible else ["--headless", "--invisible"]
         self.proc = subprocess.Popen(
-            ["soffice", "--headless", "--invisible", "--nodefault", "--norestore",
+            ["soffice"] + vis_flags + ["--nodefault", "--norestore",
              "--nologo", "--nofirststartwizard",
              "--accept=socket,host=localhost,port=%d;urp;StarOffice.ComponentContext" % self.uno_port,
              "-env:UserInstallation=%s" % self.profile],
@@ -154,7 +181,8 @@ class Daemon:
         self.file = path
         if self.doc is None:
             url = uno.systemPathToFileUrl(os.path.abspath(path))
-            self.doc = self.desktop.loadComponentFromURL(url, "_blank", 0, (_pv("Hidden", True),))
+            hidden = not bool(os.environ.get("LAGADO_VISIBLE"))   # show the doc when watching (host-only)
+            self.doc = self.desktop.loadComponentFromURL(url, "_blank", 0, (_pv("Hidden", hidden),))
             # Live recompute so a `read` after a formula op returns the computed result, not
             # a stale value. The one-shot relies on an explicit calculateAll() before store;
             # the session reads BETWEEN ops, so it needs automatic calc on.

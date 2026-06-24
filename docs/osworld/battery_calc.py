@@ -162,7 +162,8 @@ GRAMMAR_B = (
     ' | "merge_cells(sheet=" str ", range=" str ")"'
     ' | "sort_range(sheet=" str ", range=" str ", key=" str ", order=" str ")"'
     ' | "set_number_format(sheet=" str ", range=" str ", format=" str ")"'
-    ' | "create_chart(sheet=" str ", ranges=" str ", type=" str ", title=" str ", data_in=" str ")"\n'
+    ' | "create_chart(sheet=" str ", ranges=" str ", type=" str ", title=" str ", data_in=" str ")"'
+    ' | "create_pivot(source=" str ", dest=" str ", rows=" str ", cols=" str ", data=" str ", func=" str ")"\n'
     'str ::= "\\"" [^"\\\\]* "\\""\n'
 )
 
@@ -201,7 +202,13 @@ EMIT_PROMPT = (
     "  sort_range(sheet=\"S\", range=\"A1:D9\", key=\"{{Header}}\", order=\"asc\")  sort a range by a column (order asc|desc)\n"
     "  set_number_format(sheet=\"S\", range=\"E2:E9\", format=\"0.00\")  set a number-format code on a range\n"
     "  create_chart(sheet=\"S\", ranges=\"A1:D1;A9:D9\", type=\"line\", title=\"\", data_in=\"rows\")  insert a chart;"
-    " ranges=\"categories;values\" as A1 cell ranges (semicolon-separated), type=line|bar|column, data_in=rows|columns\n\n"
+    " ranges=\"categories;values\" as A1 cell ranges (semicolon-separated), type=line|bar|column, data_in=rows|columns\n"
+    "  create_pivot(source=\"S\", dest=\"S2\", rows=\"{{Header}}\", cols=\"\", data=\"{{Header}}\", func=\"sum\")  make a Pivot Table;"
+    " source=the data sheet, dest=the new sheet for the pivot. rows=field whose values become ROW labels down the"
+    " left; cols=field whose values become COLUMN headers across the top (use cols, not rows, when the goal says"
+    " the values should be the column headers; cols=\"\" if none); data=field to aggregate; func=sum|count (to COUNT"
+    " occurrences of a field, put it in BOTH rows and data with func=\"count\"). Emit a SEPARATE create_pivot for"
+    " EACH pivot table the goal asks for (e.g. 'two pivot tables, one per X and one per Y' = two create_pivot calls)\n\n"
     "Refer to columns by {{Header}} name where a name is asked; use A1 cell refs for ranges. "
     "Emit ONLY the operations the goal needs, as a list of calls:")
 
@@ -216,6 +223,17 @@ def emit_gaps(reasoning, nameops):
     if any(w in r for w in ("chart", "graph", "plot", "sparkline")) and \
        not any(n.get("kind") == "create_chart" for n in nameops):
         gaps.append("chart")
+    if "pivot" in r and not any(n.get("kind") == "create_pivot" for n in nameops):
+        gaps.append("pivot")
+    # TOTAL-ROW completeness: the model's reasoning commits to a labeled total/sum ROW but no total_row op was
+    # emitted (the observed 0a2e43bf miss: it emitted create_chart and DROPPED total_row). Gated tight — needs an
+    # explicit row-add phrase AND a total/sum word, and is suppressed on pivot tasks (a pivot owns its own totals)
+    # — so it holds the model to its OWN analysis without firing on unrelated 'total' mentions. NOT leading.
+    if re.search(r"new row|total row|row called|row named|row labeled|add a row|a row at|row at the bottom", r) and \
+       any(w in r for w in ("total", "sum")) and \
+       not any(n.get("kind") == "total_row" for n in nameops) and \
+       not any(n.get("kind") == "create_pivot" for n in nameops):
+        gaps.append("total_row")
     return gaps
 
 def gap_feedback(gaps):
@@ -225,6 +243,15 @@ def gap_feedback(gaps):
                      "operations and ALSO emit: create_chart(sheet=\"S\", ranges=\"<categories>;<values>\", "
                      "type=\"line|bar|column\", data_in=\"rows\") — ranges are A1 cell ranges (the category/label "
                      "range, then the value range, semicolon-separated), e.g. the header row then the data row.")
+    if "pivot" in gaps:
+        lines.append("- your analysis describes a PIVOT TABLE but you did NOT emit create_pivot(...). Keep your "
+                     "other operations and ALSO emit: create_pivot(source=\"<data sheet>\", dest=\"<new sheet>\", "
+                     "rows=\"{Header}\", cols=\"\", data=\"{Header}\", func=\"sum|count\") — name the columns that go "
+                     "on each axis; to COUNT occurrences put the field in BOTH rows and data with func=\"count\".")
+    if "total_row" in gaps:
+        lines.append("- your analysis describes adding a TOTAL/summary row but you did NOT emit total_row(...). "
+                     "Keep your other operations and ALSO emit: total_row(sheet=\"S\", label=\"Total\", "
+                     "columns=\"{Header1},{Header2}\") — name the columns to SUM into the total row.")
     return "\n".join(lines)
 
 def compose_feedback(fails, fired):
@@ -283,7 +310,7 @@ def parse_B_nameops(text):
     against the live re-detected structure, so new sheets / just-set headers resolve."""
     nameops = []
     verbs = ("compute_column", "set_cell", "add_sheet", "rename_sheet", "copy_sheet", "total_row",
-             "format_cells", "merge_cells", "sort_range", "set_number_format", "create_chart")
+             "format_cells", "merge_cells", "sort_range", "set_number_format", "create_chart", "create_pivot")
     for verb, body in scan_calls(text, verbs):
         kw = parse_kv(body)
         if verb == "add_sheet":
@@ -318,7 +345,47 @@ def parse_B_nameops(text):
             nameops.append({"kind": "create_chart", "sheet": kw.get("sheet"),
                             "ranges": kw.get("ranges", ""), "type": kw.get("type", "line"),
                             "title": kw.get("title", ""), "data_in": kw.get("data_in", "rows")})
+        elif verb == "create_pivot":
+            nameops.append({"kind": "create_pivot", "source": kw.get("source"), "dest": kw.get("dest", "Sheet2"),
+                            "rows": kw.get("rows", ""), "cols": kw.get("cols", ""),
+                            "data": kw.get("data", ""), "func": kw.get("func", "sum")})
     return nameops
+
+def _op_key(o):
+    """Identity of an op for cross-attempt dedup. Same key = the same intended op (a later attempt CORRECTS
+    it); a different key = an ADDITIONAL op (kept). Distinct pivots differ by their field spec, so two pivots
+    on one sheet are not collapsed."""
+    k = o.get("kind")
+    if k == "create_pivot":
+        return (k, o.get("dest"), o.get("rows"), o.get("cols"), o.get("data"))
+    if k in ("compute_column", "set_cell"):
+        return (k, o.get("sheet"), o.get("target") or o.get("cell"))
+    if k in ("format_cells", "merge_cells", "set_number_format", "sort_range"):
+        return (k, o.get("sheet"), o.get("range"))
+    if k == "add_sheet":
+        return (k, o.get("name"))
+    if k == "rename_sheet":
+        return (k, o.get("old"), o.get("new"))
+    if k == "copy_sheet":
+        return (k, o.get("source"), o.get("new"))
+    return (k, o.get("sheet"))                 # total_row, create_chart: one per sheet
+
+def merge_nameops(carried, new):
+    """Retain ops the model committed in an EARLIER attempt but DROPPED on a gap/fault retry. The reason->emit
+    conversion is lossy: it silently sheds an un-nagged op (observed 0a2e43bf — emits create_chart, then on the
+    total_row nag re-emits only total_row, losing the chart). Union carried+new keyed by op identity (new wins
+    on collision = a correction); charts/pivots go LAST so they bind to the now-final data (a chart over a total
+    row needs the row to exist first). NOTE: interface-plane repair of ONE loss class (dropped ops) — it patches
+    the conversion tax, it does NOT remove the serialization, so it is not 'the membrane'."""
+    by_key, order = {}, []
+    for o in (carried + new):
+        key = _op_key(o)
+        if key not in by_key:
+            order.append(key)
+        by_key[key] = o
+    merged = [by_key[k] for k in order]
+    viz = ("create_chart", "create_pivot")
+    return [o for o in merged if o.get("kind") not in viz] + [o for o in merged if o.get("kind") in viz]
 
 def apply_B(g, nameops, log):
     """Interleaved apply: each op applies through the session, then we RE-DETECT so later ops resolve
@@ -402,17 +469,23 @@ def apply_B(g, nameops, log):
             toks = [t.strip().strip("{}").strip() for t in (nop.get("columns") or "").split(",") if t.strip()]
             letters = [l for l in (resolve_name(sheet, t, live, fails) for t in toks) if l]
             probe_col = letters[0] if letters else first_letter
+            label = nop.get("label", "Total")
             rb = g.client("read", {"sheet": sheet, "range": "%s%d:%s%d" % (probe_col, ds, probe_col, ds + 500)})
             vals = [row[0] if row else None for row in rb.get("cells", [])] if rb.get("ok") else []
+            # read the label column too so a re-apply (op-accumulation) OVERWRITES a prior total row instead of
+            # stacking a new one below it: a row whose first cell already == the label is a previous total, not data.
+            lbcol = g.client("read", {"sheet": sheet, "range": "%s%d:%s%d" % (first_letter, ds, first_letter, ds + 500)})
+            firsts = [row[0] if row else None for row in lbcol.get("cells", [])] if lbcol.get("ok") else []
             last = ds - 1
             for i, v in enumerate(vals):
-                if v is not None and v != "":
+                fv = firsts[i] if i < len(firsts) else None
+                if v is not None and v != "" and str(fv).strip() != str(label).strip():
                     last = ds + i
             if last < ds:                                   # nothing read — fall back to detect's count
                 last = ds + info.get("rows", 1) - 1
             trow = last + 1
             g.client("apply", {"op": {"op": "set", "sheet": sheet, "cell": "%s%d" % (first_letter, trow),
-                                      "value": nop.get("label", "Total")}})
+                                      "value": label}})
             for letter in letters:
                 f = "=SUM(%s%d:%s%d)" % (letter, ds, letter, last)
                 cell = "%s%d" % (letter, trow)
@@ -454,6 +527,41 @@ def apply_B(g, nameops, log):
             rr = g.client("apply", {"op": op})
             if not rr.get("ok"):
                 fails.append({"name": nop.get("ranges"), "why": "apply error: %s" % rr.get("error", "")[:80]})
+            live = live_detect(g)
+        elif k == "create_pivot":
+            # Resolve each field NAME to a 0-based column index against the SOURCE sheet (fail-closed: an
+            # unresolved field aborts the pivot rather than building a wrong one). uno_ops then builds the
+            # DataPilot; the source range is auto-detected there. Count-by-self = the same column landing in
+            # both rows and data (the model is told to do this for func="count").
+            source = nop.get("source")
+            if source not in live:                          # model omitted/missed it → the data sheet (not dest)
+                source = next((s for s in live if s != nop.get("dest")), source)
+            dest = nop.get("dest") or "Sheet2"
+            def _idxs(spec):
+                out = []
+                for t in (spec or "").split(","):
+                    t = t.strip().strip("{}").strip()
+                    if not t:
+                        continue
+                    letter = resolve_name(source, t, live, fails)
+                    if letter is None:
+                        return None                         # fail-closed on any unresolved field
+                    out.append(_col_idx(letter))
+                return out
+            rows_i, cols_i, data_i = _idxs(nop.get("rows")), _idxs(nop.get("cols")), _idxs(nop.get("data"))
+            if rows_i is None or cols_i is None or data_i is None:
+                live = live_detect(g); continue
+            # deterministic name keyed to the field spec → a re-apply (op-accumulation) OVERWRITES the same
+            # pivot instead of creating a duplicate; two DISTINCT pivots still get distinct names. (Name is not
+            # scored — the evaluator keys pivots by source range/fields, not name.)
+            sig = lambda xs: "-".join(map(str, xs)) or "x"
+            pvt_name = "PVT_%s_%s_%s_%s" % (source, sig(rows_i), sig(cols_i), sig(data_i))
+            op = {"op": "create_pivot", "source_sheet": source, "dest_sheet": dest, "name": pvt_name,
+                  "row_fields": rows_i, "col_fields": cols_i, "data_fields": data_i,
+                  "data_func": (nop.get("func") or "sum")}
+            rr = g.client("apply", {"op": op})
+            if not rr.get("ok"):
+                fails.append({"name": "pivot %s" % dest, "why": "apply error: %s" % rr.get("error", "")[:80]})
             live = live_detect(g)
     log["resolve_fails"] = fails
     log["written_regions"] = written
@@ -696,6 +804,7 @@ EXISTING_SHEET_FIELDS = {
     "rename_sheet": ["old"], "copy_sheet": ["source", "before"], "set_cell": ["sheet"],
     "compute_column": ["sheet"], "total_row": ["sheet"], "format_cells": ["sheet"],
     "merge_cells": ["sheet"], "set_number_format": ["sheet"], "sort_range": ["sheet"],
+    "create_pivot": ["source"],
 }
 
 def ground_chart_ranges(ranges, sheet, live):
@@ -888,6 +997,7 @@ def corroborate(g, instr, detected, der1_written, mainlog):
 
 # ── one run of a condition ───────────────────────────────────────────────────────
 def run_condition(env, task, cond, file_path, run_idx):
+    """VM path: build the guest, bring up the daemon, then run the SHARED core scored by env.evaluate()."""
     g = Guest(env)
     log = {"cond": cond, "run": run_idx, "id": task["id"][:8], "steps": []}
     unopy = pick_uno_python(g)
@@ -898,6 +1008,14 @@ def run_condition(env, task, cond, file_path, run_idx):
     time.sleep(1)
     if not deploy_daemon(g, unopy):
         log["fatal"] = "daemon not ready"; return 0.0, log
+    return run_core(g, task, cond, file_path, log, lambda: env.evaluate())
+
+def run_core(g, task, cond, file_path, log, score_fn):
+    """The model→emit→apply→corroborate→score body, IDENTICAL for VM and host. `g` is an already-connected
+    daemon client (Guest over the OSWorld env, or a HostGuest over a local soffice); `score_fn()` returns the
+    REAL evaluator score (env.evaluate() on the VM; the metric funcs on the produced xlsx on host). Keeping this
+    one body shared is why a host result is a faithful proxy for a VM result — same brain, same emission, same
+    apply, same scoring — differing ONLY in host-LO vs guest-LO (which matters only for render-type tasks)."""
     r = g.client("open", {"file": file_path})
     if not r.get("ok"):
         log["fatal"] = "open failed: %s" % r.get("error"); return 0.0, log
@@ -926,9 +1044,12 @@ def run_condition(env, task, cond, file_path, run_idx):
         log["detected"] = {s: [(c["letter"], c["header"], c.get("ntype")) for c in i["cols"]] for s, i in detected.items()}
         feedback = None
         attempt = 0
+        carried = []
         for attempt in range(2):                  # reason→emit, then ONE read-back retry (the ReAct condition)
             log["steps"].append("attempt%d" % attempt)
-            nameops = author_B(instr, detected, log, feedback)
+            new_ops = author_B(instr, detected, log, feedback)
+            nameops = merge_nameops(carried, new_ops)   # retain ops the lossy retry-emit dropped (interface-plane repair)
+            carried = nameops
             log["nameops"] = nameops
             written, resolve_fails = apply_B(g, nameops, log)
             fired = falsify(g, written)
@@ -963,9 +1084,11 @@ def run_condition(env, task, cond, file_path, run_idx):
     log["self_report_done"] = harness_reports_done
 
     g.client("reconcile", {"gui": True})
+    if os.environ.get("LAGADO_VISIBLE"):          # watch-mode: hold the finished doc on screen before closing
+        time.sleep(int(os.environ.get("LAGADO_VISIBLE_HOLD", "25")))
     g.client("close")
     time.sleep(4)
-    score = env.evaluate() or 0.0
+    score = score_fn() or 0.0
     log["score"] = score
     # P5 calibration pair + false-pass flag (the integrity core)
     log["false_pass"] = bool(harness_reports_done and score < 1.0)

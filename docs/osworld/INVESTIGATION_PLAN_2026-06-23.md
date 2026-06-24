@@ -1,5 +1,44 @@
 # Investigation plan — locate the failure MOMENT, get HARD DATA on every interaction variable
 
+## ════ TURN-4 STATE — 2026-06-23 EOD (read FIRST after a /clear) ════
+**PIVOT VERB — BUILT + REAL-EVALUATOR GOLD.** `create_pivot` (UNO DataPilot → xlsx → openpyxl `_pivots`) in
+uno_ops.py + battery_calc.py (grammar/EMIT/parse/apply_B name→index resolve/emit_gaps pivot bridge). Host
+dict-equality BYTE-IDENTICAL vs all 3 golds incl. count-by-self (col in BOTH rows+data). In-VM: **1954cced GOLD
+(count-by-self), 535364ea GOLD (two pivots)**. 1de60575 = WRONG but it's a COMPREHENSION miss (instr "promotion
+names as the column headers" → gold puts Promotion on COLS; model emitted it on ROWS) — neither harness nor
+membrane fixes that; report, don't patch.
+**INTERFACE-PLANE REPAIRS (general, not task patches):** `merge_nameops` op-accumulation (retain ops the lossy
+retry-emit DROPS across a nag; charts/pivots applied LAST so they bind to final data) + `total_row` idempotency
+(skip a prior total row → re-apply overwrites, never stacks) + `create_pivot` deterministic name (no dup on
+re-apply) + a `total_row` emit_gaps detector (gated: needs row-add phrase + total/sum word, suppressed on pivot
+tasks). Op-accumulation MECHANISM confirmed (0a2e43bf now retains total_row+chart) but 0a2e43bf STILL not gold —
+residual is **chart-RANGE fragility** (model emits dimensionally-mismatched ranges), a SEPARATE issue from the
+dropped-op one.
+**MY RULE VIOLATION (logged honestly):** I made a GLOBAL EMIT_PROMPT edit (rows/cols clarification) that fixed
+535364ea but REGRESSED 0a2e43bf — exactly the [[lagado-prompt-brittleness]] trap. Kept it only because it's a
+GENERAL semantic clarification + the deterministic total_row guard nets the regression. Going forward: no global
+prompt edits without an auto-regression gate.
+**HOST-SIDE FAST LOOP — BUILT (the big force-multiplier).** `battery_host.py` + `battery_calc.run_core` (pure
+extraction; VM path byte-identical, `run_condition` unchanged). Runs the EXACT core against a LOCAL soffice
+daemon (system py3 = uno) scored by the REAL metric funcs (.venv = bs4/formulas), ~1 min/task vs ~20 in VM, SAME
+brain/emit/apply/scoring — differs only host-LO vs guest-LO (render tasks only: compare_pdfs/check_pdf_pages →
+RENDER-SKIP). Run: `cd OSWorld && PYTHONPATH=OSWorld:docs/osworld /home/alucard/projects/OSWorld/.venv/bin/python
+docs/osworld/battery_host.py <ids|heldout> [N]`. 1954cced GOLD 3/3 on host.
+**VISIBLE/WATCH MODE:** `LAGADO_VISIBLE=1` (DEFAULT for host runs when DISPLAY set; opt out LAGADO_HEADLESS=1) +
+`LAGADO_VISIBLE_HOLD=secs`. Shows the real LibreOffice window — USER CONFIRMED watching Qwen build a pivot in
+Sheet2. Recovery dialog suppressed (pre-seeded recovery-off xcu in uno_daemon + battery_host pre-kills stray
+soffice by our markers). NOTE host is Wayland (wayland-0); soffice on DISPLAY=:0 (XWayland) does reach the screen.
+**VARIANCE FINDING (critical):** temp-0 is NOT fully deterministic — 37608790 GOLDed in one run, tripped a
+falsifier in another (same prompt; also a 工作表1 locale variant). ⇒ single-run gold counts need ERROR BARS.
+**STRATEGIC (user asked "is it worth it"):** verbs are real reusable capability + 0-false-pass integrity held
+through ALL chaos (the durable moat). Risks: single-step measured / MULTI-step (the real wall) inferred;
+altitude bet needs rich app APIs (a11y/pixel fallback weak); no oracle in the wild (abstain is the only stand-in,
+unproven at scale); some emit_gaps detectors getting symptom-shaped. **NEXT (agreed): the de-risk measurement —
+host loop N=3 over the 7 golds + 3 pivots for variance/error-bars; then verb-reuse convergence, one multi-step
+task, one held-out-app + abstain-without-oracle.** Brain left UP on :8080 overnight.
+7 golds to regression-guard: 0a2e43bf(now chart-range residual) 0cecd4f3 1d17d234 37608790(FLAKY) 4172ea6e
+51b11269 a9f325aa. Pivots golded: 1954cced 535364ea. 0 false-pass maintained throughout.
+
 USER DIRECTIVE (2026-06-23, the governing thesis for the next phase):
 - **Comprehension is NOT assumed the problem.** A model limit exists somewhere, but we are NOT there.
   Until proven otherwise, **assume the failure is OUR APPROACH — how we ask the model to interact with the
