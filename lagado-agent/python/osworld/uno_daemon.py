@@ -308,6 +308,17 @@ class Daemon:
             self.doc.close(False)
         except Exception as e:
             return {"ok": False, "error": "store failed: %s" % e}
+        # Freeze is VIEW state — a headless store drops it (no view). Re-impose any logged
+        # freeze_panes onto the SAVED file (stdlib zip patch; idempotent, last op wins). Done
+        # post-store/pre-GUI-reload so the reloaded window (and its ctrl+s re-save) carries it.
+        patch_err = None
+        for o in self.op_log:
+            if o.get("op") == "freeze_panes":
+                try:
+                    fc, fr = uno_ops.freeze_counts(o)
+                    uno_ops.patch_xlsx_freeze(os.path.abspath(self.file), o.get("sheet"), fc, fr)
+                except Exception as e:
+                    patch_err = "freeze patch: %s" % e   # store succeeded; report, don't fail it
         self.doc = None
         # Release the lock by tearing down OUR headless instance before any GUI attach
         # (single-instance: a survivor would make the GUI reload attach to the headless
@@ -327,7 +338,10 @@ class Daemon:
                 ["soffice", "--calc", os.path.abspath(saved_file)],
                 env=env, start_new_session=True,
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        return {"ok": True, "reloaded_gui": bool(gui and os.environ.get("DISPLAY"))}
+        out = {"ok": True, "reloaded_gui": bool(gui and os.environ.get("DISPLAY"))}
+        if patch_err:
+            out["patch_err"] = patch_err
+        return out
 
     def op_close(self, req):
         try:

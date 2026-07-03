@@ -233,6 +233,48 @@ def apply_one_op(doc, resolve_sheet, op):
                     cell.setString("")
                 else:
                     cell.setString(val)
+    elif kind == "freeze_panes":
+        # Freeze the first N rows / M columns (the app's View→Freeze Rows and Columns). Freeze is
+        # VIEW state: with a real view (visible/watch mode) XViewFreezable.freezeAt applies it live
+        # and the store persists it. Headless/hidden LO exposes NO spreadsheet view (the controller
+        # has no freezeAt; MEASURED — and the setViewData route hard-crashes the pyuno bridge), so
+        # there the pane record is written into the SAVED file by patch_xlsx_freeze at store time
+        # (the daemon's reconcile owns that; it keys off freeze_panes ops in the op log).
+        cols, rows = freeze_counts(op)
+        if rows or cols:
+            ctrl = doc.getCurrentController()
+            if hasattr(ctrl, "freezeAt"):
+                ctrl.setActiveSheet(resolve_sheet(op.get("sheet")))
+                ctrl.freezeAt(cols, rows)
+    elif kind == "export_csv":
+        # Export ONE sheet as CSV with the app's default csv options (comma, double-quote, UTF-8 —
+        # the GUI dialog defaults, "as shown"). The Text-csv filter exports the ACTIVE sheet, so
+        # activate the named one first. The csv lands next to the document sharing its base name
+        # (op["name"] overrides the basename; the .csv extension is harness-owned). storeToURL
+        # (not storeAsURL) keeps the session attached to the original xlsx.
+        sh = resolve_sheet(op.get("sheet"))
+        doc.getCurrentController().setActiveSheet(sh)
+        folder, base = doc.getURL().rsplit("/", 1)
+        name = (op.get("name") or "").strip()
+        name = (name[:-4] if name.lower().endswith(".csv") else name) or base.rsplit(".", 1)[0]
+        flt = uno.createUnoStruct("com.sun.star.beans.PropertyValue")
+        flt.Name, flt.Value = "FilterName", "Text - txt - csv (StarCalc)"
+        opts = uno.createUnoStruct("com.sun.star.beans.PropertyValue")
+        opts.Name, opts.Value = "FilterOptions", "44,34,76"
+        doc.storeToURL(folder + "/" + name + ".csv", (flt, opts))
+    elif kind == "transpose_range":
+        # Matrix-transpose a rectangular range's VALUES to a destination anchor (the app's Paste
+        # Special→Transpose). DataArray round-trip: strings stay strings, numbers stay numbers;
+        # formulas transfer as their computed values (what sheet_data compares). `dest` is the
+        # TOP-LEFT cell of the transposed block (a range is tolerated — its first cell anchors).
+        sh = resolve_sheet(op.get("sheet"))
+        data = sh.getCellRangeByName(op["source"]).getDataArray()
+        if data and data[0]:
+            t = tuple(zip(*data))
+            a = sh.getCellRangeByName(str(op["dest"]).split(":")[0]).getRangeAddress()
+            sh.getCellRangeByPosition(a.StartColumn, a.StartRow,
+                                      a.StartColumn + len(t[0]) - 1,
+                                      a.StartRow + len(t) - 1).setDataArray(t)
     elif kind == "create_chart":
         # Insert a chart so openpyxl reads it back with the right tagname (lineChart/barChart) + series refs.
         # `ranges` = ";"-joined A1 ranges (e.g. "B1:G1;B12:G12") → category + value; `type` line|bar|column.
@@ -318,6 +360,93 @@ def apply_one_op(doc, resolve_sheet, op):
         dp.insertNewByName(name, oa, desc)
     else:
         raise ValueError("unknown op kind: %r" % kind)
+
+
+def freeze_counts(op):
+    """(cols, rows) to freeze, from either dialect of a freeze_panes op. A `range` names the
+    block the goal wants kept visible ("freeze the range A1:B1") — its END cell defines the
+    frozen extent (B1 → 2 columns, 1 row), matching the app's put-cursor-after-the-block
+    freeze semantics. Bare counts (`rows`/`cols`) pass through. Deterministic geometry, no
+    task knowledge."""
+    import re as _re
+    rng = str(op.get("range") or "").strip().replace("$", "")
+    m = _re.match(r"[A-Za-z]+\d+(?::([A-Za-z]+)(\d+))?$", rng) if rng else None
+    if m:
+        end_col = (m.group(1) or _re.match(r"([A-Za-z]+)", rng).group(1)).upper()
+        end_row = int(m.group(2) or _re.match(r"[A-Za-z]+(\d+)", rng).group(1))
+        cols = 0
+        for ch in end_col:
+            cols = cols * 26 + (ord(ch) - 64)
+        return cols, end_row
+    return (int(float(str(op.get("cols") or "0").strip() or 0)),
+            int(float(str(op.get("rows") or "0").strip() or 0)))
+
+
+def patch_xlsx_freeze(path, sheet_name, cols, rows):
+    """Write a frozen-pane record directly into a SAVED xlsx (stdlib-only — guest-safe, no openpyxl).
+
+    Freeze state lives in the VIEW; headless/hidden LO has no view, so a store from a headless
+    session silently drops it. This patches the stored file with the exact record a GUI save
+    would write (<pane xSplit/ySplit state="frozen"/> inside <sheetView>) — precisely what the
+    evaluator's openpyxl freeze rule reads, and what a subsequent GUI open+re-save round-trips.
+    sheet_name None/'' or unknown → first sheet. Idempotent: an existing pane record is replaced."""
+    import os as _os
+    import re as _re
+    import zipfile as _zip
+    cols = int(float(str(cols or 0).strip() or 0))
+    rows = int(float(str(rows or 0).strip() or 0))
+    if not (cols or rows):
+        return
+    with _zip.ZipFile(path) as z:
+        names = z.namelist()
+        contents = {n: z.read(n) for n in names}
+    wb = contents["xl/workbook.xml"].decode("utf-8")
+    rels = contents["xl/_rels/workbook.xml.rels"].decode("utf-8")
+    sheets = []                                       # (name, r:id) in workbook order, attr-order-proof
+    for tag in _re.findall(r"<sheet\b[^>]*>", wb):
+        nm = _re.search(r'name="([^"]*)"', tag)
+        rid = _re.search(r'r:id="([^"]*)"', tag)
+        if nm and rid:
+            sheets.append((nm.group(1), rid.group(1)))
+    if not sheets:
+        return
+    rid = next((r for n, r in sheets if n == (sheet_name or "")), sheets[0][1])
+    tgt = None
+    for tag in _re.findall(r"<Relationship\b[^>]*>", rels):
+        if 'Id="%s"' % rid in tag:
+            m = _re.search(r'Target="([^"]*)"', tag)
+            tgt = m.group(1) if m else None
+            break
+    if not tgt:
+        return
+    sheet_path = tgt.lstrip("/") if tgt.startswith("/") else "xl/" + tgt
+    if sheet_path not in contents:
+        return
+    xml = contents[sheet_path].decode("utf-8")
+
+    def letter(i):                                    # 0-based column index -> A1 letter
+        s = ""
+        i += 1
+        while i:
+            i, r = divmod(i - 1, 26)
+            s = chr(65 + r) + s
+        return s
+    attrs = (('xSplit="%d" ' % cols) if cols else "") + (('ySplit="%d" ' % rows) if rows else "")
+    active = "bottomRight" if (cols and rows) else ("bottomLeft" if rows else "topRight")
+    pane = '<pane %stopLeftCell="%s%d" activePane="%s" state="frozen"/>' % (
+        attrs, letter(cols), rows + 1, active)
+    xml = _re.sub(r"<pane\b[^>]*/>", "", xml)         # replace any prior pane record
+    if _re.search(r"<sheetView\b[^>]*/>", xml):       # self-closing view: expand it
+        xml = _re.sub(r"(<sheetView\b[^>]*)/>", lambda m: m.group(1) + ">" + pane + "</sheetView>",
+                      xml, count=1)
+    else:                                             # pane must be the FIRST child (schema order)
+        xml = _re.sub(r"(<sheetView\b[^>]*>)", lambda m: m.group(1) + pane, xml, count=1)
+    contents[sheet_path] = xml.encode("utf-8")
+    tmp = path + ".panetmp"
+    with _zip.ZipFile(tmp, "w", _zip.ZIP_DEFLATED) as z:
+        for n in names:
+            z.writestr(n, contents[n])
+    _os.replace(tmp, path)
 
 
 def apply_op_log(doc, ops):

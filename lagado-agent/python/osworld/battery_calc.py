@@ -163,7 +163,10 @@ GRAMMAR_B = (
     ' | "sort_range(sheet=" str ", range=" str ", key=" str ", order=" str ")"'
     ' | "set_number_format(sheet=" str ", range=" str ", format=" str ")"'
     ' | "create_chart(sheet=" str ", ranges=" str ", type=" str ", title=" str ", data_in=" str ")"'
-    ' | "create_pivot(source=" str ", dest=" str ", rows=" str ", cols=" str ", data=" str ", func=" str ")"\n'
+    ' | "create_pivot(source=" str ", dest=" str ", rows=" str ", cols=" str ", data=" str ", func=" str ")"'
+    ' | "freeze_panes(sheet=" str ", range=" str ", rows=" str ", cols=" str ")"'
+    ' | "export_csv(sheet=" str ", name=" str ")"'
+    ' | "transpose_range(sheet=" str ", source=" str ", dest=" str ")"\n'
     'str ::= "\\"" [^"\\\\]* "\\""\n'
 )
 
@@ -208,7 +211,10 @@ EMIT_PROMPT = (
     " left; cols=field whose values become COLUMN headers across the top (use cols, not rows, when the goal says"
     " the values should be the column headers; cols=\"\" if none); data=field to aggregate; func=sum|count (to COUNT"
     " occurrences of a field, put it in BOTH rows and data with func=\"count\"). Emit a SEPARATE create_pivot for"
-    " EACH pivot table the goal asks for (e.g. 'two pivot tables, one per X and one per Y' = two create_pivot calls)\n\n"
+    " EACH pivot table the goal asks for (e.g. 'two pivot tables, one per X and one per Y' = two create_pivot calls)\n"
+    "  freeze_panes(sheet=\"S\", range=\"A1:B1\", rows=\"\", cols=\"\")  freeze panes so cells stay visible when scrolling: give range EXACTLY as the goal names the cells to keep visible, OR give rows/cols counts (leave the unused fields \"\")\n"
+    "  export_csv(sheet=\"S\", name=\"\")                    export the sheet as a CSV file next to the document (name=\"\" keeps the document's own file name)\n"
+    "  transpose_range(sheet=\"S\", source=\"B2:F5\", dest=\"B8\")  paste the source range TRANSPOSED with its top-left cell at dest\n\n"
     "Refer to columns by {{Header}} name where a name is asked; use A1 cell refs for ranges. "
     "Emit ONLY the operations the goal needs, as a list of calls:")
 
@@ -310,7 +316,8 @@ def parse_B_nameops(text):
     against the live re-detected structure, so new sheets / just-set headers resolve."""
     nameops = []
     verbs = ("compute_column", "set_cell", "add_sheet", "rename_sheet", "copy_sheet", "total_row",
-             "format_cells", "merge_cells", "sort_range", "set_number_format", "create_chart", "create_pivot")
+             "format_cells", "merge_cells", "sort_range", "set_number_format", "create_chart", "create_pivot",
+             "freeze_panes", "export_csv", "transpose_range")
     for verb, body in scan_calls(text, verbs):
         kw = parse_kv(body)
         if verb == "add_sheet":
@@ -349,6 +356,14 @@ def parse_B_nameops(text):
             nameops.append({"kind": "create_pivot", "source": kw.get("source"), "dest": kw.get("dest", "Sheet2"),
                             "rows": kw.get("rows", ""), "cols": kw.get("cols", ""),
                             "data": kw.get("data", ""), "func": kw.get("func", "sum")})
+        elif verb == "freeze_panes":
+            nameops.append({"kind": "freeze_panes", "sheet": kw.get("sheet"), "range": kw.get("range", ""),
+                            "rows": kw.get("rows", "0"), "cols": kw.get("cols", "0")})
+        elif verb == "export_csv":
+            nameops.append({"kind": "export_csv", "sheet": kw.get("sheet"), "name": kw.get("name", "")})
+        elif verb == "transpose_range":
+            nameops.append({"kind": "transpose_range", "sheet": kw.get("sheet"),
+                            "source": kw.get("source", ""), "dest": kw.get("dest", "")})
     return nameops
 
 def _op_key(o):
@@ -368,7 +383,11 @@ def _op_key(o):
         return (k, o.get("old"), o.get("new"))
     if k == "copy_sheet":
         return (k, o.get("source"), o.get("new"))
-    return (k, o.get("sheet"))                 # total_row, create_chart: one per sheet
+    if k == "export_csv":
+        return (k, o.get("sheet"), o.get("name"))
+    if k == "transpose_range":
+        return (k, o.get("sheet"), o.get("source"), o.get("dest"))
+    return (k, o.get("sheet"))                 # total_row, create_chart, freeze_panes: one per sheet
 
 def merge_nameops(carried, new):
     """Retain ops the model committed in an EARLIER attempt but DROPPED on a gap/fault retry. The reason->emit
@@ -384,7 +403,8 @@ def merge_nameops(carried, new):
             order.append(key)
         by_key[key] = o
     merged = [by_key[k] for k in order]
-    viz = ("create_chart", "create_pivot")
+    # Ops that must see the FINAL data: charts/pivots bind to it, an export snapshots it.
+    viz = ("create_chart", "create_pivot", "export_csv")
     return [o for o in merged if o.get("kind") not in viz] + [o for o in merged if o.get("kind") in viz]
 
 def apply_B(g, nameops, log):
@@ -501,10 +521,13 @@ def apply_B(g, nameops, log):
                 if rr.get("ok"):
                     written.append((sheet, cell, f))
             live = live_detect(g)
-        elif k in ("format_cells", "merge_cells", "set_number_format"):
+        elif k in ("format_cells", "merge_cells", "set_number_format", "freeze_panes", "export_csv",
+                   "transpose_range"):
             op = {"op": k}
             op.update({kk: vv for kk, vv in nop.items() if kk != "kind"})
-            if k in ("format_cells", "set_number_format"):       # not merge (a merge range is intentional)
+            if k in ("format_cells", "set_number_format"):       # not merge (a merge range is intentional);
+                                                                 # not freeze/export/transpose (no data range /
+                                                                 # explicit source+dest are intentional)
                 op["range"] = clamp_range_to_data(op.get("range"), nop.get("sheet"), live)
             rr = g.client("apply", {"op": op})
             if not rr.get("ok"):
@@ -812,7 +835,8 @@ EXISTING_SHEET_FIELDS = {
     "rename_sheet": ["old"], "copy_sheet": ["source", "before"], "set_cell": ["sheet"],
     "compute_column": ["sheet"], "total_row": ["sheet"], "format_cells": ["sheet"],
     "merge_cells": ["sheet"], "set_number_format": ["sheet"], "sort_range": ["sheet"],
-    "create_pivot": ["source"],
+    "create_pivot": ["source"], "freeze_panes": ["sheet"], "export_csv": ["sheet"],
+    "transpose_range": ["sheet"],
 }
 
 def ground_chart_ranges(ranges, sheet, live):
