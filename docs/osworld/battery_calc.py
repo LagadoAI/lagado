@@ -393,7 +393,15 @@ def apply_B(g, nameops, log):
     Returns (written_regions, fails) — written_regions = [(sheet, a1range)] for read-back."""
     live = live_detect(g)
     written, fails = [], []
+    _wpause = os.environ.get("LAGADO_WATCH_PAUSE")     # watch-mode: pace each op so a human can see it land
     for nop in nameops:
+        if _wpause:
+            try:
+                print("    [apply] %s %s" % (nop.get("kind"),
+                      {kk: vv for kk, vv in nop.items() if kk != "kind"}), flush=True)
+                time.sleep(float(_wpause))
+            except Exception:
+                pass
         k = nop["kind"]
         for f in EXISTING_SHEET_FIELDS.get(k, []):       # ground existing-sheet refs to live tabs (grounding)
             if nop.get(f):
@@ -1083,7 +1091,11 @@ def run_core(g, task, cond, file_path, log, score_fn):
     harness_reports_done = no_fault and corroborated   # claim done ONLY when corroborated
     log["self_report_done"] = harness_reports_done
 
-    g.client("reconcile", {"gui": True})
+    # GUI reload is ONLY needed by the GUEST evaluator (it scores a live window via activate-by-title + ctrl+s).
+    # On the HOST, score_fn reads the saved file directly, so a GUI reload spawns a stray detached window per task
+    # (reparents to systemd, escapes per-run cleanup → windows pile up). Gate it OFF on host. `log["host"]` is set
+    # only by battery_host; the VM path (run_condition) never sets it, so the guest still gets its window.
+    g.client("reconcile", {"gui": not log.get("host")})
     if os.environ.get("LAGADO_VISIBLE"):          # watch-mode: hold the finished doc on screen before closing
         time.sleep(int(os.environ.get("LAGADO_VISIBLE_HOLD", "25")))
     g.client("close")
