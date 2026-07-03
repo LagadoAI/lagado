@@ -8,7 +8,7 @@ Proves the resident UNO daemon + client in ISOLATION (spec §9 P1):
   - teardown leaks NO soffice (checked by OUR profile string only — never a global pkill).
 
 Run on the dev host (which has soffice + python-uno):
-    python3 docs/osworld/p1_session_test.py
+    python3 lagado-agent/python/osworld/p1_session_test.py
 Exit 0 = PASS.
 """
 

@@ -7,7 +7,7 @@ apply_B(injected) → reconcile → evaluate. Reuses the exact apply/score path 
 
 Usage (OSWorld dir, its venv, podman sock):
   DOCKER_HOST=unix:///run/podman/podman.sock PYTHONPATH=/home/alucard/projects/OSWorld \
-  .venv/bin/python /home/alucard/projects/lagado/docs/osworld/brace_inject_probe.py
+  .venv/bin/python /home/alucard/projects/lagado/lagado-agent/python/osworld/brace_inject_probe.py
 """
 import json, os, sys, glob, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))

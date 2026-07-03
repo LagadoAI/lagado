@@ -19,9 +19,9 @@ use std::sync::Arc;
 
 use crate::perception::Actuator;
 
-const UNO_OPS_PY: &str = include_str!("../../docs/osworld/uno_ops.py");
-const UNO_DAEMON_PY: &str = include_str!("../../docs/osworld/uno_daemon.py");
-const UNO_CLIENT_PY: &str = include_str!("../../docs/osworld/uno_client.py");
+const UNO_OPS_PY: &str = include_str!("../python/osworld/uno_ops.py");
+const UNO_DAEMON_PY: &str = include_str!("../python/osworld/uno_daemon.py");
+const UNO_CLIENT_PY: &str = include_str!("../python/osworld/uno_client.py");
 
 const GUEST_DIR: &str = "/tmp";
 const SOCK: &str = "/tmp/lagado_session.sock";

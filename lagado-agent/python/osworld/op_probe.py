@@ -7,7 +7,7 @@ apply-ok (the daemon read returns values, not style). Riskiest = sort_range (Sor
 
 Throwaway probe over the proven session. Does NOT score. Run:
   DOCKER_HOST=unix:///run/podman/podman.sock PYTHONPATH=/home/alucard/projects/OSWorld \
-  .venv/bin/python /home/alucard/projects/lagado/docs/osworld/op_probe.py
+  .venv/bin/python /home/alucard/projects/lagado/lagado-agent/python/osworld/op_probe.py
 """
 import json, os, sys, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))

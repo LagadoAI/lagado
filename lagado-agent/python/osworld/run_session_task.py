@@ -15,7 +15,7 @@ activate_window + ctrl+s.
 Usage (from the OSWorld repo dir, with its venv + the podman socket):
   DOCKER_HOST=unix:///run/podman/podman.sock \
   /home/alucard/projects/OSWorld/.venv/bin/python \
-    /home/alucard/projects/lagado/docs/osworld/run_session_task.py \
+    /home/alucard/projects/lagado/lagado-agent/python/osworld/run_session_task.py \
     <task_json> <oplog_json> [repeat=1]
 """
 
@@ -57,7 +57,7 @@ def memory_ok(min_mb=MIN_FREE_MB):
     if avail is not None and avail < min_mb:
         print("\n*** MEMORY PRE-FLIGHT FAIL: only %d MB available (<%d MB floor) — booting a 3G VM here "
               "will thrash zram toward OOM. Free memory first:\n"
-              "    - relaunch the brain lean:  docs/osworld/start_brain.sh   (--no-mmap frees ~7GB)\n"
+              "    - relaunch the brain lean:  lagado-agent/python/osworld/start_brain.sh   (--no-mmap frees ~7GB)\n"
               "    - reclaim stale VM disk:    podman volume prune -f\n"
               "    - close heavy apps.\n*** Aborting before boot (no OOM)." % (avail, min_mb), flush=True)
         return False

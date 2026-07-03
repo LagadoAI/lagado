@@ -14,8 +14,8 @@ Same anti-doubt design as watch_qwen.py, extended to a resident session:
     that the work comes from Qwen, not from whoever typed the command.
 
 Run (in YOUR terminal if you want zero doubt I'm in the loop):
-  cd /home/alucard/projects/OSWorld && PYTHONPATH=/home/alucard/projects/OSWorld:/home/alucard/projects/lagado/docs/osworld \
-    .venv/bin/python /home/alucard/projects/lagado/docs/osworld/watch_session.py /tmp/lagado_watch/spec_demo.json
+  cd /home/alucard/projects/OSWorld && PYTHONPATH=/home/alucard/projects/OSWorld:/home/alucard/projects/lagado/lagado-agent/python/osworld \
+    .venv/bin/python /home/alucard/projects/lagado/lagado-agent/python/osworld/watch_session.py /tmp/lagado_watch/spec_demo.json
 
 Feed it tasks (from any terminal):
   echo '{"instruction":"Sort the rows by Profit descending"}' >> /tmp/lagado_watch/cmds.jsonl

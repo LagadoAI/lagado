@@ -5,8 +5,8 @@ ONLY in host-LO vs guest-LO (which matters solely for render-type tasks: sheet_p
 ~50 min in the VM — built to RE-MEASURE with error bars (run each task N× to quantify temp-0 variance).
 
 Run with the OSWorld .venv python (it has the metric deps); the daemon is spawned with /usr/bin/python3 (uno):
-  cd /home/alucard/projects/OSWorld && PYTHONPATH=/home/alucard/projects/OSWorld:/home/alucard/projects/lagado/docs/osworld \
-    .venv/bin/python /home/alucard/projects/lagado/docs/osworld/battery_host.py <ids... | heldout> [N]
+  cd /home/alucard/projects/OSWorld && PYTHONPATH=/home/alucard/projects/OSWorld:/home/alucard/projects/lagado/lagado-agent/python/osworld \
+    .venv/bin/python /home/alucard/projects/lagado/lagado-agent/python/osworld/battery_host.py <ids... | heldout> [N]
 """
 import json, os, sys, glob, time, shutil, subprocess, signal, traceback
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))

@@ -12,8 +12,8 @@ could hide:
   4. There is NO scoring against a gold (there is none). Correctness is judged by your eyes on the open window.
 
 Run (OSWorld .venv has openpyxl/requests; daemon is spawned under system python for uno):
-  cd /home/alucard/projects/OSWorld && PYTHONPATH=/home/alucard/projects/OSWorld:/home/alucard/projects/lagado/docs/osworld \
-    .venv/bin/python /home/alucard/projects/lagado/docs/osworld/watch_qwen.py <spec.json>
+  cd /home/alucard/projects/OSWorld && PYTHONPATH=/home/alucard/projects/OSWorld:/home/alucard/projects/lagado/lagado-agent/python/osworld \
+    .venv/bin/python /home/alucard/projects/lagado/lagado-agent/python/osworld/watch_qwen.py <spec.json>
 
 spec.json:
   {"instruction": "Add a Total column that sums Q1..Q4 for each region",

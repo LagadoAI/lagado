@@ -20,7 +20,7 @@ Throwaway probe over the proven native session. Does NOT score, does NOT touch t
 
 Run (from OSWorld repo dir, its venv, podman sock):
   DOCKER_HOST=unix:///run/podman/podman.sock PYTHONPATH=/home/alucard/projects/OSWorld \
-  .venv/bin/python /home/alucard/projects/lagado/docs/osworld/fill_probe.py
+  .venv/bin/python /home/alucard/projects/lagado/lagado-agent/python/osworld/fill_probe.py
 """
 import json, os, sys, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))

@@ -20,7 +20,7 @@ LAGADO = "/home/alucard/projects/lagado"
 BIN = os.environ.get("LAGADO_SESSION_DRIVE_BIN", LAGADO + "/target/debug/session_drive")
 LD = LAGADO + "/lagado-agent/vendored/llama.cpp-2/build/bin"
 EXDIR = "/home/alucard/projects/OSWorld/evaluation_examples/examples/libreoffice_calc"
-OPLOGS = LAGADO + "/docs/osworld/oplogs"
+OPLOGS = LAGADO + "/lagado-agent/python/osworld/oplogs"
 PER_TASK_TIMEOUT = 240
 
 

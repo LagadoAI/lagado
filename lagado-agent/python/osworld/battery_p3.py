@@ -17,7 +17,7 @@ We test two scenarios on the gross-profit column (ground truth known = gold J va
 
 Run (from OSWorld dir, its venv, podman sock):
   DOCKER_HOST=unix:///run/podman/podman.sock PYTHONPATH=/home/alucard/projects/OSWorld \
-  .venv/bin/python /home/alucard/projects/lagado/docs/osworld/battery_p3.py <task_json>
+  .venv/bin/python /home/alucard/projects/lagado/lagado-agent/python/osworld/battery_p3.py <task_json>
 """
 import json, os, sys, time
 import requests

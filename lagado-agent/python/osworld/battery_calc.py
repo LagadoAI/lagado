@@ -18,7 +18,7 @@ Floor untouched: this is a NEW driver over the proven native session (uno_daemon
 
 Usage (from the OSWorld repo dir, its venv, the podman sock):
   DOCKER_HOST=unix:///run/podman/podman.sock PYTHONPATH=/home/alucard/projects/OSWorld \
-  .venv/bin/python /home/alucard/projects/lagado/docs/osworld/battery_calc.py <task_json> [N=3] [cond=AB]
+  .venv/bin/python /home/alucard/projects/lagado/lagado-agent/python/osworld/battery_calc.py <task_json> [N=3] [cond=AB]
 """
 import json, os, re, sys, time, statistics
 import requests
