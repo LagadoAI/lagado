@@ -1,5 +1,11 @@
 # Investigation plan — locate the failure MOMENT, get HARD DATA on every interaction variable
 
+> **PATHS MOVED (2026-07-03, branch `Harness`, commit d6039a3):** all executable tooling referenced in
+> this doc (`battery_calc.py`, `battery_host.py`, `uno_ops.py`, `uno_daemon.py`, probes, `start_brain.sh`,
+> `oplogs/`) now lives at **`lagado-agent/python/osworld/`** — substitute that for `docs/osworld/` in every
+> command below. The `.md` docs stayed here. PYTHONPATH accordingly:
+> `PYTHONPATH=/home/alucard/projects/OSWorld:/home/alucard/projects/lagado/lagado-agent/python/osworld`.
+
 ## ════ TURN-4 STATE — 2026-06-23 EOD (read FIRST after a /clear) ════
 **PIVOT VERB — BUILT + REAL-EVALUATOR GOLD.** `create_pivot` (UNO DataPilot → xlsx → openpyxl `_pivots`) in
 uno_ops.py + battery_calc.py (grammar/EMIT/parse/apply_B name→index resolve/emit_gaps pivot bridge). Host

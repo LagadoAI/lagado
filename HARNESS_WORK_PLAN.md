@@ -65,10 +65,11 @@ short form; this file carries the work queue. Authoritative deep resume:
 - Publish the integration survey's 6 search angles + source list (coverage-gap check).
 
 ### Structural debts
-- Move executable tooling out of `docs/osworld/` (uno_daemon/uno_ops/battery_*/probes)
-  into a real package path — as its own `git mv` commit WITH the reference fixes
-  (start_brain.sh, resume-doc paths, memory pointers). Deferred until it can't break a
-  running investigation; do not do it casually mid-stress-cycle.
+- ~~Move executable tooling out of `docs/osworld/`~~ **DONE 2026-07-03 (d6039a3):** all
+  tooling now at `lagado-agent/python/osworld/` (pure `git mv`, history preserved;
+  `native_session.rs` include_str! updated, cargo check + py_compile green; path-moved
+  notes added to the resume plan + osworld README). New PYTHONPATH:
+  `/home/alucard/projects/OSWorld:/home/alucard/projects/lagado/lagado-agent/python/osworld`.
 - README still frames app-first; rewrite pends the user's public-narrative decision.
 
 ## Success criteria

@@ -1,5 +1,9 @@
 # Running Lagado against the REAL OSWorld benchmark
 
+> **PATHS MOVED (2026-07-03):** the executable tooling formerly in this directory lives at
+> `lagado-agent/python/osworld/`; only docs and result artifacts remain here. Read path
+> references below with that substitution.
+
 The comparable-to-field-SOTA number (the official OSWorld suite, xlang-ai). Our internal batteries
 (`osworld_stress` 11/11 + `osworld_heldout` 8/8 with Qwen) are FILE/SHELL proxies — NOT comparable to
 OSWorld (GUI-app heavy). This is the apples-to-apples path.
