@@ -104,6 +104,11 @@ def host_score(task, result_file):
     on host (host-LO render ≠ guest); they return None → reported as RENDER-SKIP, not a false 0."""
     ev = task["evaluator"]
     func = ev["func"]
+    # The scored RESULT is not always the input doc: an export task's result is the file the op
+    # EMITS next to it (e.g. .csv). Follow the evaluator's result extension so we score that file.
+    rext = os.path.splitext(str((ev.get("result") or {}).get("path", "")))[1]
+    if rext and not result_file.endswith(rext):
+        result_file = os.path.splitext(result_file)[0] + rext
     RENDER = {"compare_pdfs", "check_pdf_pages", "compare_image_list"}
     def one(fname, opt, exp):
         if fname in RENDER:
@@ -172,10 +177,15 @@ def main():
     N = 1
     ids = []
     for a in argv:
-        if a.isdigit():
-            N = int(a)
-        elif a == "heldout" and HELDOUT:
+        # A task id can be ALL DIGITS (37608790-…) — the old isdigit()-first order silently DROPPED
+        # such a task from the sweep (no error, no line). An id token is ≥4 chars and must match a
+        # task file; a SHORT digit token stays the run count (so a trailing "3" can't glob-match a task).
+        if a == "heldout" and HELDOUT:
             ids = list(HELDOUT)
+        elif len(a) >= 4 and glob.glob("%s/%s*.json" % (EX, a)):
+            ids.append(a)
+        elif a.isdigit():
+            N = int(a)
         else:
             ids.append(a)
     os.makedirs(WORK, exist_ok=True); os.makedirs(LOGDIR, exist_ok=True)

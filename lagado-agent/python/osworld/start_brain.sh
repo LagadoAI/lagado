@@ -12,7 +12,9 @@ set -euo pipefail
 LLAMA="${LAGADO_LLAMA_SERVER:-/home/alucard/projects/lagado/lagado-agent/vendored/llama.cpp-2/build/bin/llama-server}"
 MODEL="${LAGADO_BRAIN_MODEL:-/home/alucard/.laputa-secure/models/Qwen2.5-Coder-7B-Instruct-Q4_K_M.gguf}"
 PORT="${LAGADO_BRAIN_PORT:-8080}"
-CTX="${LAGADO_BRAIN_CTX:-2048}"   # battery prompts are <1k tokens; small ctx = less VRAM + RAM, no quality loss
+CTX="${LAGADO_BRAIN_CTX:-4096}"   # 2026-07-03: the op-vocab EMIT prompt reached ~2k tokens (measured: 2035-token
+                                  # prompt + 13 generated => truncated=1 at ctx 2048 -> mid-string emission).
+                                  # 4096 restores headroom; q8_0 KV keeps the extra RAM/VRAM small.
 
 echo "stopping any existing brain on :$PORT ..."
 pkill -f "llama-server.*--port $PORT" 2>/dev/null || true
