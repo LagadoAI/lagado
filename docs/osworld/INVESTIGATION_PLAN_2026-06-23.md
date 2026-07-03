@@ -6,6 +6,26 @@
 > command below. The `.md` docs stayed here. PYTHONPATH accordingly:
 > `PYTHONPATH=/home/alucard/projects/OSWorld:/home/alucard/projects/lagado/lagado-agent/python/osworld`.
 
+## ════ TURN-6 STATE — 2026-07-03 EOD (branch `Harness`) — WAVE-3, REGRESSION 14/14 ════
+**FOUR MORE REAL-EVALUATOR GOLDS (host loop): reorder_columns (7a4e4bc8), hide_rows_where (6054afcb),
+format_cells_where weekend-highlight (8b1ce5f2), set_decimal_separator locale-render (a01fbce3 — the first
+sheet_print-class gold). FULL REGRESSION SWEEP 14/14 GOLD** (all 7 turn-3 golds incl. 0a2e43bf+37608790 this
+run, wave-2's 3, wave-3's 4), **0 false-pass**. Verb notes: reorder moves WHOLE columns so formats/formulas
+travel; hide-NA matches the real =NA() error (32767), never deletes; weekend = date-format cells via doc
+NullDate epoch; decimal-comma = ru_RU number format at the VALUES' own precision (uniform max decimals →
+"1,0" not "1"), formulas localize too, values untouched. **REASON→EMIT LESSON (8b1ce5f2):** model reasoned
+"conditional formatting on weekends" but emitted BLANKET format_cells — style is UNRECOVERABLE once painted,
+so emit_gaps gained a conditional_format detector checked BEFORE apply (withhold the blanket op, feedback
+asks for format_cells_where); retry golded. Sheet-name misbind grounding added on both exports (name="Sheet1"
+= tab binding → doc basename; Class B, ablatable). HOST-LOOP truthfulness fixes: render-skip None passes
+through run_core (was a false 0.0); per-func result lists + multi-file expected handled; postconfig
+--convert-to replicated locally (sheet_print scoreable on host). **aa3a8974 (fit-page→PDF) = RENDER-SKIP on
+host:** export_pdf verb mechanism-proven (pdf produced, pages==1); residual = model emits destructive extra
+ops (blanket merges/set_cells) around it — REPORTED, not patched; needs VM pixel-compare anyway. Simple-verb
+queue now EMPTY. NEXT per plan: chart variants (2bd59342 sparkline, 3a7c8185 sort+chart, 0326d92d 2-chart) →
+cross-sheet/multi-step (51719eea 21ab7b40 347ef137 4f07fbe9) → render nuance (6e99a1ad 21df9241) → VM re-stress
+of the full heldout 30.
+
 ## ════ TURN-5 STATE — 2026-07-03 (branch `Harness`) ════
 **WAVE-2 SIMPLE VERBS — BUILT + REAL-EVALUATOR GOLD (host loop): freeze_panes (4188d3a4), export_csv
 (3aaa4e37), transpose_range (eb03d19a). 0 false-pass.** Method held: mechanism-first (hand-authored ops →
