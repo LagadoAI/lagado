@@ -6,6 +6,25 @@
 > command below. The `.md` docs stayed here. PYTHONPATH accordingly:
 > `PYTHONPATH=/home/alucard/projects/OSWorld:/home/alucard/projects/lagado/lagado-agent/python/osworld`.
 
+## ════ TURN-5 STATE — 2026-07-03 (branch `Harness`) ════
+**WAVE-2 SIMPLE VERBS — BUILT + REAL-EVALUATOR GOLD (host loop): freeze_panes (4188d3a4), export_csv
+(3aaa4e37), transpose_range (eb03d19a). 0 false-pass.** Method held: mechanism-first (hand-authored ops →
+apply_B → daemon → REAL metric funcs vs cached golds, 3/3 at 1.0) then brain-driven. Two interface findings:
+(1) freeze is VIEW state — headless/hidden LO has NO view (freezeAt missing, setViewData crashes pyuno) →
+pane record written into the SAVED xlsx (`uno_ops.patch_xlsx_freeze`, stdlib zip patch, guest-safe) at daemon
+reconcile post-store/pre-GUI-reload; (2) verb dialect matters — count-dialect made the model emit "freeze top
+row" (miss vs the gold's 2-col+1-row pane); giving the verb a `range=` the goal's own phrasing maps through
+deterministic geometry (`freeze_counts`) closed it, no task knowledge. INFRA DEFECTS FIXED while verifying:
+brain ctx 2048 truncated the grown ~2k-token EMIT prompt mid-string (measured truncated=1; start_brain now
+4096) + battery_host silently DROPPED all-digit task ids (isdigit-first arg parse — 37608790 never ran in
+sweeps) + host_score now scores the file the evaluator names (.csv results). REGRESSION: 0cecd4f3 1d17d234
+4172ea6e 51b11269 a9f325aa GOLD, 37608790 GOLD 3/3; 0a2e43bf MISS = the KNOWN turn-4 chart-range residual
+(cat A2:A11 vs val B12:G12 mismatch; grounding correctly declines), pre-existing, not wave-2. Tally: golds
+now 6 stable + 37608790 + 3 new = heldout ~10/30 equivalent (0a2e43bf flaky). NEXT per queue: remaining
+simple verbs (col-reorder 7a4e4bc8, resize aa3a8974, fill-NA 6054afcb, conditional-highlight 8b1ce5f2,
+locale-decimal a01fbce3) → chart variants (sparkline 2bd59342, sort+chart 3a7c8185, 2-chart 0326d92d).
+NOTE: tooling paths moved (see the PATHS MOVED banner at top).
+
 ## ════ TURN-4 STATE — 2026-06-23 EOD (read FIRST after a /clear) ════
 **PIVOT VERB — BUILT + REAL-EVALUATOR GOLD.** `create_pivot` (UNO DataPilot → xlsx → openpyxl `_pivots`) in
 uno_ops.py + battery_calc.py (grammar/EMIT/parse/apply_B name→index resolve/emit_gaps pivot bridge). Host
