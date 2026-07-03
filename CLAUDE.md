@@ -15,6 +15,8 @@ GitHub Actions CI (linux/macos/windows) is the cross-platform test bench.
 **Single source of truth:** `LAPUTA HOW TO/LAGADO_MASTER_PLAN.md.pdf` (June 3 2026 — supersedes all other plan files).
 Companion detail: `docs/plans/FILE_DEPENDENCY_REFERENCE_v3.md`.
 
+**CURRENT FOCUS (2026-07-03): THE HARNESS IS THE PRODUCT; the app/UI is the eventual shipping vehicle, not the current work.** The four pillars above are the long-term product vision. The defensible thing being built NOW is the deterministic harness that lets a small local model reliably operate a real desktop — proven on the REAL OSWorld benchmark, where success = golds with **zero false-pass** (integrity is scored, not assumed). Start from **"Status (2026-07-03)"** below and the harness doctrine sections; treat app-phase sections as background.
+
 ## Architecture
 
 ### Runtime
@@ -234,12 +236,22 @@ cd lagado-ui && npx tsc --noEmit
 
 ## Delegation workflow
 
-**2026-06-16: Opus does ALL work — planning AND implementation. No Haiku, no Sonnet delegation** (user directive, until they say otherwise). Use the `advisor` tool for the adversarial-review/skeptic pass before load-bearing designs and when declaring done.
+**The top model does ALL work — planning AND implementation. No Haiku/Sonnet delegation** (user directive 2026-06-16; main loop moved Opus → Fable 5 on 2026-07-03). Use the `advisor` tool for the adversarial-review/skeptic pass before load-bearing designs and when declaring done.
 Verify with `cargo check --workspace` + `npx tsc --noEmit` after changes.
 
 **Docs policy (2026-06-16 reversal):** `docs/`, `LAPUTA HOW TO/`, and all plans/PDFs are now COMMITTED (was: local-only). Machine = single point of failure; repo is private forever, only the binary ships → disaster-recovery beats secrecy. Never make the repo public.
 
-## Status (2026-06-11)
+## Status (2026-07-03) — harness / OSWorld phase (CURRENT)
+
+**Branch `Harness`** (continuation of `deskew/class-not-instance`; `main` is pre-OSWorld). Current work = the REAL OSWorld benchmark as the harness's proving ground; `env.evaluate()` is the incorruptible judge.
+
+- **Where we are:** LibreOffice Calc battery, held-out stress (30 never-opened tasks) = **7/30 gold, 0 false-pass**. The fracture line is OP-VOCAB coverage (pivots/sparklines/freeze/csv/transpose/reorder/resize/conditional/locale unbuilt) — NOT comprehension, NOT grounding (0 grounding mis-fires under stress). 7/30 is *golds achieved by model+harness*, not model-alone performance — attribution awaits the per-grounding ablation matrix (see `docs/osworld/PROMPT_GROUNDING_AUDIT_2026-06-29.md`).
+- **Architecture in play:** native session plane (resident guest UNO daemon over a host-owned op log; the proven stateless one-shot kept as the floor) + interface-altitude loop (candidates → reason → emit-in-names → notation-robust resolve, fail-closed → read-back/corroborate → retry). Grounding applied at seven seams, bind-or-abstain integrity held under stress.
+- **Authoritative resume:** `docs/osworld/INVESTIGATION_PLAN_2026-06-23.md` (the "POST-CLEAR RESUME PLAN" block at top). Companions: `docs/osworld/PREDICTIONS.md`, `docs/osworld/BATTERY_FINDINGS_2026-06-22.md`, `docs/INTEGRATION_SURVEY_2026-06-29.md`.
+- **Operating agreements (binding, see memory):** integrate-before-invent; verifiable-evals integrity (official evaluator only, frozen/held-out prompts, never lead-to-gold); deterministic-over-prompt (never prompt-nudge to pass a task); never replace what works; honest numbers — never soften a failure or inflate a result.
+- **Known structural debt:** executable harness tooling (`uno_daemon.py`, `uno_ops.py`, `battery_calc.py`, `lagado_agent.py`, batteries/probes) lives under `docs/osworld/` — relocation pending; ⚠️ `import uno` ONLY at `uno_ops.py` module top.
+
+## App-build status (2026-06-11 — HISTORICAL, pre-OSWorld phase)
 
 **FULL LIVING MEMORY SYSTEM COMPLETE. Perception fusion harness TASK 1–6 complete (TASK 7 next). VM control channel end-to-end tested + provisioning fixed.**
 
