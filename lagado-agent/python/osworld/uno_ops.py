@@ -256,7 +256,13 @@ def apply_one_op(doc, resolve_sheet, op):
         doc.getCurrentController().setActiveSheet(sh)
         folder, base = doc.getURL().rsplit("/", 1)
         name = (op.get("name") or "").strip()
-        name = (name[:-4] if name.lower().endswith(".csv") else name) or base.rsplit(".", 1)[0]
+        name = name[:-4] if name.lower().endswith(".csv") else name
+        # Sheet-name misbind grounding (Class B, ablatable): the model sometimes binds the FILE
+        # name field to the sheet TAB it saw ("Sheet1"). A tab name is never the asked file name
+        # in observed tasks — fall back to the document's own base name.
+        if name and doc.Sheets.hasByName(name):
+            name = ""
+        name = name or base.rsplit(".", 1)[0]
         flt = uno.createUnoStruct("com.sun.star.beans.PropertyValue")
         flt.Name, flt.Value = "FilterName", "Text - txt - csv (StarCalc)"
         opts = uno.createUnoStruct("com.sun.star.beans.PropertyValue")
@@ -275,6 +281,139 @@ def apply_one_op(doc, resolve_sheet, op):
             sh.getCellRangeByPosition(a.StartColumn, a.StartRow,
                                       a.StartColumn + len(t[0]) - 1,
                                       a.StartRow + len(t) - 1).setDataArray(t)
+    elif kind == "reorder_columns":
+        # Rearrange existing columns into a named left-to-right order (the app's cut-column →
+        # insert-column drag). Whole-column insert/move/delete so FORMATS AND FORMULAS TRAVEL
+        # with the data (a values-only permute would strand date/number formats at the old
+        # positions and break rendered comparisons). Fail-closed: the order must name exactly
+        # the used columns, each matching one header — anything else raises (no guessing).
+        sh = resolve_sheet(op.get("sheet"))
+        cur = sh.createCursor()
+        cur.gotoStartOfUsedArea(False)
+        cur.gotoEndOfUsedArea(True)
+        a = cur.getRangeAddress()
+        c0, r0, c1, r1 = a.StartColumn, a.StartRow, a.EndColumn, a.EndRow
+        want = [t.strip().strip("{}").strip() for t in str(op.get("order") or "").split(",") if t.strip()]
+        norm = lambda s: "".join(str(s).split()).casefold()
+        if len(want) != (c1 - c0 + 1):
+            raise ValueError("order names %d columns; used area has %d" % (len(want), c1 - c0 + 1))
+        for i, name in enumerate(want):
+            headers = [sh.getCellByPosition(c, r0).getString() for c in range(c0, c1 + 1)]
+            if norm(headers[i]) == norm(name):
+                continue
+            j = next((k for k, h in enumerate(headers) if norm(h) == norm(name)), None)
+            if j is None:
+                raise ValueError("column %r not found in headers %s" % (name, headers))
+            sh.Columns.insertByIndex(c0 + i, 1)
+            src = j + (1 if j >= i else 0)              # the insert shifted the source right
+            sh.moveRange(sh.getCellByPosition(c0 + i, r0).CellAddress,
+                         sh.getCellRangeByPosition(c0 + src, r0, c0 + src, r1).RangeAddress)
+            sh.Columns.removeByIndex(c0 + src, 1)
+    elif kind == "hide_rows_where":
+        # Hide (never delete) every used row containing the matched content — the app's row-hide.
+        # match text compares the DISPLAYED string; an N/A-ish match also accepts the real =NA()
+        # error cell (error code 32767, which displays as #N/A but reads back as an error, not text).
+        sh = resolve_sheet(op.get("sheet"))
+        m = str(op.get("match") or "").strip()
+        na_ish = m.upper().lstrip("#") in ("N/A", "NA")
+        cur = sh.createCursor()
+        cur.gotoStartOfUsedArea(False)
+        cur.gotoEndOfUsedArea(True)
+        a = cur.getRangeAddress()
+        for r in range(a.StartRow, a.EndRow + 1):
+            for c in range(a.StartColumn, a.EndColumn + 1):
+                cell = sh.getCellByPosition(c, r)
+                if (m and cell.getString().strip() == m) or (na_ish and cell.getError() == 32767):
+                    sh.getRows().getByIndex(r).IsVisible = False
+                    break
+    elif kind == "format_cells_where":
+        # Style every used cell matching a PREDICATE the goal states, harness-scanned (the model
+        # cannot enumerate scattered cells it never sees). "weekend" = date-formatted cells whose
+        # date falls on Sat/Sun (weekday via the doc's own NullDate epoch); any other match =
+        # exact displayed text. Only named style fields apply.
+        import datetime as _dt
+        sh = resolve_sheet(op.get("sheet"))
+        m = str(op.get("match") or "").strip()
+        weekend = m.casefold() == "weekend"
+        fc = (op.get("font_color") or "").lstrip("#").strip()
+        bg = (op.get("fill_color") or "").lstrip("#").strip()
+        fmts = doc.getNumberFormats()
+        nd = doc.NullDate
+        epoch = _dt.date(nd.Year, nd.Month, nd.Day)
+        cur = sh.createCursor()
+        cur.gotoStartOfUsedArea(False)
+        cur.gotoEndOfUsedArea(True)
+        a = cur.getRangeAddress()
+        for r in range(a.StartRow, a.EndRow + 1):
+            for c in range(a.StartColumn, a.EndColumn + 1):
+                cell = sh.getCellByPosition(c, r)
+                if weekend:
+                    if cell.getType().value != "VALUE":
+                        continue
+                    if not (fmts.getByKey(cell.NumberFormat).Type & 2):   # NumberFormat.DATE bit
+                        continue
+                    hit = (epoch + _dt.timedelta(days=int(cell.getValue()))).weekday() >= 5
+                else:
+                    hit = bool(m) and cell.getString().strip() == m
+                if hit:
+                    if bg:
+                        cell.CellBackColor = int(bg, 16)
+                    if fc:
+                        cell.CharColor = int(fc, 16)
+    elif kind == "set_decimal_separator":
+        # Render ALL numbers with the asked decimal separator by giving numeric cells the GENERAL
+        # format of a locale whose separator that is (comma → ru_RU) — VALUES untouched, natural
+        # precision kept ("as-is"), and any 'as shown' export (the evaluator's own csv convert)
+        # renders the comma. This is the app's real localized-display mechanism, not a text rewrite.
+        sh = resolve_sheet(op.get("sheet"))
+        sep = str(op.get("separator") or ",").strip() or ","
+        loc = uno.createUnoStruct("com.sun.star.lang.Locale")
+        loc.Language, loc.Country = ("ru", "RU") if sep == "," else ("en", "US")
+        cur = sh.createCursor()
+        cur.gotoStartOfUsedArea(False)
+        cur.gotoEndOfUsedArea(True)
+        a = cur.getRangeAddress()
+        # Pass 1 — the display precision the VALUES themselves need ("as-is" = the numbers, not a
+        # stale cell format): uniform decimals = the max any value requires (a consistent column,
+        # the way a human formats one; 0.1-step data → one decimal everywhere, so 1.0 shows "1,0").
+        cells, dec = [], 0
+        for r in range(a.StartRow, a.EndRow + 1):
+            for c in range(a.StartColumn, a.EndColumn + 1):
+                cell = sh.getCellByPosition(c, r)
+                # VALUE and FORMULA both render numerically (a "+1" column is formulas and must
+                # localize too); a format on a text-result formula is inert. TEXT stays untouched.
+                if cell.getType().value in ("VALUE", "FORMULA"):
+                    cells.append(cell)
+                    v = cell.getValue()
+                    for k in range(0, 7):
+                        if abs(v - round(v, k)) < 1e-9:
+                            dec = max(dec, k)
+                            break
+        code = "0" if dec == 0 else "0" + sep + "0" * dec   # format code in the locale's own notation
+        fmts = doc.getNumberFormats()
+        key = fmts.queryKey(code, loc, False)
+        if key == -1:
+            key = fmts.addNew(code, loc)
+        for cell in cells:
+            cell.NumberFormat = key
+    elif kind == "export_pdf":
+        # Export as PDF next to the document (name follows the doc unless overridden), scaled to
+        # fit N pages via the sheet's page style (the app's Format→Page→Scale). Document-level,
+        # headless-safe.
+        sh = resolve_sheet(op.get("sheet"))
+        fit = int(float(str(op.get("fit_pages") or "1").strip() or 1))
+        if fit:
+            style = doc.StyleFamilies.getByName("PageStyles").getByName(sh.PageStyle)
+            style.ScaleToPages = fit
+        folder, base = doc.getURL().rsplit("/", 1)
+        name = (op.get("name") or "").strip()
+        name = name[:-4] if name.lower().endswith(".pdf") else name
+        if name and doc.Sheets.hasByName(name):   # sheet-name misbind grounding — see export_csv
+            name = ""
+        name = name or base.rsplit(".", 1)[0]
+        flt = uno.createUnoStruct("com.sun.star.beans.PropertyValue")
+        flt.Name, flt.Value = "FilterName", "calc_pdf_Export"
+        doc.storeToURL(folder + "/" + name + ".pdf", (flt,))
     elif kind == "create_chart":
         # Insert a chart so openpyxl reads it back with the right tagname (lineChart/barChart) + series refs.
         # `ranges` = ";"-joined A1 ranges (e.g. "B1:G1;B12:G12") → category + value; `type` line|bar|column.

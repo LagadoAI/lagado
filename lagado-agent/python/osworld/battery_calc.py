@@ -166,7 +166,12 @@ GRAMMAR_B = (
     ' | "create_pivot(source=" str ", dest=" str ", rows=" str ", cols=" str ", data=" str ", func=" str ")"'
     ' | "freeze_panes(sheet=" str ", range=" str ", rows=" str ", cols=" str ")"'
     ' | "export_csv(sheet=" str ", name=" str ")"'
-    ' | "transpose_range(sheet=" str ", source=" str ", dest=" str ")"\n'
+    ' | "transpose_range(sheet=" str ", source=" str ", dest=" str ")"'
+    ' | "reorder_columns(sheet=" str ", order=" str ")"'
+    ' | "hide_rows_where(sheet=" str ", match=" str ")"'
+    ' | "format_cells_where(sheet=" str ", match=" str ", fill_color=" str ", font_color=" str ")"'
+    ' | "set_decimal_separator(sheet=" str ", separator=" str ")"'
+    ' | "export_pdf(sheet=" str ", name=" str ", fit_pages=" str ")"\n'
     'str ::= "\\"" [^"\\\\]* "\\""\n'
 )
 
@@ -214,7 +219,12 @@ EMIT_PROMPT = (
     " EACH pivot table the goal asks for (e.g. 'two pivot tables, one per X and one per Y' = two create_pivot calls)\n"
     "  freeze_panes(sheet=\"S\", range=\"A1:B1\", rows=\"\", cols=\"\")  freeze panes so cells stay visible when scrolling: give range EXACTLY as the goal names the cells to keep visible, OR give rows/cols counts (leave the unused fields \"\")\n"
     "  export_csv(sheet=\"S\", name=\"\")                    export the sheet as a CSV file next to the document (name=\"\" keeps the document's own file name)\n"
-    "  transpose_range(sheet=\"S\", source=\"B2:F5\", dest=\"B8\")  paste the source range TRANSPOSED with its top-left cell at dest\n\n"
+    "  transpose_range(sheet=\"S\", source=\"B2:F5\", dest=\"B8\")  paste the source range TRANSPOSED with its top-left cell at dest\n"
+    "  reorder_columns(sheet=\"S\", order=\"{{H1}},{{H2}},{{H3}}\")  rearrange existing columns into this left-to-right order — name EVERY column\n"
+    "  hide_rows_where(sheet=\"S\", match=\"N/A\")           hide (not delete) every row containing the matched cell text\n"
+    "  format_cells_where(sheet=\"S\", match=\"weekend\", fill_color=\"#rrggbb\", font_color=\"\")  style every cell matching a predicate: \"weekend\" = dates falling on Saturday/Sunday; any other match = exact cell text (leave unused style fields \"\")\n"
+    "  set_decimal_separator(sheet=\"S\", separator=\",\")    display ALL numbers with this decimal separator (localized format; values stay numbers)\n"
+    "  export_pdf(sheet=\"S\", name=\"\", fit_pages=\"1\")      export as a PDF next to the document, scaled to fit N pages (name=\"\" keeps the document's file name)\n\n"
     "Refer to columns by {{Header}} name where a name is asked; use A1 cell refs for ranges. "
     "Emit ONLY the operations the goal needs, as a list of calls:")
 
@@ -240,6 +250,15 @@ def emit_gaps(reasoning, nameops):
        not any(n.get("kind") == "total_row" for n in nameops) and \
        not any(n.get("kind") == "create_pivot" for n in nameops):
         gaps.append("total_row")
+    # CONDITIONAL-STYLE fidelity: the reasoning commits to styling only cells matching a CONDITION
+    # (weekend days / conditional formatting) but the emit is a blanket format_cells — which would
+    # paint EVERY cell in the range and (unlike a missing op) cannot be undone by a retry. Hold the
+    # model to its own predicate: withhold the blanket op (the caller does this pre-apply) and ask
+    # for format_cells_where. Gated on an explicit conditional phrase in the model's OWN analysis.
+    if re.search(r"conditional formatting|weekend|saturday|sunday", r) and \
+       any(n.get("kind") == "format_cells" for n in nameops) and \
+       not any(n.get("kind") == "format_cells_where" for n in nameops):
+        gaps.append("conditional_format")
     return gaps
 
 def gap_feedback(gaps):
@@ -258,6 +277,11 @@ def gap_feedback(gaps):
         lines.append("- your analysis describes adding a TOTAL/summary row but you did NOT emit total_row(...). "
                      "Keep your other operations and ALSO emit: total_row(sheet=\"S\", label=\"Total\", "
                      "columns=\"{Header1},{Header2}\") — name the columns to SUM into the total row.")
+    if "conditional_format" in gaps:
+        lines.append("- your analysis styles only the cells matching a CONDITION, but format_cells(range=...) "
+                     "styles EVERY cell in the range. Emit format_cells_where(sheet=\"S\", match=\"<your "
+                     "condition: weekend, or an exact cell text>\", fill_color=\"#rrggbb\", font_color=\"\") "
+                     "INSTEAD of format_cells, and keep your other operations.")
     return "\n".join(lines)
 
 def compose_feedback(fails, fired):
@@ -317,7 +341,8 @@ def parse_B_nameops(text):
     nameops = []
     verbs = ("compute_column", "set_cell", "add_sheet", "rename_sheet", "copy_sheet", "total_row",
              "format_cells", "merge_cells", "sort_range", "set_number_format", "create_chart", "create_pivot",
-             "freeze_panes", "export_csv", "transpose_range")
+             "freeze_panes", "export_csv", "transpose_range", "reorder_columns", "hide_rows_where",
+             "format_cells_where", "set_decimal_separator", "export_pdf")
     for verb, body in scan_calls(text, verbs):
         kw = parse_kv(body)
         if verb == "add_sheet":
@@ -364,6 +389,19 @@ def parse_B_nameops(text):
         elif verb == "transpose_range":
             nameops.append({"kind": "transpose_range", "sheet": kw.get("sheet"),
                             "source": kw.get("source", ""), "dest": kw.get("dest", "")})
+        elif verb == "reorder_columns":
+            nameops.append({"kind": "reorder_columns", "sheet": kw.get("sheet"), "order": kw.get("order", "")})
+        elif verb == "hide_rows_where":
+            nameops.append({"kind": "hide_rows_where", "sheet": kw.get("sheet"), "match": kw.get("match", "")})
+        elif verb == "format_cells_where":
+            nameops.append({"kind": "format_cells_where", "sheet": kw.get("sheet"), "match": kw.get("match", ""),
+                            "fill_color": kw.get("fill_color", ""), "font_color": kw.get("font_color", "")})
+        elif verb == "set_decimal_separator":
+            nameops.append({"kind": "set_decimal_separator", "sheet": kw.get("sheet"),
+                            "separator": kw.get("separator", ",")})
+        elif verb == "export_pdf":
+            nameops.append({"kind": "export_pdf", "sheet": kw.get("sheet"), "name": kw.get("name", ""),
+                            "fit_pages": kw.get("fit_pages", "1")})
     return nameops
 
 def _op_key(o):
@@ -383,11 +421,14 @@ def _op_key(o):
         return (k, o.get("old"), o.get("new"))
     if k == "copy_sheet":
         return (k, o.get("source"), o.get("new"))
-    if k == "export_csv":
+    if k in ("export_csv", "export_pdf"):
         return (k, o.get("sheet"), o.get("name"))
     if k == "transpose_range":
         return (k, o.get("sheet"), o.get("source"), o.get("dest"))
-    return (k, o.get("sheet"))                 # total_row, create_chart, freeze_panes: one per sheet
+    if k in ("hide_rows_where", "format_cells_where"):
+        return (k, o.get("sheet"), o.get("match"))
+    # total_row, create_chart, freeze_panes, reorder_columns, set_decimal_separator: one per sheet
+    return (k, o.get("sheet"))
 
 def merge_nameops(carried, new):
     """Retain ops the model committed in an EARLIER attempt but DROPPED on a gap/fault retry. The reason->emit
@@ -404,7 +445,7 @@ def merge_nameops(carried, new):
         by_key[key] = o
     merged = [by_key[k] for k in order]
     # Ops that must see the FINAL data: charts/pivots bind to it, an export snapshots it.
-    viz = ("create_chart", "create_pivot", "export_csv")
+    viz = ("create_chart", "create_pivot", "export_csv", "export_pdf")
     return [o for o in merged if o.get("kind") not in viz] + [o for o in merged if o.get("kind") in viz]
 
 def apply_B(g, nameops, log):
@@ -522,7 +563,8 @@ def apply_B(g, nameops, log):
                     written.append((sheet, cell, f))
             live = live_detect(g)
         elif k in ("format_cells", "merge_cells", "set_number_format", "freeze_panes", "export_csv",
-                   "transpose_range"):
+                   "transpose_range", "reorder_columns", "hide_rows_where", "format_cells_where",
+                   "set_decimal_separator", "export_pdf"):
             op = {"op": k}
             op.update({kk: vv for kk, vv in nop.items() if kk != "kind"})
             if k in ("format_cells", "set_number_format"):       # not merge (a merge range is intentional);
@@ -836,7 +878,8 @@ EXISTING_SHEET_FIELDS = {
     "compute_column": ["sheet"], "total_row": ["sheet"], "format_cells": ["sheet"],
     "merge_cells": ["sheet"], "set_number_format": ["sheet"], "sort_range": ["sheet"],
     "create_pivot": ["source"], "freeze_panes": ["sheet"], "export_csv": ["sheet"],
-    "transpose_range": ["sheet"],
+    "transpose_range": ["sheet"], "reorder_columns": ["sheet"], "hide_rows_where": ["sheet"],
+    "format_cells_where": ["sheet"], "set_decimal_separator": ["sheet"], "export_pdf": ["sheet"],
 }
 
 def ground_chart_ranges(ranges, sheet, live):
@@ -1081,11 +1124,16 @@ def run_core(g, task, cond, file_path, log, score_fn):
             log["steps"].append("attempt%d" % attempt)
             new_ops = author_B(instr, detected, log, feedback)
             nameops = merge_nameops(carried, new_ops)   # retain ops the lossy retry-emit dropped (interface-plane repair)
+            # Gap check BEFORE apply: a missing op (chart/pivot/total_row) is retry-recoverable, but a
+            # WRONG-CLASS op like a blanket style where the analysis says conditional CANNOT be unpainted
+            # — withhold it this attempt; the gap feedback asks for the conditional verb instead.
+            gaps = emit_gaps(log.get("reasoning", ""), nameops)   # reason→emit completeness (membrane bridge)
+            if "conditional_format" in gaps:
+                nameops = [n for n in nameops if n.get("kind") != "format_cells"]
             carried = nameops
             log["nameops"] = nameops
             written, resolve_fails = apply_B(g, nameops, log)
             fired = falsify(g, written)
-            gaps = emit_gaps(log.get("reasoning", ""), nameops)   # reason→emit completeness (membrane bridge)
             log["n_ops"] = len(nameops)
             if nameops and not resolve_fails and not fired and not gaps:
                 break                            # emitted ops, no detected fault — stop (NOT a correctness
@@ -1124,7 +1172,11 @@ def run_core(g, task, cond, file_path, log, score_fn):
         time.sleep(int(os.environ.get("LAGADO_VISIBLE_HOLD", "25")))
     g.client("close")
     time.sleep(4)
-    score = score_fn() or 0.0
+    score = score_fn()
+    if score is None:                 # host render-skip sentinel (compare_pdfs etc.) — pass it
+        log["score"] = None           # through so the caller reports RENDER-SKIP, not a false 0
+        log["false_pass"] = None
+        return None, log
     log["score"] = score
     # P5 calibration pair + false-pass flag (the integrity core)
     log["false_pass"] = bool(harness_reports_done and score < 1.0)

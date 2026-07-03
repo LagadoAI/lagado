@@ -92,10 +92,48 @@ def fetch_input(task):
 
 
 def _gold(task, exp_cfg):
-    """Local cached gold path for a cloud_file expected config."""
+    """Local cached gold path for a cloud_file expected config. multi-file expected configs pass
+    the FIRST dest to the metric (`gives` defaults to [0]); companions (e.g. the gold's -Sheet1.csv
+    for sheet_print) sit beside it in the cache and are found by the metric's own derivation."""
     if exp_cfg and exp_cfg.get("type") == "cloud_file":
-        return os.path.join(CACHE, task["id"], exp_cfg.get("dest", ""))
+        dest = exp_cfg.get("dest", "")
+        if isinstance(dest, list):
+            dest = dest[0] if dest else ""
+        return os.path.join(CACHE, task["id"], dest)
     return None
+
+
+def _replicate_postconfig_convert(task, result_file):
+    """Mirror the evaluator's OWN postconfig conversion on the host. sheet_print tasks derive their
+    scored artifact in-VM via `libreoffice --convert-to csv:<options>` before the fetch; the metric
+    then reads `<result-base>-<Sheet>.csv` NEXT TO the result file. Same command, same filter
+    options, pointed at our local result — a faithful mirror, not a shortcut. No-op for tasks
+    whose postconfig has no convert step. Runs after the daemon released its soffice (reconcile
+    tears it down), with a private profile so no instance/lock collision."""
+    for st in task.get("evaluator", {}).get("postconfig", []):
+        if st.get("type") != "execute":
+            continue
+        cmd = st.get("parameters", {}).get("command", [])
+        if not (isinstance(cmd, list) and any("--convert-to" in str(x) for x in cmd)):
+            continue
+        newcmd, src_seen = [], False
+        for x in cmd:
+            x = str(x)
+            if x == "libreoffice":
+                x = "soffice"
+            elif x.startswith("/home/user/") and os.path.splitext(x)[1] in (".xlsx", ".xls", ".ods"):
+                x, src_seen = result_file, True
+            elif x == "/home/user":
+                x = os.path.dirname(result_file) or "."
+            newcmd.append(x)
+        if not src_seen:
+            continue
+        newcmd.insert(1, "--headless")
+        newcmd.append("-env:UserInstallation=file:///tmp/lagado_host_convert_profile")
+        try:
+            subprocess.run(newcmd, capture_output=True, timeout=120)
+        except Exception:
+            pass                                     # metric will report the missing artifact as 0
 
 
 def host_score(task, result_file):
@@ -106,9 +144,17 @@ def host_score(task, result_file):
     func = ev["func"]
     # The scored RESULT is not always the input doc: an export task's result is the file the op
     # EMITS next to it (e.g. .csv). Follow the evaluator's result extension so we score that file.
-    rext = os.path.splitext(str((ev.get("result") or {}).get("path", "")))[1]
+    # (multi-result: the metric receives the FIRST path — `gives` defaults to [0].)
+    res = ev.get("result") or {}
+    if isinstance(res, list):                            # func-list tasks carry a result PER func
+        res = res[0] if res else {}
+    rpath = res.get("path", "") if isinstance(res, dict) else ""
+    if isinstance(rpath, list):
+        rpath = rpath[0] if rpath else ""
+    rext = os.path.splitext(str(rpath))[1]
     if rext and not result_file.endswith(rext):
         result_file = os.path.splitext(result_file)[0] + rext
+    _replicate_postconfig_convert(task, result_file)
     RENDER = {"compare_pdfs", "check_pdf_pages", "compare_image_list"}
     def one(fname, opt, exp):
         if fname in RENDER:
