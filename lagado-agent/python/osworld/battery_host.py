@@ -142,6 +142,10 @@ def host_score(task, result_file):
     on host (host-LO render ≠ guest); they return None → reported as RENDER-SKIP, not a false 0."""
     ev = task["evaluator"]
     func = ev["func"]
+    if func == "infeasible":
+        # Mirror desktop_env.evaluate: reaching the scorer WITHOUT a FAIL declaration = 0.
+        # (A declared infeasible never gets here — run_core scores it directly.)
+        return 0.0
     # The scored RESULT is not always the input doc: an export task's result is the file the op
     # EMITS next to it (e.g. .csv). Follow the evaluator's result extension so we score that file.
     # (multi-result: the metric receives the FIRST path — `gives` defaults to [0].)

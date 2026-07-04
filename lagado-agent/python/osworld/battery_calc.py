@@ -171,13 +171,19 @@ GRAMMAR_B = (
     ' | "hide_rows_where(sheet=" str ", match=" str ")"'
     ' | "format_cells_where(sheet=" str ", match=" str ", fill_color=" str ", font_color=" str ")"'
     ' | "set_decimal_separator(sheet=" str ", separator=" str ")"'
-    ' | "export_pdf(sheet=" str ", name=" str ", fit_pages=" str ")"\n'
+    ' | "export_pdf(sheet=" str ", name=" str ", fit_pages=" str ")"'
+    ' | "infeasible(reason=" str ")"\n'
     'str ::= "\\"" [^"\\\\]* "\\""\n'
 )
 
 def candidate_cards(detected):
     lines = []
     for sheet, info in detected.items():
+        # A/B MEASURED 2026-07-03 (prompt-brittleness case study): stating the row SPAN here
+        # ("data in rows 2-11") fixed 0326d92d's SUM anchors but DETERMINISTICALLY regressed
+        # 37608790 (3/3 gold -> 0/3) and induced off-by-one chart/sort ranges on 3a7c8185.
+        # Reverted to the bare count; range robustness is owned DETERMINISTICALLY at apply
+        # (sort clamp/widen, chart edge trims) — not by prompt wording.
         lines.append("Sheet %r (%d data rows):" % (sheet, info["rows"]))
         for c in info["cols"]:
             samp = ", ".join(str(s) for s in c["samples"][:3] if s is not None)
@@ -224,7 +230,8 @@ EMIT_PROMPT = (
     "  hide_rows_where(sheet=\"S\", match=\"N/A\")           hide (not delete) every row containing the matched cell text\n"
     "  format_cells_where(sheet=\"S\", match=\"weekend\", fill_color=\"#rrggbb\", font_color=\"\")  style every cell matching a predicate: \"weekend\" = dates falling on Saturday/Sunday; any other match = exact cell text (leave unused style fields \"\")\n"
     "  set_decimal_separator(sheet=\"S\", separator=\",\")    display ALL numbers with this decimal separator (localized format; values stay numbers)\n"
-    "  export_pdf(sheet=\"S\", name=\"\", fit_pages=\"1\")      export as a PDF next to the document, scaled to fit N pages (name=\"\" keeps the document's file name)\n\n"
+    "  export_pdf(sheet=\"S\", name=\"\", fit_pages=\"1\")      export as a PDF next to the document, scaled to fit N pages (name=\"\" keeps the document's file name)\n"
+    "  infeasible(reason=\"...\")                          ONLY if the request cannot be done in this application at all — emit it ALONE (no other operations) and state why\n\n"
     "Refer to columns by {{Header}} name where a name is asked; use A1 cell refs for ranges. "
     "Emit ONLY the operations the goal needs, as a list of calls:")
 
@@ -236,6 +243,8 @@ def emit_gaps(reasoning, nameops):
     reasoning describes a 'line chart over B12:G12' but emits only total_row)."""
     r = (reasoning or "").lower()
     gaps = []
+    if any(n.get("kind") == "infeasible" for n in nameops):
+        return gaps                                   # a declared-infeasible emission gets no op nags
     if any(w in r for w in ("chart", "graph", "plot", "sparkline")) and \
        not any(n.get("kind") == "create_chart" for n in nameops):
         gaps.append("chart")
@@ -245,11 +254,22 @@ def emit_gaps(reasoning, nameops):
     # emitted (the observed 0a2e43bf miss: it emitted create_chart and DROPPED total_row). Gated tight — needs an
     # explicit row-add phrase AND a total/sum word, and is suppressed on pivot tasks (a pivot owns its own totals)
     # — so it holds the model to its OWN analysis without firing on unrelated 'total' mentions. NOT leading.
-    if re.search(r"new row|total row|row called|row named|row labeled|add a row|a row at|row at the bottom", r) and \
+    if re.search(r"new row|total row|row called|row named|row labeled|add a row|a row at|row at the bottom"
+                 r"|underneath row|row underneath|row beneath|beneath row", r) and \
        any(w in r for w in ("total", "sum")) and \
        not any(n.get("kind") == "total_row" for n in nameops) and \
        not any(n.get("kind") == "create_pivot" for n in nameops):
         gaps.append("total_row")
+    # WRITES-DROPPED: the reasoning ENTERS FORMULAS into cells (the app gesture: "enter the formula
+    # =SUM(...)", "type ... in cell") but the emit contains NO cell-writing op at all — the whole
+    # computation was lost in the reason→emit conversion (observed 0326d92d: charts emitted, the
+    # Total/Growth rows they chart never written). Held to its own analysis; gated on an explicit
+    # formula-entry phrase AND zero write ops AND something else emitted (else the empty-emission
+    # path already retries).
+    write_kinds = ("compute_column", "set_cell", "total_row")
+    if nameops and re.search(r"enter the formula|=sum\(|=average\(|type the formula|input the formula", r) and \
+       not any(n.get("kind") in write_kinds for n in nameops):
+        gaps.append("writes_dropped")
     # CONDITIONAL-STYLE fidelity: the reasoning commits to styling only cells matching a CONDITION
     # (weekend days / conditional formatting) but the emit is a blanket format_cells — which would
     # paint EVERY cell in the range and (unlike a missing op) cannot be undone by a retry. Hold the
@@ -282,18 +302,30 @@ def gap_feedback(gaps):
                      "styles EVERY cell in the range. Emit format_cells_where(sheet=\"S\", match=\"<your "
                      "condition: weekend, or an exact cell text>\", fill_color=\"#rrggbb\", font_color=\"\") "
                      "INSTEAD of format_cells, and keep your other operations.")
+    if "writes_dropped" in gaps:
+        lines.append("- your analysis ENTERS FORMULAS into cells, but you emitted NO operation that writes "
+                     "any cell — the computation never happened. Keep your other operations and ALSO emit "
+                     "the writes your analysis describes: total_row(sheet=\"S\", label=\"...\", "
+                     "columns=\"{Header1},{Header2}\") computes a SUM row for you (correct rows guaranteed); "
+                     "individual formula cells use set_cell(sheet=\"S\", cell=\"A1\", value=\"=FORMULA\").")
     return "\n".join(lines)
 
 def compose_feedback(fails, fired):
     """Turn read-back faults into a concrete correction note for the next emit (the retry condition)."""
     lines = []
     for f in fails:
-        if "apply error" in f.get("why", ""):
+        why = f.get("why", "")
+        if "apply error" in why:
             lines.append("- the formula %r failed to apply (%s). Use DOUBLE quotes for text literals "
-                         "(\"_\" not '_'), and valid function/sheet names." % (f.get("name"), f.get("why")))
+                         "(\"_\" not '_'), and valid function/sheet names." % (f.get("name"), why))
+        elif "EMPTY" in why:
+            # An OBSERVATION fault (e.g. a chart bound to unwritten cells) — relay it verbatim;
+            # the name-resolution template below would mislead the retry toward {Sheet.Header}
+            # qualification when the actual problem is missing data ops.
+            lines.append("- %s." % why)
         else:
             lines.append("- could not resolve the name %r (%s). A column on ANOTHER sheet must be qualified "
-                         "as {Sheet1.Header}; check the exact header spelling." % (f.get("name"), f.get("why")))
+                         "as {Sheet1.Header}; check the exact header spelling." % (f.get("name"), why))
     for f in fired:
         if f["falsifier"] == "error_values":
             lines.append("- the column %s contains error values %s — fix the formula (text literals use "
@@ -318,7 +350,7 @@ def _chat(content, grammar=None, temperature=0.0, seed=7, max_tokens=800):
     r = requests.post(CHAT, json=body, timeout=200)
     return r.json()["choices"][0]["message"]["content"]
 
-def author_B(instr, detected, log, feedback=None, temperature=0.0):
+def author_B(instr, detected, log, feedback=None, temperature=0.0, additive=False):
     cards = candidate_cards(detected)
     seed = int(temperature * 1000) + 7            # vary seed with temp so the 2nd derivation is independent
     # call 1: REASON (no grammar — free reasoning)
@@ -328,8 +360,15 @@ def author_B(instr, detected, log, feedback=None, temperature=0.0):
     # call 2: EMIT (grammar-constrained). On retry, append the specific fault.
     emit = EMIT_PROMPT.format(instr=instr, cards=cards, reasoning=reasoning)
     if feedback:
-        emit += ("\n\nYour PREVIOUS attempt had these problems. Keep your operations EXACTLY as written "
-                 "(same verbs, same targets, same structure) and change ONLY what these notes say:\n%s" % feedback)
+        # Two retry stances: CORRECTIVE (fix in place, change nothing else) vs ADDITIVE (the attempt
+        # was incomplete — the old "change ONLY what these notes say" preamble actively FORBADE the
+        # model from emitting the ops a gap/empty-range note asks it to add; observed on 0326d92d).
+        if additive:
+            emit += ("\n\nYour PREVIOUS attempt was INCOMPLETE. Keep your operations exactly as "
+                     "written AND ALSO emit the operations these notes ask for:\n%s" % feedback)
+        else:
+            emit += ("\n\nYour PREVIOUS attempt had these problems. Keep your operations EXACTLY as written "
+                     "(same verbs, same targets, same structure) and change ONLY what these notes say:\n%s" % feedback)
     raw = _chat(emit, grammar=GRAMMAR_B, temperature=temperature, seed=seed, max_tokens=800)
     log.setdefault("emit_raw", [])
     log["emit_raw"].append(raw)
@@ -342,7 +381,7 @@ def parse_B_nameops(text):
     verbs = ("compute_column", "set_cell", "add_sheet", "rename_sheet", "copy_sheet", "total_row",
              "format_cells", "merge_cells", "sort_range", "set_number_format", "create_chart", "create_pivot",
              "freeze_panes", "export_csv", "transpose_range", "reorder_columns", "hide_rows_where",
-             "format_cells_where", "set_decimal_separator", "export_pdf")
+             "format_cells_where", "set_decimal_separator", "export_pdf", "infeasible")
     for verb, body in scan_calls(text, verbs):
         kw = parse_kv(body)
         if verb == "add_sheet":
@@ -402,6 +441,8 @@ def parse_B_nameops(text):
         elif verb == "export_pdf":
             nameops.append({"kind": "export_pdf", "sheet": kw.get("sheet"), "name": kw.get("name", ""),
                             "fit_pages": kw.get("fit_pages", "1")})
+        elif verb == "infeasible":
+            nameops.append({"kind": "infeasible", "reason": kw.get("reason", "")})
     return nameops
 
 def _op_key(o):
@@ -427,7 +468,11 @@ def _op_key(o):
         return (k, o.get("sheet"), o.get("source"), o.get("dest"))
     if k in ("hide_rows_where", "format_cells_where"):
         return (k, o.get("sheet"), o.get("match"))
-    # total_row, create_chart, freeze_panes, reorder_columns, set_decimal_separator: one per sheet
+    if k == "create_chart":
+        # keyed by TITLE: two titled charts on one sheet coexist (the two-chart tasks), while a
+        # retry that corrects the ranges of the SAME chart still collides and replaces it.
+        return (k, o.get("sheet"), o.get("title") or "")
+    # total_row, freeze_panes, reorder_columns, set_decimal_separator: one per sheet
     return (k, o.get("sheet"))
 
 def merge_nameops(carried, new):
@@ -578,6 +623,26 @@ def apply_B(g, nameops, log):
         elif k == "sort_range":
             sheet = nop.get("sheet")
             rng = (nop.get("range") or "").replace("$", "")
+            # ROW-INTEGRITY grounding: sorting a SUBSET of the used columns tears rows apart
+            # (observed: range A1:E36 on a 6-column sheet left column F unsorted — silent data
+            # corruption). The app's own sort extends the selection to the whole table; mirror
+            # that: WIDEN the range's column span to the sheet's used columns (rows untouched,
+            # never shrink). Deterministic geometry, no task knowledge.
+            info = live.get(sheet) or {}
+            letters = [c.get("letter") for c in info.get("cols", []) if c.get("letter")]
+            m0 = re.match(r"([A-Za-z]+)(\d+):([A-Za-z]+)(\d+)$", rng)
+            if m0 and letters:
+                lo = min(letters + [m0.group(1).upper()], key=_col_idx)
+                hi = max(letters + [m0.group(3).upper()], key=_col_idx)
+                # ...and CLAMP the end row to the observed data extent: an over-long range drags
+                # empty rows into the sort and scrambles them against the real data (observed:
+                # a 2-37 range on 2-36 data). Never clamp above the model's start row.
+                last = info.get("data_start", 2) + info.get("rows", 0) - 1
+                end = int(m0.group(4))
+                if int(m0.group(2)) <= last < end:
+                    end = last
+                rng = "%s%s:%s%d" % (lo, m0.group(2), hi, end)
+                nop["range"] = rng
             key = (nop.get("key") or "").strip().strip("{}").strip()
             op = {"op": "sort_range", "sheet": sheet, "range": nop.get("range"),
                   "ascending": "true" if (nop.get("order", "asc") or "asc").lower().startswith("a") else "false"}
@@ -593,10 +658,89 @@ def apply_B(g, nameops, log):
                 fails.append({"name": key or rng, "why": "apply error: %s" % rr.get("error", "")[:80]})
             live = live_detect(g)
         elif k == "create_chart":
+            # Host-side sheet tolerance (mirrors the daemon's resolve_sheet): an unknown/placeholder
+            # sheet ("S") on a single-sheet book binds to the only live sheet — every read/extent
+            # lookup below depends on it (an unresolved name here anchored a chart to the header row).
+            if nop.get("sheet") not in live and len(live) == 1:
+                nop["sheet"] = list(live)[0]
             grounded = ground_chart_ranges(nop.get("ranges", ""), nop.get("sheet"), live)
+            # ORIENTATION from geometry: the ranges themselves declare it — all single-column parts
+            # = column series, all single-row parts = row series. The model's data_in label is used
+            # only when the shape is ambiguous (observed: column ranges labeled data_in="rows").
+            gparts = [p.strip().replace("$", "") for p in grounded.split(";") if p.strip()]
+            gm = [re.match(r"([A-Za-z]+)(\d+):([A-Za-z]+)(\d+)$", p) for p in gparts]
+            data_in = nop.get("data_in", "rows")
+            if gparts and all(m and m.group(1).upper() == m.group(3).upper() for m in gm):
+                data_in = "columns"
+            elif gparts and all(m and m.group(2) == m.group(4) for m in gm):
+                data_in = "rows"
+            def _reparse():
+                return [re.match(r"([A-Za-z]+)(\d+):([A-Za-z]+)(\d+)$", p) for p in gparts]
+            # COLUMN-part trailing trim: a vertical series that runs past the data's end (off-by-one
+            # emissions) charts empty cells and shifts the saved refs off the gold — clamp each
+            # column part's end to its last non-empty cell. Observation-based, end-only.
+            if gparts and all(m and m.group(1).upper() == m.group(3).upper() for m in gm):
+                newparts = []
+                for p, m in zip(gparts, gm):
+                    rr_ = g.client("read", {"sheet": nop.get("sheet"), "range": p})
+                    colvals = [row[0] if row else None for row in (rr_.get("cells") or [])]
+                    filled = [i for i, v in enumerate(colvals) if v not in (None, "")]
+                    if filled and filled[-1] < len(colvals) - 1:
+                        p = "%s%s:%s%d" % (m.group(1), m.group(2), m.group(3),
+                                           int(m.group(2)) + filled[-1])
+                    newparts.append(p)
+                gparts = newparts
+                grounded = ";".join(gparts)
+                gm = _reparse()
+            # ROW-pair grounding to observed data. (1) A value row that is entirely EMPTY while the
+            # sheet has a real bottom data row = the model mis-anchored the row (observed: chart at
+            # row 13 for a total row written at 12) — re-anchor the value row to the live last data
+            # row (Class B, ablatable). (2) EDGE-TRIM both parts' column span to the value row's
+            # numeric extent: value series are NUMBERS — an edge cell that is empty (a Growth row
+            # skipping Jan) or text (the row's own label) belongs outside the series.
+            if len(gm) == 2 and all(m and m.group(2) == m.group(4) for m in gm) and \
+               gm[0].group(1) == gm[1].group(1) and gm[0].group(3) == gm[1].group(3):
+                info_ = live.get(nop.get("sheet")) or {}
+                last_row = info_.get("data_start", 2) + info_.get("rows", 0) - 1
+                rr_ = g.client("read", {"sheet": nop.get("sheet"), "range": gparts[1]})
+                row_ = (rr_.get("cells") or [[]])[0]
+                if info_ and row_ and all(v in (None, "") for v in row_) and \
+                   int(gm[1].group(2)) != last_row and last_row >= info_.get("data_start", 2):
+                    gparts[1] = "%s%d:%s%d" % (gm[1].group(1), last_row, gm[1].group(3), last_row)
+                    grounded = ";".join(gparts)
+                    gm = _reparse()
+                    rr_ = g.client("read", {"sheet": nop.get("sheet"), "range": gparts[1]})
+                    row_ = (rr_.get("cells") or [[]])[0]
+                numeric = [i for i, v in enumerate(row_)
+                           if v not in (None, "") and isinstance(v, (int, float))]
+                if numeric and (numeric[0] > 0 or numeric[-1] < len(row_) - 1):
+                    b0 = _col_idx(gm[0].group(1))
+                    lo_l, hi_l = col_letter(b0 + numeric[0]), col_letter(b0 + numeric[-1])
+                    gparts = ["%s%s:%s%s" % (lo_l, m.group(2), hi_l, m.group(4)) for m in gm]
+                    grounded = ";".join(gparts)
+                    gm = _reparse()
+            # EMPTY-RANGE FALSIFIER (fail-closed): a chart binding cells that hold NOTHING is an
+            # objective world-state fault (observed: charting a Total row that was never written).
+            # Don't create it; the fault feedback drives the retry to write the data it described.
+            empty_part = None
+            for p in gparts:
+                r_ = g.client("read", {"sheet": nop.get("sheet"), "range": p})
+                vals = [v for row in (r_.get("cells") or []) for v in row]
+                if vals and all(v in (None, "") for v in vals):
+                    empty_part = p
+                    break
+            if empty_part:
+                fails.append({"name": empty_part, "why": "chart range %s is entirely EMPTY — the data it "
+                              "should display has not been written; emit the operations that produce those "
+                              "cells (keep the chart too)" % empty_part})
+                live = live_detect(g)
+                continue
+            # deterministic per-TITLE chart name: distinct titled charts coexist; a retry-corrected
+            # chart with the same title re-uses the name and REPLACES itself (uno_ops removes+adds).
+            cname = "CHT_" + (re.sub(r"\W+", "_", nop.get("title") or "") or "default")
             op = {"op": "create_chart", "sheet": nop.get("sheet"), "ranges": grounded,
                   "type": nop.get("type", "line"), "title": nop.get("title", ""),
-                  "data_in": nop.get("data_in", "rows")}
+                  "data_in": data_in, "name": cname}
             rr = g.client("apply", {"op": op})
             if not rr.get("ok"):
                 fails.append({"name": nop.get("ranges"), "why": "apply error: %s" % rr.get("error", "")[:80]})
@@ -889,6 +1033,24 @@ def ground_chart_ranges(ranges, sheet, live):
     ROW (the referenced row that isn't the header) from whatever it emitted, and rebuild canonical
     'headerRow ; dataRow' over the full span. Fires only when a header row + a distinct data row + ≥2 columns are
     present; else leaves the ranges untouched (fail-open). Grounds the intent, not the typo."""
+    # COLUMN-oriented ranges (every part a single-column vertical range, e.g. "A2:A36;E2:E36" for a
+    # dates-vs-quantity line chart) are already structured — the row-rebuild below would shred them
+    # into per-cell series. Leave them untouched (fail-open; this grounding is for ROW-shaped intent).
+    parts = [p.strip().replace("$", "") for p in (ranges or "").split(";") if p.strip()]
+    if parts:
+        m2 = [re.match(r"([A-Za-z]+)(\d+):([A-Za-z]+)(\d+)$", p) for p in parts]
+        if all(m and m.group(1).upper() == m.group(3).upper() for m in m2):
+            # Column-oriented (each part one vertical column) — already structured; the row-rebuild
+            # below would shred it. ONE grounding applies: a part that STARTS at the header row is
+            # the model including the label in the series — shift its start to the first data row
+            # (the saved chart keys header-free refs; the gold shape).
+            hrow = live.get(sheet, {}).get("header_row", 1)
+            ds = live.get(sheet, {}).get("data_start", hrow + 1)
+            out = []
+            for m in m2:
+                start = ds if int(m.group(2)) == hrow else int(m.group(2))
+                out.append("%s%d:%s%s" % (m.group(1), start, m.group(3), m.group(4)))
+            return ";".join(out)
     refs = re.findall(r"([A-Za-z]+)(\d+)", ranges or "")
     if not refs:
         return ranges
@@ -1118,15 +1280,25 @@ def run_core(g, task, cond, file_path, log, score_fn):
         detected = detect(g, detail)
         log["detected"] = {s: [(c["letter"], c["header"], c.get("ntype")) for c in i["cols"]] for s, i in detected.items()}
         feedback = None
+        additive = False
         attempt = 0
         carried = []
         for attempt in range(2):                  # reason→emit, then ONE read-back retry (the ReAct condition)
             log["steps"].append("attempt%d" % attempt)
-            new_ops = author_B(instr, detected, log, feedback)
+            new_ops = author_B(instr, detected, log, feedback, additive=additive)
             nameops = merge_nameops(carried, new_ops)   # retain ops the lossy retry-emit dropped (interface-plane repair)
             # Gap check BEFORE apply: a missing op (chart/pivot/total_row) is retry-recoverable, but a
             # WRONG-CLASS op like a blanket style where the analysis says conditional CANNOT be unpainted
             # — withhold it this attempt; the gap feedback asks for the conditional verb instead.
+            # A SOLE infeasible declaration ends the attempt loop — nothing to apply or falsify;
+            # scoring mirrors the official env below. Mixed with real ops it is noise: drop it and
+            # proceed (a genuine declaration has nothing else to say).
+            if len(nameops) == 1 and nameops[0].get("kind") == "infeasible":
+                log["declared_infeasible"] = nameops[0].get("reason", "")
+                log["nameops"] = nameops
+                written, resolve_fails, fired, gaps = [], [], [], []
+                break
+            nameops = [n for n in nameops if n.get("kind") != "infeasible"]
             gaps = emit_gaps(log.get("reasoning", ""), nameops)   # reason→emit completeness (membrane bridge)
             if "conditional_format" in gaps:
                 nameops = [n for n in nameops if n.get("kind") != "format_cells"]
@@ -1141,6 +1313,8 @@ def run_core(g, task, cond, file_path, log, score_fn):
                                                  # which write no compute_column → empty `written` → used to
                                                  # retry needlessly. (no_fault below still gates self-report.)
             feedback = (compose_feedback(resolve_fails, fired) + "\n" + gap_feedback(gaps)).strip()
+            # ADD-type notes (missing ops / empty chart data) need the additive retry stance.
+            additive = bool(gaps) or any("EMPTY" in f.get("why", "") for f in resolve_fails)
             log.setdefault("feedbacks", []).append(feedback)
         log["attempts"] = attempt + 1
 
@@ -1172,6 +1346,16 @@ def run_core(g, task, cond, file_path, log, score_fn):
         time.sleep(int(os.environ.get("LAGADO_VISIBLE_HOLD", "25")))
     g.client("close")
     time.sleep(4)
+    if "declared_infeasible" in log:
+        # Mirror the official env exactly (desktop_env.evaluate): an infeasible-func task with a FAIL
+        # declaration scores 1; a declaration on a FEASIBLE task scores 0 — a wrong declaration can
+        # only LOSE, never false-pass, and it IS the false claim, so it sets the false_pass flag.
+        # (The VM runner must translate this into a literal "FAIL" action for env.evaluate.)
+        score = 1.0 if (task.get("evaluator") or {}).get("func") == "infeasible" else 0.0
+        log["score"] = score
+        log["self_report_done"] = True
+        log["false_pass"] = bool(score < 1.0)
+        return score, log
     score = score_fn()
     if score is None:                 # host render-skip sentinel (compare_pdfs etc.) — pass it
         log["score"] = None           # through so the caller reports RENDER-SKIP, not a false 0

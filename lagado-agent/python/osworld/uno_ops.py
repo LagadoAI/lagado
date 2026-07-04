@@ -115,6 +115,10 @@ def apply_one_op(doc, resolve_sheet, op):
             v = op.get("value")
             if isinstance(v, (int, float)):
                 cell.setValue(float(v))
+            elif isinstance(v, str) and v.startswith("="):
+                # The app's type-into-cell semantics: a leading "=" IS a formula. Without this a
+                # set_cell value of "=(C12-B12)/B12" lands as literal TEXT and silently scores 0.
+                cell.setFormula(excel_to_calc(v))
             else:
                 cell.setString("" if v is None else str(v))
     elif kind == "fill":
@@ -429,6 +433,10 @@ def apply_one_op(doc, resolve_sheet, op):
             if rname:
                 addrs.append(sh.getCellRangeByName(rname).getRangeAddress())
         rect = Rectangle(); rect.X = 9000; rect.Y = 500; rect.Width = 14000; rect.Height = 9000
+        # (colh=False, rowh=True) is correct for BOTH orientations (measured on the saved-xlsx
+        # round-trip): rows → val=B12:G12 cat=B1:G1 (the proven 0a2e43bf shape); columns with
+        # header-free ranges ("A2:A36;E2:E36") → val=E2:E36 cat=A2:A36. Flipping the flags per
+        # orientation degrades to split/degenerate series refs, which the evaluator keys on.
         col_headers = str(op.get("col_headers", "false")).lower() in ("1", "true", "yes")
         row_headers = str(op.get("row_headers", "true")).lower() in ("1", "true", "yes")
         if charts.hasByName(name):
