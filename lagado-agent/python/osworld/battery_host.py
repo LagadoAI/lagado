@@ -22,7 +22,11 @@ CACHE = os.path.join(OSW, "cache")
 SYS_PY = "/usr/bin/python3"                       # the interpreter that can import uno
 WORK = "/tmp/lagado_host"
 LOGDIR = "/tmp/lagado_battery"
-HELDOUT = battery_calc.__dict__.get("HELDOUT")    # reuse if present
+try:
+    from battery_breadth import HELDOUT as _BREADTH_HELDOUT   # the frozen 30-task held-out set
+except Exception:
+    _BREADTH_HELDOUT = None
+HELDOUT = battery_calc.__dict__.get("HELDOUT") or _BREADTH_HELDOUT
 
 
 class HostGuest:

@@ -6,6 +6,23 @@
 > command below. The `.md` docs stayed here. PYTHONPATH accordingly:
 > `PYTHONPATH=/home/alucard/projects/OSWorld:/home/alucard/projects/lagado/lagado-agent/python/osworld`.
 
+## ════ TURN-10 STATE — 2026-07-03 — HELD-OUT 30 RE-STRESS: 7/30 → 17/30, 0 FALSE-PASS ════
+**THE RE-STRESS (host loop, real metric funcs, N=1): 17/30 GOLD, 0 false-pass across all 30** — the
+post-clear goal ("solve the fracture line → re-stress") delivered 2.4× the June baseline in one build
+day. GOLDS: 0a2e43bf 0cecd4f3 1954cced(pivot) 3a7c8185 3aaa4e37 4172ea6e 4188d3a4 51719eea(cross-sheet)
+51b11269 535364ea(2-pivot) 6054afcb 6e99a1ad 7a4e4bc8 8b1ce5f2 a01fbce3 a9f325aa eb03d19a.
+MISS CLASSIFICATION (each located, none mysterious): [VARIANCE FLIPS — golded in OTHER runs today,
+temp-0 llama.cpp nondeterminism, the turn-4 finding] 1d17d234, abed40dc (dedup right + a stray invented
+set_cell broke don't-touch), 37608790; [DOCUMENTED SEMANTIC/COMPREHENSION residuals] 21ab7b40(×100),
+21df9241(0M-vs-0.0M), 4f07fbe9(literal-not-formula), 1de60575(pivot cols-vs-rows), 0326d92d(compound),
+2bd59342(sparkline-infeasible knowledge); [OBSERVATION LIMIT] 347ef137(two stacked tables);
+[FLOW EDGE] 30e3e107(3 pivots one dest); [INFRA] 1334ca3e; [RENDER-SKIP → VM] aa3a8974.
+⇒ stable floor 17; with the 3 variance flips the demonstrated capability ceiling today ≈ 20/30 + 1 VM
+unknown. **NEXT LEVERS: (1) VARIANCE — temp-0 flips are now the cheapest points on the board
+(best-of-N emissions judged ONLY by internal falsifiers = sound, evaluator never consulted; or KV/batch
+determinism knobs); (2) chunked VM confirmation of the 17 (2-3 short evening batches, GPU-friendly);
+(3) the semantic-residual class needs either stronger reasoning extraction or stays reported.**
+
 ## ════ TURN-9 STATE — 2026-07-03 EOD (branch `Harness`) — ITERATIVE EMISSION BUILT, THE WALL CRACKED ════
 **VARIABLE #1 BUILT AS ADDITIVE ESCALATION (commit 82eaef4; single-shot floor byte-identical — step
 grammar + step docs DERIVED from the existing constants).** Engages ONLY when the single-shot loop ends
