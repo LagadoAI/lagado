@@ -169,7 +169,7 @@ GRAMMAR_B = (
     ' | "transpose_range(sheet=" str ", source=" str ", dest=" str ")"'
     ' | "reorder_columns(sheet=" str ", order=" str ")"'
     ' | "hide_rows_where(sheet=" str ", match=" str ")"'
-    ' | "format_cells_where(sheet=" str ", match=" str ", fill_color=" str ", font_color=" str ")"'
+    ' | "format_cells_where(sheet=" str ", match=" str ", fill_color=" str ", font_color=" str ", range=" str ")"'
     ' | "set_decimal_separator(sheet=" str ", separator=" str ")"'
     ' | "export_pdf(sheet=" str ", name=" str ", fit_pages=" str ")"'
     ' | "infeasible(reason=" str ")"\n'
@@ -228,7 +228,7 @@ EMIT_PROMPT = (
     "  transpose_range(sheet=\"S\", source=\"B2:F5\", dest=\"B8\")  paste the source range TRANSPOSED with its top-left cell at dest\n"
     "  reorder_columns(sheet=\"S\", order=\"{{H1}},{{H2}},{{H3}}\")  rearrange existing columns into this left-to-right order — name EVERY column\n"
     "  hide_rows_where(sheet=\"S\", match=\"N/A\")           hide (not delete) every row containing the matched cell text\n"
-    "  format_cells_where(sheet=\"S\", match=\"weekend\", fill_color=\"#rrggbb\", font_color=\"\")  style every cell matching a predicate: \"weekend\" = dates falling on Saturday/Sunday; any other match = exact cell text (leave unused style fields \"\")\n"
+    "  format_cells_where(sheet=\"S\", match=\"weekend\", fill_color=\"#rrggbb\", font_color=\"\", range=\"\")  style every cell matching a predicate: \"weekend\" = dates on Saturday/Sunday, \"max\" = the largest number, any other match = exact cell text; range=\"{{Header}}\" or A1 range limits the scan (\"\" = whole sheet)\n"
     "  set_decimal_separator(sheet=\"S\", separator=\",\")    display ALL numbers with this decimal separator (localized format; values stay numbers)\n"
     "  export_pdf(sheet=\"S\", name=\"\", fit_pages=\"1\")      export as a PDF next to the document, scaled to fit N pages (name=\"\" keeps the document's file name)\n"
     "  infeasible(reason=\"...\")                          ONLY if the request cannot be done in this application at all — emit it ALONE (no other operations) and state why\n\n"
@@ -267,9 +267,17 @@ def emit_gaps(reasoning, nameops):
     # formula-entry phrase AND zero write ops AND something else emitted (else the empty-emission
     # path already retries).
     write_kinds = ("compute_column", "set_cell", "total_row")
-    if nameops and re.search(r"enter the formula|=sum\(|=average\(|type the formula|input the formula", r) and \
+    if nameops and re.search(r"enter the formula|=sum\(|=average\(|type the formula|input the formula"
+                             r"|calculate .{0,40}(new column|column)|new column", r) and \
        not any(n.get("kind") in write_kinds for n in nameops):
         gaps.append("writes_dropped")
+    # STYLE-DROPPED: the reasoning commits to a highlight/color styling step but the emit contains
+    # NO style op at all (observed 21ab7b40: compute emitted, the green-font highlight silently
+    # lost — and the claim gate corroborates only WRITTEN cells, so this class can even self-report
+    # done). Held to its own analysis.
+    if nameops and re.search(r"highlight|font color|background color|\bgreen\b|\bred\b|\bbold\b", r) and \
+       not any(n.get("kind") in ("format_cells", "format_cells_where") for n in nameops):
+        gaps.append("style_dropped")
     # CONDITIONAL-STYLE fidelity: the reasoning commits to styling only cells matching a CONDITION
     # (weekend days / conditional formatting) but the emit is a blanket format_cells — which would
     # paint EVERY cell in the range and (unlike a missing op) cannot be undone by a retry. Hold the
@@ -302,6 +310,12 @@ def gap_feedback(gaps):
                      "styles EVERY cell in the range. Emit format_cells_where(sheet=\"S\", match=\"<your "
                      "condition: weekend, or an exact cell text>\", fill_color=\"#rrggbb\", font_color=\"\") "
                      "INSTEAD of format_cells, and keep your other operations.")
+    if "style_dropped" in gaps:
+        lines.append("- your analysis includes a HIGHLIGHT/styling step but you emitted no style operation. "
+                     "Keep your other operations and ALSO emit it: format_cells_where(sheet=\"S\", "
+                     "match=\"weekend|max|<exact text>\", fill_color=\"\", font_color=\"#rrggbb\", "
+                     "range=\"{Header}\") styles the cells matching your condition (\"max\" = the largest "
+                     "number in range); format_cells(sheet=\"S\", range=\"A1:C1\", ...) styles a fixed range.")
     if "writes_dropped" in gaps:
         lines.append("- your analysis ENTERS FORMULAS into cells, but you emitted NO operation that writes "
                      "any cell — the computation never happened. Keep your other operations and ALSO emit "
@@ -309,6 +323,22 @@ def gap_feedback(gaps):
                      "columns=\"{Header1},{Header2}\") computes a SUM row for you (correct rows guaranteed); "
                      "individual formula cells use set_cell(sheet=\"S\", cell=\"A1\", value=\"=FORMULA\").")
     return "\n".join(lines)
+
+def _norm_quotes(f):
+    """HARNESS OWNS SYNTAX: LibreOffice string literals need DOUBLE quotes; models emit single —
+    and GRAMMAR_B's str rule makes '"' unemittable, so single quotes are the only channel. Convert
+    ' -> " EXCEPT apostrophes that QUOTE A SHEET NAME ('Retail Price'!A2:B23 — the cross-sheet
+    dialect the formula engine needs intact)."""
+    prot = {}
+    def _keep(m):
+        k = "\x00%d\x00" % len(prot)
+        prot[k] = m.group(0)
+        return k
+    f = re.sub(r"'[^']+'(?=!)", _keep, f)
+    f = f.replace("'", '"')
+    for k, v in prot.items():
+        f = f.replace(k, v)
+    return f
 
 def compose_feedback(fails, fired):
     """Turn read-back faults into a concrete correction note for the next emit (the retry condition)."""
@@ -335,6 +365,9 @@ def compose_feedback(fails, fired):
                          "literal is wrong; use DOUBLE quotes (\"_\") for the separator." % (f["range"], f.get("sample")))
         elif f["falsifier"] == "extent_shortfall":
             lines.append("- the column %s left %d cells empty — cover every data row." % (f["range"], f.get("empty")))
+        elif f["falsifier"] == "named_target_empty":
+            lines.append("- the goal names the column %s but it is still ENTIRELY EMPTY — keep your other "
+                         "operations and ALSO emit the operation that fills it." % f["range"])
     return "\n".join(lines)
 
 CHAT = "http://localhost:8080/v1/chat/completions"   # applies the GGUF's own chat template (model-agnostic)
@@ -434,7 +467,8 @@ def parse_B_nameops(text):
             nameops.append({"kind": "hide_rows_where", "sheet": kw.get("sheet"), "match": kw.get("match", "")})
         elif verb == "format_cells_where":
             nameops.append({"kind": "format_cells_where", "sheet": kw.get("sheet"), "match": kw.get("match", ""),
-                            "fill_color": kw.get("fill_color", ""), "font_color": kw.get("font_color", "")})
+                            "fill_color": kw.get("fill_color", ""), "font_color": kw.get("font_color", ""),
+                            "range": kw.get("range", "")})
         elif verb == "set_decimal_separator":
             nameops.append({"kind": "set_decimal_separator", "sheet": kw.get("sheet"),
                             "separator": kw.get("separator", ",")})
@@ -469,9 +503,11 @@ def _op_key(o):
     if k in ("hide_rows_where", "format_cells_where"):
         return (k, o.get("sheet"), o.get("match"))
     if k == "create_chart":
-        # keyed by TITLE: two titled charts on one sheet coexist (the two-chart tasks), while a
-        # retry that corrects the ranges of the SAME chart still collides and replaces it.
-        return (k, o.get("sheet"), o.get("title") or "")
+        # keyed by TITLE when present (two titled charts coexist; a retry correcting the SAME
+        # chart's ranges collides and replaces it). Untitled charts key by RANGES so two untitled
+        # charts (per-year bars) coexist — the cost: an untitled retry with changed ranges adds a
+        # second chart instead of replacing (visible MISS, never a false pass).
+        return (k, o.get("sheet"), o.get("title") or o.get("ranges") or "")
     # total_row, freeze_panes, reorder_columns, set_decimal_separator: one per sheet
     return (k, o.get("sheet"))
 
@@ -526,15 +562,17 @@ def apply_B(g, nameops, log):
                                           "before": nop.get("before", "")}})
                 live = live_detect(g)
         elif k == "set_cell":
+            v = nop["value"]
+            if isinstance(v, str) and v.startswith("="):
+                v = _norm_quotes(v)               # formula-typed set: same quote ownership as compute
             g.client("apply", {"op": {"op": "set", "sheet": nop["sheet"], "cell": nop["cell"],
-                                      "value": nop["value"]}})
+                                      "value": v}})
             live = live_detect(g)  # a set_cell may have written a header → re-perceive
         elif k == "compute_column":
             sheet, target, formula = nop["sheet"], nop["target"], nop["formula"]
             # HARNESS OWNS SYNTAX: LibreOffice string literals need double quotes; LLMs often emit single
-            # ('_'), which silently evaluates to 0. The model's quotes are only ever string literals here
-            # (sheet refs come from {braces}→`!`), so normalizing ' → " is safe and general.
-            formula = formula.replace("'", '"')
+            # ('_'), which silently evaluates to 0. Quoted SHEET names ('Retail Price'!...) are protected.
+            formula = _norm_quotes(formula)
             # GROUND the model's NATURAL column references (2026-06-23): it names columns by the header it
             # perceived; we bind those names against the LIVE structure rather than demand the {brace} dialect.
             # ground_bare_refs braces only SOUND occurrences (guarded for literals/function-position/longest-
@@ -610,6 +648,19 @@ def apply_B(g, nameops, log):
         elif k in ("format_cells", "merge_cells", "set_number_format", "freeze_panes", "export_csv",
                    "transpose_range", "reorder_columns", "hide_rows_where", "format_cells_where",
                    "set_decimal_separator", "export_pdf"):
+            if k == "format_cells_where":
+                # A {Header} (or bare header) range resolves to that column's data span — the model
+                # names the column it means; the harness owns the geometry (same fail-open contract
+                # as ground_bare_refs: unresolved → scan the whole sheet as before).
+                rspec = (nop.get("range") or "").strip()
+                if rspec and not re.match(r"^[A-Za-z]+\d+(:[A-Za-z]+\d+)?$", rspec.replace("$", "")):
+                    letter = resolve_name(nop.get("sheet"), rspec.strip("{}").strip(), live, [])
+                    info = live.get(nop.get("sheet")) or {}
+                    if letter and info:
+                        ds = info.get("data_start", 2)
+                        nop["range"] = "%s%d:%s%d" % (letter, ds, letter, ds + info.get("rows", 0) - 1)
+                    else:
+                        nop["range"] = ""
             op = {"op": k}
             op.update({kk: vv for kk, vv in nop.items() if kk != "kind"})
             if k in ("format_cells", "set_number_format"):       # not merge (a merge range is intentional);
@@ -735,9 +786,11 @@ def apply_B(g, nameops, log):
                               "cells (keep the chart too)" % empty_part})
                 live = live_detect(g)
                 continue
-            # deterministic per-TITLE chart name: distinct titled charts coexist; a retry-corrected
-            # chart with the same title re-uses the name and REPLACES itself (uno_ops removes+adds).
-            cname = "CHT_" + (re.sub(r"\W+", "_", nop.get("title") or "") or "default")
+            # deterministic chart name: per TITLE when present (retry with same title REPLACES
+            # itself via uno_ops remove+add); untitled falls back to the ranges signature so two
+            # untitled charts coexist.
+            cname = "CHT_" + (re.sub(r"\W+", "_", nop.get("title") or "") or
+                              re.sub(r"\W+", "_", grounded) or "default")
             op = {"op": "create_chart", "sheet": nop.get("sheet"), "ranges": grounded,
                   "type": nop.get("type", "line"), "title": nop.get("title", ""),
                   "data_in": data_in, "name": cname}
@@ -1109,6 +1162,32 @@ def substitute_names(formula, default_sheet, detected, fails, row, refsheets=Non
     return None if aborted[0] else out
 
 # ── READ-BACK + SOUND FALSIFIERS (falsify only; pass ≠ correct) ──────────────────
+def falsify_empty_named_targets(g, instr):
+    """INSTRUCTION-NAMED TARGET COMPLETENESS (sound, goal-grounded). A live header the GOAL ITSELF
+    names verbatim whose column is still ENTIRELY EMPTY after apply = an unfinished deliverable
+    invisible to write-corroboration (observed 37608790: 1 of 3 named columns filled → the claim
+    gate corroborated the one write and FALSE-PASSED). Fires only on exact header-in-goal matches
+    (≥3 chars, case-insensitive) with a fully empty data span — no inference from reasoning text.
+    Wrong firings only UNDER-claim and nag (never a false pass)."""
+    fired = []
+    low = (instr or "").lower()
+    for sheet, info in live_detect(g).items():
+        ds = info.get("data_start", 2)
+        last = ds + info.get("rows", 0) - 1
+        if last < ds:
+            continue
+        for c in info.get("cols", []):
+            h = str(c.get("header") or "").strip()
+            if len(h) < 3 or h.lower() not in low:
+                continue
+            r = g.client("read", {"sheet": sheet,
+                                  "range": "%s%d:%s%d" % (c["letter"], ds, c["letter"], last)})
+            vals = [v for row in (r.get("cells") or []) for v in row]
+            if vals and all(v in (None, "") for v in vals):
+                fired.append({"falsifier": "named_target_empty",
+                              "range": "'%s' (column %s on %s)" % (h, c["letter"], sheet)})
+    return fired
+
 def falsify(g, written_regions):
     """written_regions = [(sheet, a1range, formula)]. Return list of FIRED falsifiers.
     Empty list = 'no detected fault' — NOT 'correct' (the oracle is the only correctness signal).
@@ -1305,7 +1384,7 @@ def run_core(g, task, cond, file_path, log, score_fn):
             carried = nameops
             log["nameops"] = nameops
             written, resolve_fails = apply_B(g, nameops, log)
-            fired = falsify(g, written)
+            fired = falsify(g, written) + falsify_empty_named_targets(g, instr)
             log["n_ops"] = len(nameops)
             if nameops and not resolve_fails and not fired and not gaps:
                 break                            # emitted ops, no detected fault — stop (NOT a correctness
@@ -1313,8 +1392,10 @@ def run_core(g, task, cond, file_path, log, score_fn):
                                                  # which write no compute_column → empty `written` → used to
                                                  # retry needlessly. (no_fault below still gates self-report.)
             feedback = (compose_feedback(resolve_fails, fired) + "\n" + gap_feedback(gaps)).strip()
-            # ADD-type notes (missing ops / empty chart data) need the additive retry stance.
-            additive = bool(gaps) or any("EMPTY" in f.get("why", "") for f in resolve_fails)
+            # ADD-type notes (missing ops / empty chart data / unfilled named targets) need the
+            # additive retry stance.
+            additive = bool(gaps) or any("EMPTY" in f.get("why", "") for f in resolve_fails) or \
+                any(f.get("falsifier") == "named_target_empty" for f in fired)
             log.setdefault("feedbacks", []).append(feedback)
         log["attempts"] = attempt + 1
 

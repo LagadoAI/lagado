@@ -308,10 +308,16 @@ class Daemon:
             self.doc.close(False)
         except Exception as e:
             return {"ok": False, "error": "store failed: %s" % e}
+        # Serialization normalization on the SAVED file: LO's theme-black fonts → explicit rgb
+        # (the dialect Excel-authored golds and openpyxl-based scoring understand). Always on.
+        patch_err = None
+        try:
+            uno_ops.patch_xlsx_font_rgb(os.path.abspath(self.file))
+        except Exception as e:
+            patch_err = "font patch: %s" % e
         # Freeze is VIEW state — a headless store drops it (no view). Re-impose any logged
         # freeze_panes onto the SAVED file (stdlib zip patch; idempotent, last op wins). Done
         # post-store/pre-GUI-reload so the reloaded window (and its ctrl+s re-save) carries it.
-        patch_err = None
         for o in self.op_log:
             if o.get("op") == "freeze_panes":
                 try:
@@ -319,6 +325,14 @@ class Daemon:
                     uno_ops.patch_xlsx_freeze(os.path.abspath(self.file), o.get("sheet"), fc, fr)
                 except Exception as e:
                     patch_err = "freeze patch: %s" % e   # store succeeded; report, don't fail it
+            # LO's export drops programmatic font colors — re-impose them on the saved file for
+            # the cells the op actually matched (recorded by apply_one_op).
+            if o.get("op") == "format_cells_where" and (o.get("font_color") or "").strip() and o.get("_matched"):
+                try:
+                    uno_ops.patch_xlsx_font_color(os.path.abspath(self.file), o.get("sheet"),
+                                                  o["_matched"], o["font_color"])
+                except Exception as e:
+                    patch_err = "font color patch: %s" % e
         self.doc = None
         # Release the lock by tearing down OUR headless instance before any GUI attach
         # (single-instance: a survivor would make the GUI reload attach to the headless

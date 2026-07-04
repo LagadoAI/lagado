@@ -331,39 +331,66 @@ def apply_one_op(doc, resolve_sheet, op):
                     sh.getRows().getByIndex(r).IsVisible = False
                     break
     elif kind == "format_cells_where":
-        # Style every used cell matching a PREDICATE the goal states, harness-scanned (the model
-        # cannot enumerate scattered cells it never sees). "weekend" = date-formatted cells whose
-        # date falls on Sat/Sun (weekday via the doc's own NullDate epoch); any other match =
-        # exact displayed text. Only named style fields apply.
+        # Style every cell matching a PREDICATE the goal states, harness-scanned (the model cannot
+        # enumerate scattered cells it never sees). "weekend" = date-formatted cells whose date
+        # falls on Sat/Sun (weekday via the doc's own NullDate epoch); "max" = the largest numeric
+        # value in the scan area; any other match = exact displayed text. op["range"] limits the
+        # scan (the harness resolves a named column to its data span); absent → whole used area.
         import datetime as _dt
         sh = resolve_sheet(op.get("sheet"))
         m = str(op.get("match") or "").strip()
         weekend = m.casefold() == "weekend"
+        want_max = m.casefold() in ("max", "maximum", "highest")
         fc = (op.get("font_color") or "").lstrip("#").strip()
         bg = (op.get("fill_color") or "").lstrip("#").strip()
         fmts = doc.getNumberFormats()
         nd = doc.NullDate
         epoch = _dt.date(nd.Year, nd.Month, nd.Day)
-        cur = sh.createCursor()
-        cur.gotoStartOfUsedArea(False)
-        cur.gotoEndOfUsedArea(True)
-        a = cur.getRangeAddress()
-        for r in range(a.StartRow, a.EndRow + 1):
-            for c in range(a.StartColumn, a.EndColumn + 1):
-                cell = sh.getCellByPosition(c, r)
-                if weekend:
-                    if cell.getType().value != "VALUE":
-                        continue
-                    if not (fmts.getByKey(cell.NumberFormat).Type & 2):   # NumberFormat.DATE bit
-                        continue
-                    hit = (epoch + _dt.timedelta(days=int(cell.getValue()))).weekday() >= 5
-                else:
-                    hit = bool(m) and cell.getString().strip() == m
-                if hit:
-                    if bg:
-                        cell.CellBackColor = int(bg, 16)
-                    if fc:
-                        cell.CharColor = int(fc, 16)
+        rng = str(op.get("range") or "").strip()
+        if rng:
+            a = sh.getCellRangeByName(rng).getRangeAddress()
+        else:
+            cur = sh.createCursor()
+            cur.gotoStartOfUsedArea(False)
+            cur.gotoEndOfUsedArea(True)
+            a = cur.getRangeAddress()
+        cells = [(sh.getCellByPosition(c, r), c, r)
+                 for r in range(a.StartRow, a.EndRow + 1)
+                 for c in range(a.StartColumn, a.EndColumn + 1)]
+        mx = None
+        if want_max:
+            nums = [cell.getValue() for cell, _c, _r in cells if cell.getType().value in ("VALUE", "FORMULA")]
+            mx = max(nums) if nums else None
+        def _letter(i):
+            s = ""
+            i += 1
+            while i:
+                i, rr = divmod(i - 1, 26)
+                s = chr(65 + rr) + s
+            return s
+        matched = []
+        for cell, _c, _r in cells:
+            if weekend:
+                if cell.getType().value != "VALUE":
+                    continue
+                if not (fmts.getByKey(cell.NumberFormat).Type & 2):   # NumberFormat.DATE bit
+                    continue
+                hit = (epoch + _dt.timedelta(days=int(cell.getValue()))).weekday() >= 5
+            elif want_max:
+                hit = mx is not None and cell.getType().value in ("VALUE", "FORMULA") and \
+                    abs(cell.getValue() - mx) < 1e-12
+            else:
+                hit = bool(m) and cell.getString().strip() == m
+            if hit:
+                matched.append("%s%d" % (_letter(_c), _r + 1))
+                if bg:
+                    cell.CellBackColor = int(bg, 16)
+                if fc:
+                    cell.CharColor = int(fc, 16)
+        # LO's xlsx export DROPS programmatic font colors (measured: live CharColor readback OK,
+        # stored styles.xml has no color while bold survives) — record the matched cells so the
+        # daemon's reconcile can re-impose the color on the SAVED file (patch_xlsx_font_color).
+        op["_matched"] = matched
     elif kind == "set_decimal_separator":
         # Render ALL numbers with the asked decimal separator by giving numeric cells the GENERAL
         # format of a locale whose separator that is (comma → ru_RU) — VALUES untouched, natural
@@ -454,11 +481,14 @@ def apply_one_op(doc, resolve_sheet, op):
             diag.DataRowSource = 0 if rowsrc == "rows" else 1
         except Exception:
             pass
+        # chart1 BarDiagram.Vertical is INVERTED vs the xlsx barDir it exports (MEASURED:
+        # Vertical=True → barDir='bar' horizontal; False → 'col' vertical — the evaluator's
+        # "direction" prop compares these verbatim).
         if ctype == "column":
-            try: diag.Vertical = True
+            try: diag.Vertical = False
             except Exception: pass
         elif ctype == "bar":
-            try: diag.Vertical = False
+            try: diag.Vertical = True
             except Exception: pass
         chart.setDiagram(diag)
         if op.get("title"):
@@ -590,6 +620,127 @@ def patch_xlsx_freeze(path, sheet_name, cols, rows):
         xml = _re.sub(r"(<sheetView\b[^>]*>)", lambda m: m.group(1) + pane, xml, count=1)
     contents[sheet_path] = xml.encode("utf-8")
     tmp = path + ".panetmp"
+    with _zip.ZipFile(tmp, "w", _zip.ZIP_DEFLATED) as z:
+        for n in names:
+            z.writestr(n, contents[n])
+    _os.replace(tmp, path)
+
+
+def patch_xlsx_font_color(path, sheet_name, cells, color):
+    """Write an explicit font color onto SPECIFIC cells of a SAVED xlsx (stdlib-only, guest-safe).
+
+    LO's xlsx export DROPS programmatic font colors entirely (measured: CharColor reads back in
+    the live doc; the stored styles.xml carries no <color> while bold on the same cell survives).
+    For each target cell: clone its font with the rgb added, clone its xf pointing at the new
+    font, repoint the cell's style index. sheet_name ''/unknown → first sheet."""
+    import os as _os
+    import re as _re
+    import zipfile as _zip
+    rgb = "FF" + str(color).lstrip("#").upper()[-6:]
+    with _zip.ZipFile(path) as z:
+        names = z.namelist()
+        contents = {n: z.read(n) for n in names}
+    wb = contents["xl/workbook.xml"].decode("utf-8")
+    rels = contents["xl/_rels/workbook.xml.rels"].decode("utf-8")
+    sheets = []
+    for tag in _re.findall(r"<sheet\b[^>]*>", wb):
+        nm = _re.search(r'name="([^"]*)"', tag)
+        rid = _re.search(r'r:id="([^"]*)"', tag)
+        if nm and rid:
+            sheets.append((nm.group(1), rid.group(1)))
+    if not sheets:
+        return
+    rid = next((r for n, r in sheets if n == (sheet_name or "")), sheets[0][1])
+    tgt = None
+    for tag in _re.findall(r"<Relationship\b[^>]*>", rels):
+        if 'Id="%s"' % rid in tag:
+            m = _re.search(r'Target="([^"]*)"', tag)
+            tgt = m.group(1) if m else None
+            break
+    if not tgt:
+        return
+    spath = tgt.lstrip("/") if tgt.startswith("/") else "xl/" + tgt
+    if spath not in contents:
+        return
+    sxml = contents[spath].decode("utf-8")
+    styles = contents["xl/styles.xml"].decode("utf-8")
+    fonts = _re.findall(r"<font>.*?</font>|<font/>", styles)
+    xfs_m = _re.search(r"<cellXfs[^>]*>(.*?)</cellXfs>", styles, _re.S)
+    if not xfs_m:
+        return
+    xf_list = _re.findall(r"<xf\b[^>]*/>|<xf\b.*?</xf>", xfs_m.group(1))
+    orig_s = {}
+    for coord in cells:
+        m = _re.search(r'<c r="%s"(?:\s+s="(\d+)")?' % coord, sxml)
+        if m:
+            orig_s[coord] = int(m.group(1)) if m.group(1) else 0
+    if not orig_s:
+        return
+    new_xf_of, add_fonts, add_xfs = {}, [], []
+    for s_idx in sorted(set(orig_s.values())):
+        xf = xf_list[s_idx] if s_idx < len(xf_list) else xf_list[0]
+        fm = _re.search(r'fontId="(\d+)"', xf)
+        f_idx = int(fm.group(1)) if fm else 0
+        font = fonts[f_idx] if f_idx < len(fonts) else "<font/>"
+        nf = _re.sub(r"<color\b[^/]*/>", "", font)
+        if nf.startswith("<font>"):
+            nf = nf.replace("<font>", '<font><color rgb="%s"/>' % rgb, 1)
+        else:
+            nf = '<font><color rgb="%s"/></font>' % rgb
+        fid = len(fonts) + len(add_fonts)
+        add_fonts.append(nf)
+        nxf = xf
+        if 'fontId="' in nxf:
+            nxf = _re.sub(r'fontId="\d+"', 'fontId="%d"' % fid, nxf, count=1)
+        else:
+            nxf = nxf.replace("<xf ", '<xf fontId="%d" ' % fid, 1)
+        if 'applyFont="' in nxf:
+            nxf = _re.sub(r'applyFont="[^"]*"', 'applyFont="1"', nxf, count=1)
+        else:
+            nxf = nxf.replace("<xf ", '<xf applyFont="1" ', 1)
+        new_xf_of[s_idx] = len(xf_list) + len(add_xfs)
+        add_xfs.append(nxf)
+    styles = _re.sub(r'(<fonts count=")(\d+)(")',
+                     lambda m: m.group(1) + str(int(m.group(2)) + len(add_fonts)) + m.group(3),
+                     styles, count=1)
+    styles = styles.replace("</fonts>", "".join(add_fonts) + "</fonts>", 1)
+    styles = _re.sub(r'(<cellXfs count=")(\d+)(")',
+                     lambda m: m.group(1) + str(int(m.group(2)) + len(add_xfs)) + m.group(3),
+                     styles, count=1)
+    styles = styles.replace("</cellXfs>", "".join(add_xfs) + "</cellXfs>", 1)
+    for coord, s_idx in orig_s.items():
+        sxml = _re.sub(r'<c r="%s"(?:\s+s="\d+")?' % coord,
+                       '<c r="%s" s="%d"' % (coord, new_xf_of[s_idx]), sxml, count=1)
+    contents[spath] = sxml.encode("utf-8")
+    contents["xl/styles.xml"] = styles.encode("utf-8")
+    tmp = path + ".fcolortmp"
+    with _zip.ZipFile(tmp, "w", _zip.ZIP_DEFLATED) as z:
+        for n in names:
+            z.writestr(n, contents[n])
+    _os.replace(tmp, path)
+
+
+def patch_xlsx_font_rgb(path):
+    """Normalize LO's theme-black font serialization to explicit rgb in a SAVED xlsx (stdlib-only).
+
+    LibreOffice exports default-black fonts as <color theme="1"/>; Excel-authored golds carry
+    <color rgb="FF000000"/>. openpyxl reads the theme form as a non-string sentinel, so the
+    evaluator's font_color comparison fails on EVERY untouched cell — a pure serialization
+    dialect difference (both are black). Rewrites only theme-1 font colors in styles.xml.
+    Always applied at store time (dialect normalization, not an op; ablatable)."""
+    import os as _os
+    import zipfile as _zip
+    with _zip.ZipFile(path) as z:
+        names = z.namelist()
+        if "xl/styles.xml" not in names:
+            return
+        contents = {n: z.read(n) for n in names}
+    xml = contents["xl/styles.xml"].decode("utf-8")
+    new = xml.replace('<color theme="1"/>', '<color rgb="FF000000"/>')
+    if new == xml:
+        return
+    contents["xl/styles.xml"] = new.encode("utf-8")
+    tmp = path + ".fonttmp"
     with _zip.ZipFile(tmp, "w", _zip.ZIP_DEFLATED) as z:
         for n in names:
             z.writestr(n, contents[n])
