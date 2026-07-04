@@ -235,6 +235,48 @@ EMIT_PROMPT = (
     "Refer to columns by {{Header}} name where a name is asked; use A1 cell refs for ranges. "
     "Emit ONLY the operations the goal needs, as a list of calls:")
 
+# ── ITERATIVE EMISSION (variable-matrix #1, built 2026-07-03 after the compound-collapse was
+# measured on 4 independent tasks: reasoning right, the single list-EMIT keeps ~one op and drops
+# the model's own remaining steps). One op per call → apply immediately → re-present LIVE state →
+# continue or done(). DERIVED from the proven constants so the single-shot floor stays byte-
+# identical: same op vocabulary, same docs, only the root rule and the framing differ.
+GRAMMAR_STEP = GRAMMAR_B.replace('root ::= "[" op ("," op)* "]"', 'root ::= op | "done()"', 1)
+GRAMMAR_STEP_FORCED = GRAMMAR_B.replace('root ::= "[" op ("," op)* "]"', 'root ::= op', 1)
+
+def _ops_doc():
+    return EMIT_PROMPT.split("Available operations:\n", 1)[1].rsplit("\nRefer to columns", 1)[0]
+
+def author_step(instr, g, reasoning, applied, problems, log, forced=False):
+    """ONE emission step against the LIVE document (act → OBSERVE detected faults → act).
+    Returns a nameop, or None for done()/empty. `problems` = the CURRENT detected faults/gaps —
+    without them in view the model rubber-stamps done() over an incomplete document (measured).
+    forced=True removes the done() escape (used ONCE per loop after a done()-over-problems)."""
+    cards = candidate_cards(live_detect(g))
+    applied_txt = "\n".join(
+        "- %s(%s) — %s" % (o.get("kind"),
+                           ", ".join("%s=%s" % (k, v) for k, v in o.items() if k != "kind"), note)
+        for o, note in applied) or "(none yet)"
+    prompt = ("Goal: {instr}\n\n"
+              "Columns present (LIVE — re-read after every applied operation):\n{cards}\n\n"
+              "Your analysis:\n{reasoning}\n\n"
+              "Operations ALREADY APPLIED to the document:\n{applied}\n\n"
+              "PROBLEMS DETECTED in the document right now:\n{problems}\n\n"
+              "Available operations:\n" + _ops_doc() + "\n"
+              "Refer to columns by {{Header}} name where a name is asked; use A1 cell refs for ranges. " +
+              ("The detected problems above are UNRESOLVED — emit the ONE operation that addresses "
+               "the first of them:" if forced else
+               "Emit exactly ONE next operation the goal still needs, or done() when everything the "
+               "goal asks is already applied:")).format(
+                  instr=instr, cards=cards, reasoning=reasoning, applied=applied_txt,
+                  problems=problems or "(none detected)")
+    raw = _chat(prompt, grammar=GRAMMAR_STEP_FORCED if forced else GRAMMAR_STEP,
+                temperature=0.0, seed=7, max_tokens=300)
+    log.setdefault("step_raw", []).append(raw)
+    if raw.strip().startswith("done"):
+        return None
+    ops = parse_B_nameops(raw)
+    return ops[0] if ops else None
+
 def emit_gaps(reasoning, nameops):
     """EMIT-COMPLETENESS GROUNDING (2026-06-23, the reason→emit bridge — membrane: the reasoning is the model's
     rich representation; the emit is a lossy conversion that can DROP a committed action). Detect actions the
@@ -283,7 +325,7 @@ def emit_gaps(reasoning, nameops):
     # paint EVERY cell in the range and (unlike a missing op) cannot be undone by a retry. Hold the
     # model to its own predicate: withhold the blanket op (the caller does this pre-apply) and ask
     # for format_cells_where. Gated on an explicit conditional phrase in the model's OWN analysis.
-    if re.search(r"conditional formatting|weekend|saturday|sunday", r) and \
+    if re.search(r"conditional formatting|weekend|saturday|sunday|the highest|the largest|maximum value", r) and \
        any(n.get("kind") == "format_cells" for n in nameops) and \
        not any(n.get("kind") == "format_cells_where" for n in nameops):
         gaps.append("conditional_format")
@@ -353,6 +395,10 @@ def compose_feedback(fails, fired):
             # the name-resolution template below would mislead the retry toward {Sheet.Header}
             # qualification when the actual problem is missing data ops.
             lines.append("- %s." % why)
+        elif "0 header matches" in why:
+            lines.append("- no column named %r exists on the sheet (%s). If the goal requires that column, "
+                         "FIRST emit the operation that creates/fills it (compute_column for a computed "
+                         "column), THEN the operation that uses it." % (f.get("name"), why))
         else:
             lines.append("- could not resolve the name %r (%s). A column on ANOTHER sheet must be qualified "
                          "as {Sheet1.Header}; check the exact header spelling." % (f.get("name"), why))
@@ -572,6 +618,10 @@ def apply_B(g, nameops, log):
             sheet, target, formula = nop["sheet"], nop["target"], nop["formula"]
             # HARNESS OWNS SYNTAX: LibreOffice string literals need double quotes; LLMs often emit single
             # ('_'), which silently evaluates to 0. Quoted SHEET names ('Retail Price'!...) are protected.
+            # And a SPACED live sheet name emitted bare (Retail Price!A:B) gets its required quotes.
+            for s_ in live:
+                if " " in s_ and ("%s!" % s_) in formula and ("'%s'!" % s_) not in formula:
+                    formula = formula.replace("%s!" % s_, "'%s'!" % s_)
             formula = _norm_quotes(formula)
             # GROUND the model's NATURAL column references (2026-06-23): it names columns by the header it
             # perceived; we bind those names against the LIVE structure rather than demand the {brace} dialect.
@@ -1398,6 +1448,77 @@ def run_core(g, task, cond, file_path, log, score_fn):
                 any(f.get("falsifier") == "named_target_empty" for f in fired)
             log.setdefault("feedbacks", []).append(feedback)
         log["attempts"] = attempt + 1
+
+        # ══ ITERATIVE-EMISSION ESCALATION (variable #1) ══ The single-shot floor above is
+        # UNTOUCHED; this engages ONLY when it ends with detected faults/gaps — the measured
+        # compound-collapse signature. One op per call, applied immediately, LIVE state
+        # re-presented each step. Deterministic rails: 8-step cap, duplicate-proposal stop,
+        # stop after 2 consecutive apply failures, infeasible ignored mid-flight.
+        if (resolve_fails or fired or gaps) and "declared_infeasible" not in log:
+            log["steps"].append("iterative")
+            applied = [(o, "already applied (may be incomplete or faulty)") for o in nameops]
+            problems = (compose_feedback(resolve_fails, fired) + "\n" + gap_feedback(gaps)).strip()
+            consec_errors = 0
+            steps_taken = 0
+            forced_used = False
+            for _it in range(8):
+                nop = author_step(instr, g, log.get("reasoning", ""), applied, problems, log)
+                if nop is None and problems and not forced_used:
+                    # done() rubber-stamped over OPEN problems (measured): one forced step with no
+                    # done() escape, aimed at the first problem. Once per loop — a rail, not a whip.
+                    forced_used = True
+                    nop = author_step(instr, g, log.get("reasoning", ""), applied, problems, log,
+                                      forced=True)
+                if nop is None or nop.get("kind") == "infeasible":
+                    break
+                key = _op_key(nop)
+                if any(_op_key(o) == key for o, _n in applied):
+                    break                          # re-proposing something already applied
+                # same pre-apply withhold as the single-shot path: a BLANKET style op against a
+                # conditional/extreme-value styling analysis cannot be unpainted.
+                if nop.get("kind") == "format_cells" and \
+                   "conditional_format" in emit_gaps(log.get("reasoning", ""),
+                                                     [o for o, _n in applied] + [nop]):
+                    applied.append((nop, "WITHHELD: your analysis styles only cells matching a "
+                                         "condition — use format_cells_where"))
+                    continue
+                w2, f2 = apply_B(g, [nop], log)
+                written += w2
+                steps_taken += 1
+                if f2:
+                    consec_errors += 1
+                    note = "FAILED: %s" % str(f2[-1].get("why", ""))[:70]
+                    resolve_fails = f2
+                else:
+                    consec_errors = 0
+                    note = "applied"
+                    if w2:
+                        rb = g.client("read", {"sheet": w2[-1][0], "range": w2[-1][1]})
+                        head = [row[0] if row else None for row in (rb.get("cells") or [])][:3]
+                        note = "applied; first values: %s" % head
+                    resolve_fails = []
+                applied.append((nop, note))
+                if consec_errors >= 2:
+                    break
+                # OBSERVE: recompute the detected faults on the live document — the loop's exit is
+                # the OBSERVATION going clean, not the model's say-so.
+                fired = falsify(g, written) + falsify_empty_named_targets(g, instr)
+                gaps = emit_gaps(log.get("reasoning", ""), [o for o, _n in applied])
+                problems = (compose_feedback(resolve_fails, fired) + "\n" + gap_feedback(gaps)).strip()
+                if not problems:
+                    break
+            nameops = [o for o, _n in applied]
+            log["nameops"] = nameops
+            log["iter_steps"] = steps_taken
+            # DEPENDENCY RE-APPLY: an op that failed fail-closed before its dependency existed
+            # (a pivot over a Revenue column created two steps later) never re-ran — the duplicate
+            # guard rightly blocks re-proposing it. The op vocabulary is idempotent by design
+            # (guarded creates, replace-by-name charts, deterministic pivot names, overwrite
+            # writes), so ONE full re-apply in dependency order resolves every such case.
+            if steps_taken:
+                w3, _refails = apply_B(g, merge_nameops([], nameops), log)
+                written += w3
+            fired = falsify(g, written) + falsify_empty_named_targets(g, instr)
 
     log["falsifiers_fired"] = fired
     no_fault = (len(written) > 0 and len(fired) == 0 and len(resolve_fails) == 0)
