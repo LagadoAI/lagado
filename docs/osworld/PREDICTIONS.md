@@ -139,3 +139,23 @@ FALSIFIERS for my own claims: if GOLD ≫ prediction with no contamination → t
 all calc failure than I think (good, but re-scope). If FALSE PASSES > 2 → the integrity layer has a hole the
 fill fix exposed (formulas now compute, so wrong-but-plausible values can slip the falsifiers) → integrity
 work jumps the queue ahead of comprehension.
+
+## ═══ PRE-REGISTERED: NEW-FRACTURE GAUNTLET (2026-07-03, FROZEN BEFORE FIRST RUN) ═══
+Code state: commit d790183. Six NEVER-TOUCHED calc tasks chosen deliberately AGAINST the
+post-op-vocab fracture line (compound emission, multi-table observation, semantic precision).
+Protocol: host loop, N=1, cold — no code changes between selection and run; results reported
+in full whatever they are.
+
+| task | prediction | expected failure class |
+|---|---|---|
+| 04d9aeaf (Sheet2 + 4 headers + %-annual-changes ×3 cols) | MISS | compound emission; %-vs-last-year row anchoring |
+| 7e429b8d (officer lookup across two tables) | MISS (low conf) | two-table observation; VLOOKUP capability exists — if detect merges tables, refs misbind |
+| d681960f (grade students from scale table above) | MISS | stacked-tables observation + banding lookup semantics |
+| 4de54231 (fill accel rows + "Header: value, ..." concat col) | MISS | compound + string-pattern precision |
+| 4e6fcf72 (ages from birthdays) | MISS | date-anchor semantics (TODAY vs gold's fixed date) |
+| f9584479 (fill missing total rows AND columns) | MISS (medium — total_row may carry the row half) | structure inference + compound |
+
+Aggregate pre-registration: 0-2 golds / 6. Dominant classes predicted: compound emission (3),
+observation limits (2), semantic precision (2). If MORE than 2 gold, the harness generalized
+better than believed; if 0, the new fracture line is exactly where measured. Falsifier
+expectation: 0 false-pass regardless.
