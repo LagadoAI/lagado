@@ -279,7 +279,7 @@ def author_step(instr, g, reasoning, applied, problems, log, forced=False):
     ops = parse_B_nameops(raw)
     return ops[0] if ops else None
 
-def emit_gaps(reasoning, nameops):
+def emit_gaps(reasoning, nameops, instr=""):
     """EMIT-COMPLETENESS GROUNDING (2026-06-23, the reason→emit bridge — membrane: the reasoning is the model's
     rich representation; the emit is a lossy conversion that can DROP a committed action). Detect actions the
     model's OWN reasoning commits to but the emitted ops don't cover. NOT leading (the model already reasoned
@@ -289,7 +289,12 @@ def emit_gaps(reasoning, nameops):
     gaps = []
     if any(n.get("kind") == "infeasible" for n in nameops):
         return gaps                                   # a declared-infeasible emission gets no op nags
-    if any(w in r for w in ("chart", "graph", "plot", "sparkline")) and \
+    # Gated on the INSTRUCTION also asking for a chart: reasoning about pivot tables often uses
+    # chart vocabulary, and a misfired chart-nag pushes the emission AWAY from the actual goal
+    # (measured on 30e3e107 — a pivot task nagged toward create_chart).
+    # WORD-BOUNDED chart vocabulary ("Demographic" contains "graph" — measured misfire).
+    _chartword = r"\bcharts?\b|\bgraphs?\b|\bplot|\bsparkline|\bbars?\b"
+    if re.search(_chartword, r) and re.search(_chartword, (instr or "").lower()) and \
        not any(n.get("kind") == "create_chart" for n in nameops):
         gaps.append("chart")
     if "pivot" in r and not any(n.get("kind") == "create_pivot" for n in nameops):
@@ -310,7 +315,11 @@ def emit_gaps(reasoning, nameops):
     # Total/Growth rows they chart never written). Held to its own analysis; gated on an explicit
     # formula-entry phrase AND zero write ops AND something else emitted (else the empty-emission
     # path already retries).
-    write_kinds = ("compute_column", "set_cell", "total_row")
+    # EVERY op that writes cell data counts — an incomplete list here NAGS A FINISHED TASK and the
+    # additive retry then injects a damaging extra op (measured: dedup_column done, gap fired,
+    # retry added a truncated COUNTIF set_cell that broke sheet_data).
+    write_kinds = ("compute_column", "set_cell", "total_row", "dedup_column", "transpose_range",
+                   "reorder_columns", "sort_range", "set_decimal_separator")
     if nameops and re.search(r"enter the formula|=sum\(|=average\(|type the formula|input the formula"
                              r"|calculate .{0,40}(new column|column)|new column", r) and \
        not any(n.get("kind") in write_kinds for n in nameops):
@@ -322,6 +331,20 @@ def emit_gaps(reasoning, nameops):
     if nameops and re.search(r"highlight|font color|background color|\bgreen\b|\bred\b|\bbold\b", r) and \
        not any(n.get("kind") in ("format_cells", "format_cells_where") for n in nameops):
         gaps.append("style_dropped")
+    # GOAL-LITERAL completeness (grounded in the INSTRUCTION text itself, not the reasoning):
+    # a QUOTED string the goal asks to write ('write "Demographic Profile"') or an EXPLICIT merge
+    # range ('Merge cells A1:C1') that no emitted op carries = a missing deliverable. Deterministic
+    # string checks; a wrong firing only nags (the op values check covers sheet names etc.).
+    if nameops and instr:
+        opblob = " ".join(str(v) for o in nameops for v in o.values())
+        for mlit in re.finditer(r'"([^"]{3,60})"', instr):
+            if mlit.group(1) not in opblob:
+                gaps.append("goal_literal:%s" % mlit.group(1))
+        mm = re.search(r"[Mm]erge (?:the )?cells? ([A-Za-z]+\d+:[A-Za-z]+\d+)", instr)
+        if mm and not any(n.get("kind") == "merge_cells" and
+                          (n.get("range") or "").replace("$", "").upper() == mm.group(1).upper()
+                          for n in nameops):
+            gaps.append("merge_range:%s" % mm.group(1))
     # CONDITIONAL-STYLE fidelity: the reasoning commits to styling only cells matching a CONDITION
     # (weekend days / conditional formatting) but the emit is a blanket format_cells — which would
     # paint EVERY cell in the range and (unlike a missing op) cannot be undone by a retry. Hold the
@@ -366,6 +389,15 @@ def gap_feedback(gaps):
                      "the writes your analysis describes: total_row(sheet=\"S\", label=\"...\", "
                      "columns=\"{Header1},{Header2}\") computes a SUM row for you (correct rows guaranteed); "
                      "individual formula cells use set_cell(sheet=\"S\", cell=\"A1\", value=\"=FORMULA\").")
+    for gp in gaps:
+        if gp.startswith("goal_literal:"):
+            lines.append("- the goal asks for the text \"%s\" to be written, but no operation writes it. "
+                         "Keep your other operations and ALSO emit set_cell(...) with that exact text at "
+                         "the cell the goal names." % gp.split(":", 1)[1])
+        elif gp.startswith("merge_range:"):
+            lines.append("- the goal asks to merge cells %s but no merge_cells(...) operation does. Keep "
+                         "your other operations and ALSO emit merge_cells(sheet=\"S\", range=\"%s\")."
+                         % (gp.split(":", 1)[1], gp.split(":", 1)[1]))
     return "\n".join(lines)
 
 def _norm_quotes(f):
@@ -431,6 +463,33 @@ def _chat(content, grammar=None, temperature=0.0, seed=7, max_tokens=800):
     r = requests.post(CHAT, json=body, timeout=200)
     return r.json()["choices"][0]["message"]["content"]
 
+def static_defects(nameops, instr, detected):
+    """STATIC emission defects — internal checks only, the evaluator is NEVER consulted.
+    Counts: (1) formula-valued fields with unbalanced parentheses (a truncated draw);
+    (2) goal-named EXISTING empty columns no emitted op touches (the coverage gap that cost
+    37608790/abed40dc golds on bad draws); (3) an empty emission. Used to choose between
+    temp-0 draws (llama.cpp batching makes them vary run-to-run)."""
+    if not nameops:
+        return 99
+    d = 0
+    for o in nameops:
+        for v in o.values():
+            if isinstance(v, str) and v.startswith("=") and v.count("(") != v.count(")"):
+                d += 1
+    low = (instr or "").lower()
+    opblob = " ".join(str(v) for o in nameops for v in o.values()).lower()
+    for sheet, info in (detected or {}).items():
+        for c in info.get("cols", []):
+            h = str(c.get("header") or "").strip()
+            if len(h) < 3 or h.lower() not in low:
+                continue
+            samples = c.get("samples") or []
+            if samples and any(s not in (None, "") for s in samples):
+                continue                          # column already has data
+            if h.lower() not in opblob:
+                d += 1                            # goal-named empty column left untouched
+    return d
+
 def author_B(instr, detected, log, feedback=None, temperature=0.0, additive=False):
     cards = candidate_cards(detected)
     seed = int(temperature * 1000) + 7            # vary seed with temp so the 2nd derivation is independent
@@ -453,7 +512,25 @@ def author_B(instr, detected, log, feedback=None, temperature=0.0, additive=Fals
     raw = _chat(emit, grammar=GRAMMAR_B, temperature=temperature, seed=seed, max_tokens=800)
     log.setdefault("emit_raw", [])
     log["emit_raw"].append(raw)
-    return parse_B_nameops(raw)
+    ops = parse_B_nameops(raw)
+    # STATIC BEST-OF-N (the variance lever, 2026-07-03): temp-0 draws vary run-to-run (llama.cpp
+    # batching nondeterminism — the turn-4 finding); a defective draw (truncated formula, goal-
+    # named column left untouched) costs a gold that another draw wins. Re-draw on DETECTED static
+    # defects only, up to 2 extra seeds; keep the fewest-defect draw (tie → earliest). Judged by
+    # internal checks alone — the evaluator plays no part.
+    best, best_d = ops, static_defects(ops, instr, detected)
+    for t in (1, 2):
+        if best_d == 0:
+            break
+        raw2 = _chat(emit, grammar=GRAMMAR_B, temperature=temperature,
+                     seed=seed + 1000 * t, max_tokens=800)
+        log["emit_raw"].append(raw2)
+        ops2 = parse_B_nameops(raw2)
+        d2 = static_defects(ops2, instr, detected)
+        if d2 < best_d:
+            best, best_d = ops2, d2
+    log.setdefault("emit_defects", []).append(best_d)
+    return best
 
 def parse_B_nameops(text):
     """Parse name-level calls (UNRESOLVED — names stay in {braces}). Resolution happens at APPLY time
@@ -1235,7 +1312,7 @@ def substitute_names(formula, default_sheet, detected, fails, row, refsheets=Non
     return None if aborted[0] else out
 
 # ── READ-BACK + SOUND FALSIFIERS (falsify only; pass ≠ correct) ──────────────────
-def falsify_empty_named_targets(g, instr):
+def falsify_empty_named_targets(g, instr, nameops=()):
     """INSTRUCTION-NAMED TARGET COMPLETENESS (sound, goal-grounded). A live header the GOAL ITSELF
     names verbatim whose column is still ENTIRELY EMPTY after apply = an unfinished deliverable
     invisible to write-corroboration (observed 37608790: 1 of 3 named columns filled → the claim
@@ -1244,6 +1321,11 @@ def falsify_empty_named_targets(g, instr):
     Wrong firings only UNDER-claim and nag (never a false pass)."""
     fired = []
     low = (instr or "").lower()
+    # Content an op WROTE (a title via set_cell) can be re-detected as a "header" over an empty
+    # column — that is a delivered artifact, not an unfilled target (measured: 'Demographic
+    # Profile' nagged as an empty column right after being written).
+    written_texts = {str(v).strip().lower() for o in (nameops or ()) for v in o.values()
+                     if isinstance(v, str) and len(v.strip()) >= 3}
     for sheet, info in live_detect(g).items():
         ds = info.get("data_start", 2)
         last = ds + info.get("rows", 0) - 1
@@ -1252,7 +1334,7 @@ def falsify_empty_named_targets(g, instr):
         headers_all = [str(cc.get("header") or "").strip() for cc in info.get("cols", [])]
         for c in info.get("cols", []):
             h = str(c.get("header") or "").strip()
-            if len(h) < 3:
+            if len(h) < 3 or h.lower() in written_texts:
                 continue
             named = h.lower() in low
             if not named:
@@ -1465,13 +1547,13 @@ def run_core(g, task, cond, file_path, log, score_fn):
                 written, resolve_fails, fired, gaps = [], [], [], []
                 break
             nameops = [n for n in nameops if n.get("kind") != "infeasible"]
-            gaps = emit_gaps(log.get("reasoning", ""), nameops)   # reason→emit completeness (membrane bridge)
+            gaps = emit_gaps(log.get("reasoning", ""), nameops, instr)   # reason→emit completeness (membrane bridge)
             if "conditional_format" in gaps:
                 nameops = [n for n in nameops if n.get("kind") != "format_cells"]
             carried = nameops
             log["nameops"] = nameops
             written, resolve_fails = apply_B(g, nameops, log)
-            fired = falsify(g, written) + falsify_empty_named_targets(g, instr)
+            fired = falsify(g, written) + falsify_empty_named_targets(g, instr, nameops)
             log["n_ops"] = len(nameops)
             if nameops and not resolve_fails and not fired and not gaps:
                 break                            # emitted ops, no detected fault — stop (NOT a correctness
@@ -1510,7 +1592,12 @@ def run_core(g, task, cond, file_path, log, score_fn):
                     break
                 key = _op_key(nop)
                 if any(_op_key(o) == key for o, _n in applied):
-                    break                          # re-proposing something already applied
+                    # First echo of an applied op: tell it (the note lands in the next step's
+                    # applied list) and ask again; a second echo means it has nothing new — stop.
+                    if any(n == "DUPLICATE of an applied operation" for _o, n in applied):
+                        break
+                    applied.append((nop, "DUPLICATE of an applied operation"))
+                    continue
                 # same pre-apply withhold as the single-shot path: a BLANKET style op against a
                 # conditional/extreme-value styling analysis cannot be unpainted.
                 if nop.get("kind") == "format_cells" and \
@@ -1539,8 +1626,8 @@ def run_core(g, task, cond, file_path, log, score_fn):
                     break
                 # OBSERVE: recompute the detected faults on the live document — the loop's exit is
                 # the OBSERVATION going clean, not the model's say-so.
-                fired = falsify(g, written) + falsify_empty_named_targets(g, instr)
-                gaps = emit_gaps(log.get("reasoning", ""), [o for o, _n in applied])
+                fired = falsify(g, written) + falsify_empty_named_targets(g, instr, nameops)
+                gaps = emit_gaps(log.get("reasoning", ""), [o for o, _n in applied], instr)
                 problems = (compose_feedback(resolve_fails, fired) + "\n" + gap_feedback(gaps)).strip()
                 if not problems:
                     break
@@ -1555,7 +1642,7 @@ def run_core(g, task, cond, file_path, log, score_fn):
             if steps_taken:
                 w3, _refails = apply_B(g, merge_nameops([], nameops), log)
                 written += w3
-            fired = falsify(g, written) + falsify_empty_named_targets(g, instr)
+            fired = falsify(g, written) + falsify_empty_named_targets(g, instr, nameops)
 
     log["falsifiers_fired"] = fired
     no_fault = (len(written) > 0 and len(fired) == 0 and len(resolve_fails) == 0)

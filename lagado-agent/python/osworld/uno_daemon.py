@@ -327,7 +327,8 @@ class Daemon:
                     patch_err = "freeze patch: %s" % e   # store succeeded; report, don't fail it
             # LO's export drops programmatic font colors — re-impose them on the saved file for
             # the cells the op actually matched (recorded by apply_one_op).
-            if o.get("op") == "format_cells_where" and (o.get("font_color") or "").strip() and o.get("_matched"):
+            if o.get("op") in ("format_cells_where", "format_cells") and \
+               (o.get("font_color") or "").strip() and o.get("_matched"):
                 try:
                     uno_ops.patch_xlsx_font_color(os.path.abspath(self.file), o.get("sheet"),
                                                   o["_matched"], o["font_color"])

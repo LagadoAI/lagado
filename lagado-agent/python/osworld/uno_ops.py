@@ -178,6 +178,21 @@ def apply_one_op(doc, resolve_sheet, op):
         bold = str(op.get("bold", "")).strip().lower() in ("1", "true", "yes", "bold")
         if fc:
             rng.CharColor = int(fc, 16)
+            # LO's xlsx export DROPS font colors (see format_cells_where) — record the range's
+            # cells (capped: a whole-sheet recolor isn't patchable cell-by-cell) so the daemon's
+            # reconcile re-imposes the color on the saved file.
+            a = rng.getRangeAddress()
+            if (a.EndColumn - a.StartColumn + 1) * (a.EndRow - a.StartRow + 1) <= 200:
+                def _l(i):
+                    s = ""
+                    i += 1
+                    while i:
+                        i, r_ = divmod(i - 1, 26)
+                        s = chr(65 + r_) + s
+                    return s
+                op["_matched"] = ["%s%d" % (_l(c), r + 1)
+                                  for r in range(a.StartRow, a.EndRow + 1)
+                                  for c in range(a.StartColumn, a.EndColumn + 1)]
         if bg:
             rng.CellBackColor = int(bg, 16)
         if bold:
@@ -557,7 +572,10 @@ def apply_one_op(doc, resolve_sheet, op):
             fields.getByIndex(int(ci)).Orientation = ORI("COLUMN")
         for ci in op.get("data_fields", []):
             f = fields.getByIndex(int(ci)); f.Orientation = ORI("DATA"); f.Function = func
-        oa = CellAddress(); oa.Sheet = dest.RangeAddress.Sheet; oa.Column = out_col; oa.Row = 0
+        # Row 2, not 0: a title/header block often lives in the dest's top rows and the DataPilot
+        # output OVERWRITES its landing cells (measured: pivot at A1 clobbered a written title —
+        # its 'Filter' header replaced the checked cell). Location itself is not scored.
+        oa = CellAddress(); oa.Sheet = dest.RangeAddress.Sheet; oa.Column = out_col; oa.Row = 2
         dp.insertNewByName(name, oa, desc)
     else:
         raise ValueError("unknown op kind: %r" % kind)

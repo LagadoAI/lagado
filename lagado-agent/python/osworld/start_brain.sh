@@ -20,6 +20,9 @@ echo "stopping any existing brain on :$PORT ..."
 pkill -f "llama-server.*--port $PORT" 2>/dev/null || true
 sleep 1
 
-echo "launching lean brain: ctx=$CTX, --no-mmap, full GPU offload"
+echo "launching lean brain: ctx=$CTX, --no-mmap, full GPU offload, single slot"
+# --parallel 1: multi-slot continuous batching made temp-0 SAME-SEED outputs vary run-to-run
+# (the 2026-06-23 variance finding; server logs showed 4 slots). One slot = sequential decode =
+# reproducible draws, so best-of-N seed diversity is CONTROLLED diversity, not noise on noise.
 exec "$LLAMA" -m "$MODEL" --port "$PORT" -c "$CTX" -ngl 99 --threads 8 -fa on \
-     -ctk q8_0 -ctv q8_0 --no-mmap
+     -ctk q8_0 -ctv q8_0 --no-mmap --parallel 1
