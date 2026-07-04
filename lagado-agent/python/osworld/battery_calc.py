@@ -336,9 +336,13 @@ def emit_gaps(reasoning, nameops, instr=""):
     # range ('Merge cells A1:C1') that no emitted op carries = a missing deliverable. Deterministic
     # string checks; a wrong firing only nags (the op values check covers sheet names etc.).
     if nameops and instr:
-        opblob = " ".join(str(v) for o in nameops for v in o.values())
-        for mlit in re.finditer(r'"([^"]{3,60})"', instr):
-            if mlit.group(1) not in opblob:
+        opblob = " ".join(str(v) for o in nameops for v in o.values()).lower()
+        # WRITE-VERB-GATED: instructions quote column NAMES constantly ('format column "spent"');
+        # only a quote following an explicit write verb is content-to-write. The ungated version
+        # nagged name-references into stray set_cells and broke sheet_data on golds (measured,
+        # round-2 sweep). Coverage check case-insensitive for the same reason.
+        for mlit in re.finditer(r'(?:write|enter|type|says?|labell?ed|titled)\s+"([^"]{3,60})"', instr):
+            if mlit.group(1).lower() not in opblob:
                 gaps.append("goal_literal:%s" % mlit.group(1))
         mm = re.search(r"[Mm]erge (?:the )?cells? ([A-Za-z]+\d+:[A-Za-z]+\d+)", instr)
         if mm and not any(n.get("kind") == "merge_cells" and
@@ -675,6 +679,16 @@ def apply_B(g, nameops, log):
             except Exception:
                 pass
         k = nop["kind"]
+        # Single-book placeholder tolerance for EVERY op: a draw that copies the docs' "S"
+        # placeholder (or any unknown name) binds to the only live sheet — the daemon has this
+        # tolerance, but host-side resolution paths (total_row's column resolve, dedup, sort key)
+        # silently lost the op without it (measured: total_row sheet='S' → "unknown sheet 'S'").
+        # Only EXISTING-sheet fields; never new-name fields (dest/new/name keep the model's word).
+        if len(live) == 1:
+            bindable = ("sheet", "source") if k in ("create_pivot", "copy_sheet") else ("sheet",)
+            for f in bindable:
+                if nop.get(f) and nop[f] not in live:
+                    nop[f] = list(live)[0]
         for f in EXISTING_SHEET_FIELDS.get(k, []):       # ground existing-sheet refs to live tabs (grounding)
             if nop.get(f):
                 nop[f] = ground_sheet(nop[f], live)
@@ -890,6 +904,17 @@ def apply_B(g, nameops, log):
                                            int(m.group(2)) + filled[-1])
                     newparts.append(p)
                 gparts = newparts
+                grounded = ";".join(gparts)
+                gm = _reparse()
+            # ROW-pair SPAN UNIFICATION: same start column, different end columns (cat B1:G1 with
+            # val B12:F12 — a sloppy draw) dodges the same-span grounding below and saves refs the
+            # evaluator can't match (measured, round-2 sweep). Rebuild both parts over the UNION
+            # span; the numeric edge-trim below then clamps to what actually exists.
+            if len(gm) == 2 and all(m and m.group(2) == m.group(4) for m in gm) and \
+               gm[0].group(1).upper() == gm[1].group(1).upper() and \
+               gm[0].group(3).upper() != gm[1].group(3).upper():
+                hi = max(gm[0].group(3).upper(), gm[1].group(3).upper(), key=_col_idx)
+                gparts = ["%s%s:%s%s" % (m.group(1), m.group(2), hi, m.group(4)) for m in gm]
                 grounded = ";".join(gparts)
                 gm = _reparse()
             # ROW-pair grounding to observed data. (1) A value row that is entirely EMPTY while the
@@ -1683,6 +1708,10 @@ def run_core(g, task, cond, file_path, log, score_fn):
         log["false_pass"] = bool(score < 1.0)
         return score, log
     score = score_fn()
+    if isinstance(score, tuple):      # host scorer error sentinel ("ERR", msg) — pass it through
+        log["score_err"] = score[1]   # (comparing it crashed the claim gate; measured). Never a
+        log["false_pass"] = None      # verdict: the caller reports SCORE-ERR.
+        return score, log
     if score is None:                 # host render-skip sentinel (compare_pdfs etc.) — pass it
         log["score"] = None           # through so the caller reports RENDER-SKIP, not a false 0
         log["false_pass"] = None

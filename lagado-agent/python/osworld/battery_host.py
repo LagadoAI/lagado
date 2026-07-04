@@ -98,12 +98,32 @@ def fetch_input(task):
 def _gold(task, exp_cfg):
     """Local cached gold path for a cloud_file expected config. multi-file expected configs pass
     the FIRST dest to the metric (`gives` defaults to [0]); companions (e.g. the gold's -Sheet1.csv
-    for sheet_print) sit beside it in the cache and are found by the metric's own derivation."""
+    for sheet_print) sit beside it in the cache and are found by the metric's own derivation.
+    NEVER-RUN tasks have an empty cache — download the gold(s) on demand (scoring a missing gold
+    is an automatic-0 that reads like a real miss; measured on the fresh-task gauntlet)."""
     if exp_cfg and exp_cfg.get("type") == "cloud_file":
-        dest = exp_cfg.get("dest", "")
-        if isinstance(dest, list):
-            dest = dest[0] if dest else ""
-        return os.path.join(CACHE, task["id"], dest)
+        paths = exp_cfg.get("path", "")
+        dests = exp_cfg.get("dest", "")
+        if not isinstance(paths, list):
+            paths, dests = [paths], [dests]
+        cdir = os.path.join(CACHE, task["id"])
+        os.makedirs(cdir, exist_ok=True)
+        for url, dst in zip(paths, dests):
+            local = os.path.join(cdir, dst)
+            if not os.path.exists(local) and url:
+                try:
+                    r = requests.get(url, timeout=180)
+                    r.raise_for_status()
+                    open(local, "wb").write(r.content)
+                except Exception:
+                    pass                          # the metric will surface the missing file
+        return os.path.join(cdir, dests[0] if dests else "")
+    if exp_cfg and exp_cfg.get("type") == "vm_file":
+        # An expected file the task's SETUP placed in the VM (e.g. a gold xlsx among the task
+        # downloads) — locate it in the cache by basename (task downloads land hash-prefixed).
+        base = os.path.basename(str(exp_cfg.get("path", "")))
+        hits = sorted(glob.glob(os.path.join(CACHE, task["id"], "*" + base)))
+        return hits[0] if hits else None
     return None
 
 
