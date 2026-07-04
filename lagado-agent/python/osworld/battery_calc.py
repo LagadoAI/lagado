@@ -172,6 +172,7 @@ GRAMMAR_B = (
     ' | "format_cells_where(sheet=" str ", match=" str ", fill_color=" str ", font_color=" str ", range=" str ")"'
     ' | "set_decimal_separator(sheet=" str ", separator=" str ")"'
     ' | "export_pdf(sheet=" str ", name=" str ", fit_pages=" str ")"'
+    ' | "dedup_column(sheet=" str ", source=" str ", target=" str ")"'
     ' | "infeasible(reason=" str ")"\n'
     'str ::= "\\"" [^"\\\\]* "\\""\n'
 )
@@ -231,6 +232,7 @@ EMIT_PROMPT = (
     "  format_cells_where(sheet=\"S\", match=\"weekend\", fill_color=\"#rrggbb\", font_color=\"\", range=\"\")  style every cell matching a predicate: \"weekend\" = dates on Saturday/Sunday, \"max\" = the largest number, any other match = exact cell text; range=\"{{Header}}\" or A1 range limits the scan (\"\" = whole sheet)\n"
     "  set_decimal_separator(sheet=\"S\", separator=\",\")    display ALL numbers with this decimal separator (localized format; values stay numbers)\n"
     "  export_pdf(sheet=\"S\", name=\"\", fit_pages=\"1\")      export as a PDF next to the document, scaled to fit N pages (name=\"\" keeps the document's file name)\n"
+    "  dedup_column(sheet=\"S\", source=\"{{Header1}}\", target=\"{{Header2}}\")  copy the source column's UNIQUE values into the target column, keeping first-occurrence order\n"
     "  infeasible(reason=\"...\")                          ONLY if the request cannot be done in this application at all — emit it ALONE (no other operations) and state why\n\n"
     "Refer to columns by {{Header}} name where a name is asked; use A1 cell refs for ranges. "
     "Emit ONLY the operations the goal needs, as a list of calls:")
@@ -460,7 +462,7 @@ def parse_B_nameops(text):
     verbs = ("compute_column", "set_cell", "add_sheet", "rename_sheet", "copy_sheet", "total_row",
              "format_cells", "merge_cells", "sort_range", "set_number_format", "create_chart", "create_pivot",
              "freeze_panes", "export_csv", "transpose_range", "reorder_columns", "hide_rows_where",
-             "format_cells_where", "set_decimal_separator", "export_pdf", "infeasible")
+             "format_cells_where", "set_decimal_separator", "export_pdf", "infeasible", "dedup_column")
     for verb, body in scan_calls(text, verbs):
         kw = parse_kv(body)
         if verb == "add_sheet":
@@ -523,6 +525,9 @@ def parse_B_nameops(text):
                             "fit_pages": kw.get("fit_pages", "1")})
         elif verb == "infeasible":
             nameops.append({"kind": "infeasible", "reason": kw.get("reason", "")})
+        elif verb == "dedup_column":
+            nameops.append({"kind": "dedup_column", "sheet": kw.get("sheet"),
+                            "source": kw.get("source", ""), "target": kw.get("target", "")})
     return nameops
 
 def _op_key(o):
@@ -548,6 +553,8 @@ def _op_key(o):
         return (k, o.get("sheet"), o.get("source"), o.get("dest"))
     if k in ("hide_rows_where", "format_cells_where"):
         return (k, o.get("sheet"), o.get("match"))
+    if k == "dedup_column":
+        return (k, o.get("sheet"), o.get("source"), o.get("target"))
     if k == "create_chart":
         # keyed by TITLE when present (two titled charts coexist; a retry correcting the SAME
         # chart's ranges collides and replaces it). Untitled charts key by RANGES so two untitled
@@ -720,6 +727,21 @@ def apply_B(g, nameops, log):
             rr = g.client("apply", {"op": op})
             if not rr.get("ok"):
                 fails.append({"name": nop.get("range"), "why": "apply error: %s" % rr.get("error", "")[:80]})
+            live = live_detect(g)
+        elif k == "dedup_column":
+            sheet = nop.get("sheet")
+            src = resolve_name(sheet, (nop.get("source") or "").strip("{}").strip(), live, fails)
+            tgt = resolve_name(sheet, (nop.get("target") or "").strip("{}").strip(), live, fails)
+            if src is None or tgt is None:
+                live = live_detect(g)
+                continue                                # fail-closed; the resolve fail drives retry
+            info = live.get(sheet) or {}
+            ds = info.get("data_start", 2)
+            rr = g.client("apply", {"op": {"op": "dedup_column", "sheet": sheet, "source": src,
+                                           "target": tgt, "row0": ds,
+                                           "row1": ds + info.get("rows", 0) - 1}})
+            if not rr.get("ok"):
+                fails.append({"name": nop.get("target"), "why": "apply error: %s" % rr.get("error", "")[:80]})
             live = live_detect(g)
         elif k == "sort_range":
             sheet = nop.get("sheet")
@@ -1127,6 +1149,7 @@ EXISTING_SHEET_FIELDS = {
     "create_pivot": ["source"], "freeze_panes": ["sheet"], "export_csv": ["sheet"],
     "transpose_range": ["sheet"], "reorder_columns": ["sheet"], "hide_rows_where": ["sheet"],
     "format_cells_where": ["sheet"], "set_decimal_separator": ["sheet"], "export_pdf": ["sheet"],
+    "dedup_column": ["sheet"],
 }
 
 def ground_chart_ranges(ranges, sheet, live):
@@ -1226,9 +1249,23 @@ def falsify_empty_named_targets(g, instr):
         last = ds + info.get("rows", 0) - 1
         if last < ds:
             continue
+        headers_all = [str(cc.get("header") or "").strip() for cc in info.get("cols", [])]
         for c in info.get("cols", []):
             h = str(c.get("header") or "").strip()
-            if len(h) < 3 or h.lower() not in low:
+            if len(h) < 3:
+                continue
+            named = h.lower() in low
+            if not named:
+                # UNIQUE-WORD binding: the goal says "Billions (B) in Column C" while the header
+                # reads "in billions (B)" — verbatim-substring misses it. A distinctive header
+                # word (≥5 chars) that appears in the goal AND in exactly ONE header binds
+                # deterministically. Misfires only nag/under-claim, never false-pass.
+                words = [w for w in re.findall(r"[a-z]{5,}", h.lower())]
+                for w in words:
+                    if w in low and sum(1 for hh in headers_all if w in hh.lower()) == 1:
+                        named = True
+                        break
+            if not named:
                 continue
             r = g.client("read", {"sheet": sheet,
                                   "range": "%s%d:%s%d" % (c["letter"], ds, c["letter"], last)})

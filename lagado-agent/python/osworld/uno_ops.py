@@ -192,7 +192,9 @@ def apply_one_op(doc, resolve_sheet, op):
         rng = sh.getCellRangeByName(op["range"])
         fmts = doc.getNumberFormats()
         loc = uno.createUnoStruct("com.sun.star.lang.Locale")
-        code = str(op["format"])
+        # Format-code text sections need DOUBLE quotes (0.0,," M"); the emission grammar makes
+        # '"' unemittable so models send single — normalize (a format code has no sheet refs).
+        code = str(op["format"]).replace("'", '"')
         key = fmts.queryKey(code, loc, False)
         if key == -1:
             key = fmts.addNew(code, loc)
@@ -445,6 +447,28 @@ def apply_one_op(doc, resolve_sheet, op):
         flt = uno.createUnoStruct("com.sun.star.beans.PropertyValue")
         flt.Name, flt.Value = "FilterName", "calc_pdf_Export"
         doc.storeToURL(folder + "/" + name + ".pdf", (flt,))
+    elif kind == "dedup_column":
+        # Order-preserving unique copy: the source column's data rows → the target column, first
+        # occurrences keeping their order (the app's Remove-Duplicates analog, non-destructive).
+        # source/target arrive as COLUMN LETTERS with row0/row1 = the data span (resolved by the
+        # harness); rows beyond the unique count stay untouched.
+        sh = resolve_sheet(op.get("sheet"))
+
+        def _cidx(letters):
+            n = 0
+            for ch in str(letters).strip().upper():
+                n = n * 26 + (ord(ch) - 64)
+            return n - 1
+        c_src, c_tgt = _cidx(op["source"]), _cidx(op["target"])
+        r0, r1 = int(op["row0"]) - 1, int(op["row1"]) - 1
+        seen, uniq = set(), []
+        for r in range(r0, r1 + 1):
+            v = sh.getCellByPosition(c_src, r).getString()
+            if v != "" and v not in seen:
+                seen.add(v)
+                uniq.append(v)
+        for i, v in enumerate(uniq):
+            sh.getCellByPosition(c_tgt, r0 + i).setString(v)
     elif kind == "create_chart":
         # Insert a chart so openpyxl reads it back with the right tagname (lineChart/barChart) + series refs.
         # `ranges` = ";"-joined A1 ranges (e.g. "B1:G1;B12:G12") → category + value; `type` line|bar|column.
