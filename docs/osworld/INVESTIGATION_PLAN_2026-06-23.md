@@ -6,6 +6,42 @@
 > command below. The `.md` docs stayed here. PYTHONPATH accordingly:
 > `PYTHONPATH=/home/alucard/projects/OSWorld:/home/alucard/projects/lagado/lagado-agent/python/osworld`.
 
+## ════ TURN-13 STATE — 2026-07-05 — PREFIX-COMMIT/RESAMPLE LOOP (DSpark-shaped); 17/30; FULL MISS DOSSIER ════
+**USER DOCTRINE ADOPTED (see memory lagado-propose-verify-doctrine): amnesiac proposer / sound verifier /
+prefix-commit / resample-at-divergence at every granularity; contract from STRUCTURE > dialogue >
+under-claim, never from user specificity.** BUILT: `resample_divergence` between attempt0 and the
+UNCHANGED full-retry+iterative floor — committed ops = truth; each localized fault gets ONE forced
+single-op emission; permanently-rejected ops (overwrite-withheld, unappliable) are DROPPED not carried
+(spec decode discards rejected tokens); idempotent dependency re-apply; OBSERVATION decides the exit.
+THREE MEASURED REPAIRS DURING THE BUILD: (1) cause-before-symptom fault ORDER — resampling an
+"empty chart range" fail first patched a lone SUM cell and poisoned total_row's last-row scan
+(0a2e43bf regressed → fixed: gaps first, empty-range fails get NO own resample, re-apply owns them —
+3/3 again); (2) overwrite-withhold was rejecting OUR OWN idempotent re-applies (cell shows the
+formula's RESULT ≠ formula string; 7e429b8d) → applied_set_keys guard; (3) format_cells_where added
+to write_kinds (writes_dropped nagged a FINISHED style solution → additive retry injected a
+self-referential set_cell; the abed40dc lesson repeated verbatim on 8b1ce5f2 → 3/3 again).
+**USER FLAG MID-BUILD: "you are leading with prompts again" — CORRECT: I tuned withhold/gap feedback
+wording to steer emissions. All new feedback lines stripped to FACT-ONLY; the behavior got a MECHANISM
+instead: FILL-SHAPE GROUNDING (a formula set into a table column's FIRST data cell with a same-row
+relative scalar ref above an all-empty span = the app's own fill-handle gesture → set_formula_range
+over the table span; empty-below/region-top/≥3-row guards; aggregates never match). 7e429b8d re-golded
+2/2 through the mechanism with zero coaching.** TEMP-DIVERSIFIED best-of-N + resample redraw (temp-0
+decode is deterministic under --parallel 1; diversity only on detected defects).
+**FINAL SWEEP 17/30 GOLD, 0 false-pass** (16 + 347ef137 stays; d681960f/7e429b8d not in heldout-30).
+Oscillators now CONSISTENT misses (0/12 across 4×3) — determinism turned noise into fixed targets.
+**FULL MISS DOSSIER (per-task breaking points, cell-level vs gold — miss_dossier.py): see TURN-13
+build-map in the conversation record / next turn's plan. Headlines: 37608790 = 3 mechanical levers
+(duplicate-header write into B2/C2, trailing unbalanced ')' stored as text, Last Name compute dropped);
+abed40dc = semantic_col bound a cell VALUE ("Keira Daily") as source → never bind a token equal to an
+observed sample value; 1334ca3e = goal-echo improvised write into virgin A1 (+ set_zoom verb, zip-patch
+family); 21df9241 = units-in-FORMAT not string (ground_result_unit_format, the ground_result_date_type
+family); 21ab7b40 = fill/font field swap vs goal's "green font" (dialect); 1de60575 = pivot cols-vs-rows
+("as the column headers" dialect); 535364ea+30e3e107 = pivot_count gap (chart_count clone) +
+multi-pivot-one-dest anchoring; 1d17d234 = goal-literal regex misses "write the header \"X\"" (allow
+≤3 intervening words) + merge-with-label composite; 0326d92d = ROW-fill-shape (transpose of fill-shape)
++ total misplacement; 4f07fbe9 = edit-in-place class → contract compiler; 2bd59342 = infeasible
+knowledge (VM); aa3a8974 = VM render. NEXT: mechanical levers above → VM re-stress → contract compiler.**
+
 ## ════ TURN-12 STATE — 2026-07-04 — MULTI-TABLE OBSERVATION BUILT; THE OBSERVATION LIMIT BROKEN ════
 **THE BUILD: detect() now SEGMENTS every sheet into TABLE REGIONS** (`segment_regions`: row-blocks on
 blank rows → column-groups on blank columns; per-region title line, header row, candidates with ABSOLUTE

@@ -392,11 +392,12 @@ GRAMMAR_STEP_FORCED = GRAMMAR_B.replace('root ::= "[" op ("," op)* "]"', 'root :
 def _ops_doc():
     return EMIT_PROMPT.split("Available operations:\n", 1)[1].rsplit("\nRefer to columns", 1)[0]
 
-def author_step(instr, g, reasoning, applied, problems, log, forced=False):
+def author_step(instr, g, reasoning, applied, problems, log, forced=False, temperature=0.0):
     """ONE emission step against the LIVE document (act → OBSERVE detected faults → act).
     Returns a nameop, or None for done()/empty. `problems` = the CURRENT detected faults/gaps —
     without them in view the model rubber-stamps done() over an incomplete document (measured).
-    forced=True removes the done() escape (used ONCE per loop after a done()-over-problems)."""
+    forced=True removes the done() escape (used ONCE per loop after a done()-over-problems).
+    temperature>0 = the resample diversifier (the deterministic temp-0 draw IS the broken one)."""
     cards = candidate_cards(live_detect(g))
     applied_txt = "\n".join(
         "- %s(%s) — %s" % (o.get("kind"),
@@ -416,12 +417,91 @@ def author_step(instr, g, reasoning, applied, problems, log, forced=False):
                   instr=instr, cards=cards, reasoning=reasoning, applied=applied_txt,
                   problems=problems or "(none detected)")
     raw = _chat(prompt, grammar=GRAMMAR_STEP_FORCED if forced else GRAMMAR_STEP,
-                temperature=0.0, seed=7, max_tokens=300)
+                temperature=temperature, seed=7 + int(temperature * 1000), max_tokens=300)
     log.setdefault("step_raw", []).append(raw)
     if raw.strip().startswith("done"):
         return None
     ops = parse_B_nameops(raw)
     return ops[0] if ops else None
+
+def resample_divergence(g, instr, nameops, written, resolve_fails, fired, gaps, log):
+    """PREFIX-COMMIT + RESAMPLE-AT-DIVERGENCE (2026-07-05 — the DSpark-shaped loop, user doctrine).
+    Applied ops are COMMITTED truth; each LOCALIZED fault is a divergence point that gets ONE
+    targeted single-op forced emission against the live document, instead of a full re-derivation
+    (the full retry re-derives everything and its op-carrying drags junk forward — measured on
+    d681960f, where withheld marks-clobbering ops were re-presented every attempt). Permanently
+    rejected ops (overwrite-withheld, structurally unappliable) are DROPPED from the carried list —
+    spec decode discards rejected tokens, it does not re-propose them. Paper-aligned mechanics:
+    the corrected op ANCHORS the next cycle (DSpark's rejected-token rule), and faults are ORDERED
+    by expected fix-rate (resolve fails name exact ops → first; gaps → missing deliverables →
+    second; falsifiers → last); per-kind acceptance is logged as calibration data. Faults this
+    stage cannot clean fall through to the UNCHANGED full-retry + iterative floor.
+    Returns (nameops, written, resolve_fails, fired, gaps)."""
+    reasoning = log.get("reasoning", "")
+    applied = [(o, "already applied (committed)") for o in nameops]
+    # ORDER = CAUSES BEFORE SYMPTOMS (measured on 0a2e43bf: resampling the "chart range empty"
+    # fail FIRST patched a lone SUM cell, which poisoned total_row's last-data-row scan — the
+    # Total landed one row low and a stable gold regressed). Gaps are missing WRITES (causes);
+    # they resample first. An "entirely EMPTY range" fail is a symptom of those missing writes
+    # and gets NO resample of its own — the op that owns it is already in nameops and the
+    # idempotent dependency re-apply retries it once the writes exist.
+    faults = []
+    for gp in gaps:
+        if gp == "conditional_format":
+            continue                              # owned by the pre-apply withhold, not resample
+        n = 1
+        if gp.startswith("chart_count:"):
+            n = max(int(gp.split(":")[1]) - int(gp.split(":")[2]), 1)
+        faults.extend([("gap", gp)] * n)
+    faults += [("fail", f) for f in resolve_fails if "entirely EMPTY" not in f.get("why", "")]
+    faults += [("fired", f) for f in fired]
+    steps = 0
+    for kind, f in faults:
+        if steps >= 5:
+            break                                 # rail, not a policy — utility scheduling comes later
+        problem = (compose_feedback([f], []) if kind == "fail" else
+                   compose_feedback([], [f]) if kind == "fired" else gap_feedback([f]))
+        if not problem:
+            continue
+        nop = author_step(instr, g, reasoning, applied, problem, log, forced=True)
+        if nop is not None and any(_op_key(o) == _op_key(nop) for o, _n in applied):
+            # the deterministic draw IS the broken/echoed one — diversify (temp mirror of best-of-N)
+            nop = author_step(instr, g, reasoning, applied, problem, log, forced=True,
+                              temperature=0.35)
+        dup = nop is not None and any(_op_key(o) == _op_key(nop) for o, _n in applied)
+        if nop is None or nop.get("kind") == "infeasible" or dup:
+            log.setdefault("resample_acc", []).append([kind, str(f)[:60], "open"])
+            continue                              # divergence stays open for the fallback paths
+        if nop.get("kind") == "format_cells" and \
+           "conditional_format" in emit_gaps(reasoning, [o for o, _n in applied] + [nop]):
+            log.setdefault("resample_acc", []).append([kind, str(f)[:60], "withheld"])
+            continue
+        w2, f2 = apply_B(g, [nop], log, instr)
+        written += w2
+        steps += 1
+        note = ("resample FAILED: %s" % str(f2[-1].get("why", ""))[:60]) if f2 else "resampled: applied"
+        applied.append((nop, note))
+        log.setdefault("resample_acc", []).append([kind, str(f)[:60],
+                                                   "fail" if f2 else "applied"])
+    log["resample_steps"] = steps
+    if not steps:
+        return nameops, written, resolve_fails, fired, gaps    # nothing resampled — state unchanged
+    # DROP permanently rejected ops (never applied, can never apply) before the dependency re-apply
+    rejected = set(map(tuple, log.get("rejected_keys", [])))
+    def _keyt(o):
+        k = _op_key(o)
+        return tuple(k) if isinstance(k, (list, tuple)) else (k,)
+    nameops = [o for o, _n in applied if _keyt(o) not in rejected]
+    # DEPENDENCY RE-APPLY (idempotent, the turn-9 mechanism): a resampled op may satisfy a
+    # dependency an earlier fail-closed op was waiting on.
+    w3, refails = apply_B(g, merge_nameops([], nameops), log, instr)
+    written += w3
+    # RE-VERIFY: the observation decides the exit, not the resample's say-so.
+    fired = falsify(g, written) + falsify_empty_named_targets(g, instr, nameops)
+    gaps = emit_gaps(log.get("reasoning", ""), nameops, instr)
+    if "conditional_format" in gaps:
+        gaps.remove("conditional_format")
+    return nameops, written, refails, fired, gaps
 
 def emit_gaps(reasoning, nameops, instr=""):
     """EMIT-COMPLETENESS GROUNDING (2026-06-23, the reason→emit bridge — membrane: the reasoning is the model's
@@ -472,8 +552,12 @@ def emit_gaps(reasoning, nameops, instr=""):
     # EVERY op that writes cell data counts — an incomplete list here NAGS A FINISHED TASK and the
     # additive retry then injects a damaging extra op (measured: dedup_column done, gap fired,
     # retry added a truncated COUNTIF set_cell that broke sheet_data).
+    # format_cells_where added 2026-07-05: a conditional format IS the write the reasoning's
+    # condition-formula gestures at — its absence here nagged a FINISHED style-only solution
+    # (8b1ce5f2) and the additive retry injected a self-referential set_cell that corrupted B2
+    # (the same abed40dc failure mode this comment already warns about).
     write_kinds = ("compute_column", "set_cell", "total_row", "dedup_column", "transpose_range",
-                   "reorder_columns", "sort_range", "set_decimal_separator")
+                   "reorder_columns", "sort_range", "set_decimal_separator", "format_cells_where")
     if nameops and re.search(r"enter the formula|=sum\(|=average\(|type the formula|input the formula"
                              r"|calculate .{0,40}(new column|column)|new column", r) and \
        not any(n.get("kind") in write_kinds for n in nameops):
@@ -550,9 +634,7 @@ def gap_feedback(gaps):
     for gp in gaps:
         if gp.startswith("chart_count:"):
             wantn, gotn = gp.split(":")[1], gp.split(":")[2]
-            lines.append("- the goal asks for %s charts but you emitted only %s create_chart operation(s). "
-                         "Keep your operations and ALSO emit a SEPARATE create_chart(...) for EACH remaining "
-                         "chart the goal asks for (each with its own ranges and title)." % (wantn, gotn))
+            lines.append("- the goal asks for %s charts; the document currently has %s." % (wantn, gotn))
         elif gp.startswith("goal_literal:"):
             lines.append("- the goal asks for the text \"%s\" to be written, but no operation writes it. "
                          "Keep your other operations and ALSO emit set_cell(...) with that exact text at "
@@ -612,8 +694,7 @@ def compose_feedback(fails, fired):
             lines.append("- the goal names the column %s but it is still ENTIRELY EMPTY — keep your other "
                          "operations and ALSO emit the operation that fills it." % f["range"])
         elif f["falsifier"] == "column_fill_incomplete":
-            lines.append("- the goal names the column %s but only its FIRST cell is filled — fill the "
-                         "WHOLE column over the table's data rows (compute_column fills every row)." % f["range"])
+            lines.append("- the goal names the column %s; most of its data rows are still empty." % f["range"])
     return "\n".join(lines)
 
 CHAT = "http://localhost:8080/v1/chat/completions"   # applies the GGUF's own chat template (model-agnostic)
@@ -907,20 +988,65 @@ def apply_B(g, nameops, log, instr=""):
             # op-carrying re-presents withheld ops verbatim, indistinguishable from deliberate
             # re-emission, and the marks got clobbered anyway. Region-gated so the single-table
             # floor is byte-identical; ablatable.
-            if len((live.get(nop.get("sheet"), {}).get("regions") or [])) > 1:
+            if len((live.get(nop.get("sheet"), {}).get("regions") or [])) > 1 and \
+               _op_key(nop) not in [tuple(k) for k in log.get("applied_set_keys", [])]:
+                # applied_set_keys guard: an op WE already applied this run re-arriving via the
+                # idempotent dependency re-apply is OUR OWN write — the cell now holds the formula's
+                # RESULT, which never string-matches the op's formula (measured on 7e429b8d: the
+                # committed F2 VLOOKUP got withheld as "overwriting" its own displayed value and
+                # then dropped as junk). First-writes still withhold; re-applies never do.
                 rr0 = g.client("read", {"sheet": nop["sheet"],
                                         "range": "%s:%s" % (nop["cell"], nop["cell"])})
                 cur = ((rr0.get("cells") or [[None]])[0] or [None])[0]
                 if not _blank(cur) and str(cur) != str(nop.get("value")):
                     log.setdefault("overwrite_withheld", []).append(
                         ["set_cell", nop.get("sheet"), nop.get("cell"), str(nop.get("value"))])
+                    # PERMANENT withhold → a REJECTED op in the prefix-commit sense: record its key
+                    # so the resample stage can DROP it instead of carrying it forever (the measured
+                    # junk-drag: merge re-presented withheld marks-clobbering ops every attempt).
+                    log.setdefault("rejected_keys", []).append(_op_key(nop))
+                    # FACT-ONLY feedback (user flag 2026-07-05: tuning this wording to steer the next
+                    # emission = leading with prompts; the earlier "write to an EMPTY cell instead"
+                    # phrasing induced a value="" clear — which the withhold itself already blocks.
+                    # The harness relays the observation; the mechanism owns the protection).
                     fails.append({"name": nop.get("cell"),
-                                  "why": "would OVERWRITE existing data (cell %s on %s already holds %r) — "
-                                         "write to an EMPTY cell instead"
+                                  "why": "not applied: cell %s on %s already holds %r"
                                          % (nop["cell"], nop["sheet"], cur)})
                     continue
-            g.client("apply", {"op": {"op": "set", "sheet": nop["sheet"], "cell": nop["cell"],
-                                      "value": v}})
+            # FILL-SHAPE GROUNDING (Class B, ablatable; multi-table sheets only this round). A
+            # FORMULA set into a table column's FIRST data cell, carrying a same-row RELATIVE
+            # scalar reference, above an entirely-EMPTY remaining span, is the app's own
+            # enter-formula-then-fill-down gesture — the model narrates "drag the fill handle",
+            # an intent no emitted op carries (measured, 7e429b8d). The harness owns the geometry
+            # the fill handle would: set_formula_range over the table's data span (relative refs
+            # adjust exactly as fillAuto). Guards make it unable to clobber: empty-below only,
+            # region-top only, ≥3-row span only; aggregates (=AVERAGE(E2:E12)) never match — a
+            # range ref is not a same-row scalar.
+            filled = False
+            mcell = re.match(r"([A-Za-z]+)(\d+)$", (nop.get("cell") or "").replace("$", ""))
+            if isinstance(v, str) and v.startswith("=") and mcell and \
+               len((live.get(nop.get("sheet"), {}).get("regions") or [])) > 1:
+                rgs = _range_region(live.get(nop.get("sheet")), nop["cell"])
+                rowc = int(mcell.group(2))
+                if rgs and rowc == rgs["data_start"] and rgs["row1"] - rowc >= 2:
+                    same_row_scalar = any(
+                        m.group(2) == "" and int(m.group(3)) == rowc
+                        for m in re.finditer(r"(?<![:$\w])([A-Za-z]{1,3})(\$?)(\d+)(?![:\w])", v))
+                    below = "%s%d:%s%d" % (mcell.group(1), rowc + 1, mcell.group(1), rgs["row1"])
+                    rrb = g.client("read", {"sheet": nop["sheet"], "range": below})
+                    empties = [x for row in (rrb.get("cells") or []) for x in row]
+                    if same_row_scalar and empties and all(_blank(x) for x in empties):
+                        span = "%s%d:%s%d" % (mcell.group(1), rowc, mcell.group(1), rgs["row1"])
+                        rr = g.client("apply", {"op": {"op": "set_formula_range",
+                                                       "sheet": nop["sheet"], "range": span,
+                                                       "formula": v}})
+                        if rr.get("ok"):
+                            written.append((nop["sheet"], span, v))
+                            filled = True
+            if not filled:
+                g.client("apply", {"op": {"op": "set", "sheet": nop["sheet"], "cell": nop["cell"],
+                                          "value": v}})
+            log.setdefault("applied_set_keys", []).append(list(_op_key(nop)))
             live = live_detect(g)  # a set_cell may have written a header → re-perceive
         elif k == "compute_column":
             sheet, target, formula = nop["sheet"], nop["target"], nop["formula"]
@@ -964,7 +1090,9 @@ def apply_B(g, nameops, log, instr=""):
             if tcol is None:
                 if len((live.get(sheet, {}).get("regions") or [])) > 1:
                     # multi-table sheet: a flat append would land the new column outside every table —
-                    # fail-closed; the resolve fail drives the retry feedback instead
+                    # fail-closed; the resolve fail drives the retry feedback instead. Structurally
+                    # unappliable → rejected in the prefix-commit sense (resample may drop it).
+                    log.setdefault("rejected_keys", []).append(_op_key(nop))
                     fails.append({"name": target, "sheet": sheet,
                                   "why": "target not found on a multi-table sheet (no auto-create)"})
                     live = live_detect(g)
@@ -1720,12 +1848,14 @@ def falsify_empty_named_targets(g, instr, nameops=()):
                 fired.append({"falsifier": "named_target_empty",
                               "range": "'%s' (column %s on %s)" % (h, c["letter"], sheet)})
             elif len(vals) >= 3 and vals[0] not in (None, "") and \
-                    all(v in (None, "") for v in vals[1:]):
+                    sum(1 for v in vals[1:] if v in (None, "")) > len(vals[1:]) / 2:
                 # PARTIAL FILL (measured on 7e429b8d): the model authors a correct formula, sets it in
                 # the FIRST data cell and says "drag the fill handle down" — an intent no emitted op
-                # carries; the column's remaining rows stay empty and nothing detected it. A goal-named
-                # column with ONLY its top data cell filled = an unfinished deliverable. Under-claims
-                # and nags only — never a false pass.
+                # carries; the column's remaining rows stay empty and nothing detected it. Threshold =
+                # MAJORITY of the rows below the top still empty ("top cell only" stopped matching the
+                # moment a resample added a second cell — 2-of-11 filled read as clean). A goal-named
+                # column left mostly empty = an unfinished deliverable. Under-claims and nags only —
+                # never a false pass.
                 fired.append({"falsifier": "column_fill_incomplete",
                               "range": "'%s' (column %s on %s, rows %d-%d)" % (h, c["letter"], sheet, ds, last)})
     return fired
@@ -1935,6 +2065,18 @@ def run_core(g, task, cond, file_path, log, score_fn):
                                                  # claim). Covers STRUCTURAL-only tasks (rename/copy/format)
                                                  # which write no compute_column → empty `written` → used to
                                                  # retry needlessly. (no_fault below still gates self-report.)
+            # ══ DIVERGENCE RESAMPLE (DSpark-shaped, 2026-07-05) ══ prefix committed, each localized
+            # fault gets ONE targeted single-op resample BEFORE any full re-derivation; permanently
+            # rejected ops are dropped from the carried list. Cleans → skip the full retry entirely;
+            # doesn't → the unchanged full-retry + iterative floor proceeds with the updated state.
+            if attempt == 0 and nameops:
+                nameops, written, resolve_fails, fired, gaps = resample_divergence(
+                    g, instr, nameops, written, resolve_fails, fired, gaps, log)
+                carried = nameops
+                log["nameops"] = nameops
+                if nameops and not resolve_fails and not fired and not gaps:
+                    log["steps"].append("resample_clean")
+                    break
             feedback = (compose_feedback(resolve_fails, fired) + "\n" + gap_feedback(gaps)).strip()
             # ADD-type notes (missing ops / empty chart data / unfilled named targets) need the
             # additive retry stance.
