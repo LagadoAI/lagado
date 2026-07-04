@@ -6,6 +6,30 @@
 > command below. The `.md` docs stayed here. PYTHONPATH accordingly:
 > `PYTHONPATH=/home/alucard/projects/OSWorld:/home/alucard/projects/lagado/lagado-agent/python/osworld`.
 
+## ════ TURN-11 STATE — 2026-07-04 — RESOLVE ROUND, 3-ROUND STRESS, THE PRE-REGISTERED GAUNTLET ════
+**THREE FULL-30 ROUNDS (host, real metrics): 17 → 14 → 16, 0 false-pass in all 90 scored runs; 19
+DISTINCT tasks have golded at least once.** Round-2's drop was MY goal-literal detector nagging quoted
+column NAMES into stray set_cells (3 golds broken) — the regression sweep caught it exactly as designed;
+fixed by write-verb gating + case-insensitive coverage (commit c604c30). Also fixed from forensics:
+chart row-pair SPAN UNIFICATION (cat B1:G1/val B12:F12 draws), placeholder sheet 'S' binding for every
+op host-side, abed40dc stabilized 3/3 (write-kinds bug — MY gap injected a damaging op), --parallel 1
+brain (slot-batching = variance root), static best-of-N emission chooser (internal checks only).
+STILL FLAKY (decode-level, semantically-wrong draws invisible to static checks): 37608790 1d17d234
+535364ea 8b1ce5f2 — oscillate across rounds; falsifiers hold 0-false-pass on every miss.
+**GAUNTLET (6 never-run tasks, predictions FROZEN in PREDICTIONS.md/3a02afc BEFORE first run): 0/6 —
+inside the predicted 0-2 band, class-for-class** (04d9aeaf compound, 7e429b8d+d681960f two-table
+observation, 4de54231 compound, 4e6fcf72 date-anchor, f9584479 structure-inference). SCORING SOUNDNESS
+finds: fresh tasks scored against MISSING golds = silent automatic 0 (all six first verdicts were
+bogus) → _gold downloads cloud_file golds on demand + maps vm_file golds; ('ERR',msg) tuples pass
+through as SCORE-ERR. **THE INTEGRITY FINDING: f9584479 = a REAL FALSE-PASS — a goal with NO named
+deliverables ('fill the missing totals') gives goal-grounded falsifiers nothing to bind, and
+corroboration SHARES the model's assumptions. The integrity frontier = claims on under-specified
+goals.** NEW FRACTURE LINE (measured, 2 batteries): (1) compound-emission depth beyond the iterative
+loop's reach, (2) MULTI-TABLE OBSERVATION (single-table detect blinds the model — now 3 tasks), (3)
+decode variance, (4) under-specified-goal integrity. NEXT: multi-table detection in detect() >
+variance (best-of-N deepening / KV determinism) > a corroboration mode with INDEPENDENT assumptions
+(e.g. derive expected STRUCTURE from the goal, not from the model's own read).
+
 ## ════ TURN-10 STATE — 2026-07-03 — HELD-OUT 30 RE-STRESS: 7/30 → 17/30, 0 FALSE-PASS ════
 **THE RE-STRESS (host loop, real metric funcs, N=1): 17/30 GOLD, 0 false-pass across all 30** — the
 post-clear goal ("solve the fracture line → re-stress") delivered 2.4× the June baseline in one build
