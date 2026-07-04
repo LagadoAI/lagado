@@ -6,6 +6,31 @@
 > command below. The `.md` docs stayed here. PYTHONPATH accordingly:
 > `PYTHONPATH=/home/alucard/projects/OSWorld:/home/alucard/projects/lagado/lagado-agent/python/osworld`.
 
+## ════ TURN-8 STATE — 2026-07-03 (branch `Harness`) — CROSS-SHEET WAVE: MECHANISMS 4/4, THE EMISSION WALL ════
+**MECHANISMS ALL PROVEN (hand-driven 1.0): 51719eea cross-sheet VLOOKUP+pivot, 4f07fbe9 FIXED() decimal
+text, 347ef137 two untitled column charts, 21ab7b40 rate+max-highlight** (commit 2d3060f). THREE
+EVALUATOR-INTERFACE DEFECTS found+fixed (all measured, not guessed): (1) quote-ownership now PROTECTS
+quoted sheet names ('Retail Price'!$A$2:$B$23 survives '→"); (2) chart1 BarDiagram.Vertical is INVERTED
+vs the exported barDir (True→'bar', False→'col') — the evaluator compares barDir verbatim; (3) LO's xlsx
+export DROPS font colors entirely (live CharColor OK; stored styles.xml colorless while bold survives) +
+writes theme-black where golds carry rgb → two stdlib post-store patches (patch_xlsx_font_color on
+op-matched cells via _matched; patch_xlsx_font_rgb theme-1→FF000000 normalization). New capability:
+format_cells_where match="max" + range="{Header}" (column-scoped max-highlight).
+**INTEGRITY: FIRST FALSE-PASS OBSERVED AND CLOSED.** 21ab7b40/37608790 class: corroboration sees only
+WRITTEN cells — an unemitted deliverable (2 of 3 goal-named columns left empty) self-reported done.
+`falsify_empty_named_targets` (SOUND, goal-grounded: a live header the INSTRUCTION names verbatim whose
+column is entirely empty) now blocks the claim + nags additively. Post-fix: 0 false-pass everywhere;
+37608790 FLAKY 1/3 (one complete fill GOLDED; residual = 3-way-split formula quality variance).
+**THE WALL, NOW MEASURED ON 4 INDEPENDENT TASKS: COMPOUND-EMISSION COLLAPSE.** Reasoning is right
+(correct plans, even correct SUM anchors); the grammar-constrained EMIT keeps ~one op and drops the
+model's own remaining steps; temp-0 emissions VARY run-to-run; gap-nags + additive retry restore
+integrity but rescue completeness only sometimes. ⇒ **NEXT BUILD = ITERATIVE/SEGMENTED EMISSION
+(variable-matrix #1, re-elevated from downgraded): emit per reasoning step → observe → continue.** Also
+open: multi-table sheets are invisible to the single-table observation model (347ef137); ×100-style
+semantic misreads (21ab7b40) = comprehension, report don't patch.
+Baseline after wave: **14 stable GOLD + 1 flaky, 0 false-pass.** Remaining queue: render nuance
+(6e99a1ad 21df9241) → dedup (abed40dc) → iterative emission → VM re-stress heldout 30.
+
 ## ════ TURN-7 STATE — 2026-07-03 (branch `Harness`) — CHART WAVE, REGRESSION 15/15 ════
 **3a7c8185 (sort+line-chart) GOLD 3/3 + 0a2e43bf (total-row+chart, FLAKY since turn-3) GOLD 3/3 — now
 STABLE. FULL REGRESSION 15/15 GOLD, 0 false-pass** (all 7 turn-3 golds + wave-2's 3 + wave-3's 4 +
