@@ -6,6 +6,26 @@
 > command below. The `.md` docs stayed here. PYTHONPATH accordingly:
 > `PYTHONPATH=/home/alucard/projects/OSWorld:/home/alucard/projects/lagado/lagado-agent/python/osworld`.
 
+## ════ TURN-9 STATE — 2026-07-03 EOD (branch `Harness`) — ITERATIVE EMISSION BUILT, THE WALL CRACKED ════
+**VARIABLE #1 BUILT AS ADDITIVE ESCALATION (commit 82eaef4; single-shot floor byte-identical — step
+grammar + step docs DERIVED from the existing constants).** Engages ONLY when the single-shot loop ends
+with detected faults/gaps: emit ONE op → apply → OBSERVE (live cards + falsifiers + named-target + gaps
+recomputed) → continue/done(). Rails: 8-step cap, duplicate-proposal stop, 2-consec-failure stop, in-loop
+conditional-style withhold, exit on OBSERVATION-clean. THREE measured design lessons: (1) without the
+CURRENT detected problems in the step prompt the model rubber-stamps done() over an incomplete doc;
+(2) even with them it done()'s once → ONE FORCED STEP (grammar without the done() escape, aimed at the
+first problem) — this is what pulls the dropped op out; (3) DEPENDENCY RE-APPLY — a fail-closed op whose
+dependency arrived later (pivot before Revenue) re-runs via one idempotent full re-apply (the vocabulary's
+idempotency was built for this). + spaced-sheet-name auto-quoting (Retail Price!A:B → quoted) and
+create-first feedback for 0-header-match fields.
+**RESULT: 51719eea (cross-sheet VLOOKUP revenue + pivot) GOLD brain-driven end-to-end** — single-shot
+failed → iterative → forced step emitted the compute → re-apply landed the pivot. **REGRESSION 15/16
+GOLD, 0 false-pass** (37608790 = documented formula-quality flaky; golded via named-target nag in one
+run earlier today). RESIDUALS (semantic, report-don't-patch): 21ab7b40 single-cell write + ×100 misread;
+0326d92d wrong cell anchors; 2bd59342 sparkline knowledge gap; 347ef137 two-table observation limit.
+**Host battery now 15 stable + 1 flaky golds. NEXT: render nuance (6e99a1ad 21df9241) → dedup (abed40dc)
+→ VM RE-STRESS of the full heldout 30 (the thesis number) — iterative emission now rides along.**
+
 ## ════ TURN-8 STATE — 2026-07-03 (branch `Harness`) — CROSS-SHEET WAVE: MECHANISMS 4/4, THE EMISSION WALL ════
 **MECHANISMS ALL PROVEN (hand-driven 1.0): 51719eea cross-sheet VLOOKUP+pivot, 4f07fbe9 FIXED() decimal
 text, 347ef137 two untitled column charts, 21ab7b40 rate+max-highlight** (commit 2d3060f). THREE
