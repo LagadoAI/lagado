@@ -6,6 +6,28 @@
 > command below. The `.md` docs stayed here. PYTHONPATH accordingly:
 > `PYTHONPATH=/home/alucard/projects/OSWorld:/home/alucard/projects/lagado/lagado-agent/python/osworld`.
 
+## ════ TURN-7 STATE — 2026-07-03 (branch `Harness`) — CHART WAVE, REGRESSION 15/15 ════
+**3a7c8185 (sort+line-chart) GOLD 3/3 + 0a2e43bf (total-row+chart, FLAKY since turn-3) GOLD 3/3 — now
+STABLE. FULL REGRESSION 15/15 GOLD, 0 false-pass** (all 7 turn-3 golds + wave-2's 3 + wave-3's 4 +
+3a7c8185). Levers (all deterministic, commit 0421d4f): sort row-integrity (widen to used columns + clamp to
+data extent); chart grounding family (column-shape passthrough, header-start shift, orientation from range
+geometry, trailing-empty trim, empty-value-row re-anchor to live last data row [Class B, ablatable],
+numeric-extent edge trim — turns sloppy refs into the gold's exact B1:G1;B12:G12); EMPTY-CHART FALSIFIER
+(fail-closed, observed fault relayed verbatim); per-TITLE chart identity (two titled charts coexist; retry
+replaces itself); additive retry stance (gap feedback no longer contradicted by "change ONLY" preamble);
+set_cell types "=" as formula. **INFEASIBLE CHANNEL BUILT:** 2bd59342 (sparkline) is func:infeasible —
+`infeasible(reason=…)` verb emitted ALONE + exact official mirror (FAIL declaration: 1.0 on infeasible-func,
+0 else; wrong declaration can only lose, never false-pass). Model doesn't know LO lacks sparklines → builds
+a chart → honest MISS (VM runner must translate the declaration to a literal "FAIL" action).
+**PROMPT-BRITTLENESS A/B (measured, reverted, recorded in candidate_cards):** row-span cards fixed 0326d92d's
+SUM anchors but deterministically regressed 37608790 3/3→0/3 + induced off-by-one ranges; reverted — range
+robustness is owned at APPLY (clamps), not prompt wording. **RESIDUALS (honest):** 0326d92d = reason→emit
+COMPOUND COLLAPSE (reasoning correct incl. =SUM(B2:B11); emit repeatedly drops its own computed rows, keeps
+only charts, through writes_dropped gap + additive retry + verbatim falsifier feedback; mechanism 1.0
+hand-driven) ⇒ MEASURED EVIDENCE RE-ELEVATING iterative emission (variable-matrix #1, previously
+downgraded); 2bd59342 = app-capability knowledge gap. NEXT: cross-sheet/multi-step (51719eea 21ab7b40
+347ef137 4f07fbe9) → render nuance (6e99a1ad 21df9241) → dedup (abed40dc) → VM re-stress of the heldout 30.
+
 ## ════ TURN-6 STATE — 2026-07-03 EOD (branch `Harness`) — WAVE-3, REGRESSION 14/14 ════
 **FOUR MORE REAL-EVALUATOR GOLDS (host loop): reorder_columns (7a4e4bc8), hide_rows_where (6054afcb),
 format_cells_where weekend-highlight (8b1ce5f2), set_decimal_separator locale-render (a01fbce3 — the first
