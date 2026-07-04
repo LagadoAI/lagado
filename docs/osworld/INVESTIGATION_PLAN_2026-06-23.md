@@ -6,6 +6,45 @@
 > command below. The `.md` docs stayed here. PYTHONPATH accordingly:
 > `PYTHONPATH=/home/alucard/projects/OSWorld:/home/alucard/projects/lagado/lagado-agent/python/osworld`.
 
+## ════ TURN-12 STATE — 2026-07-04 — MULTI-TABLE OBSERVATION BUILT; THE OBSERVATION LIMIT BROKEN ════
+**THE BUILD: detect() now SEGMENTS every sheet into TABLE REGIONS** (`segment_regions`: row-blocks on
+blank rows → column-groups on blank columns; per-region title line, header row, candidates with ABSOLUTE
+letters, data span; small tables ≤10 rows carry FULL contents — a scale/lookup table's semantics ARE its
+rows, measured on d681960f where 3-sample cards made the model INVENT a grading scale). Region-aware all
+the way down: cards (per-table spans ONLY on multi-table sheets — the single-table A/B-frozen card is
+byte-identical), resolve (region-context first for duplicate headers, else fail-closed; `resolve_col`/
+`resolve_ref_full` carry region identity), compute_column ds/extent from the TARGET's table, clamps/sort/
+chart-anchor/total-row scan/falsifier spans all scoped to the range's OWN region. Floor untouched:
+single-table sheets take the exact legacy paths.
+**RESULTS: 347ef137 (turn-10's "OBSERVATION LIMIT") GOLD 3/3 STABLE; 7e429b8d (gauntlet two-table class)
+GOLD brain-driven** — model authored the exact cross-table VLOOKUP once it could SEE both tables.
+**REGRESSION SWEEP (full heldout 30, N=1): 16/30 GOLD, 0 false-pass, 1 render-skip** — inside the
+turn-11 14-17 band; every miss previously classified (variance oscillators 1d17d234/37608790/535364ea/
+8b1ce5f2/abed40dc + the documented semantic residuals). NO new failure class.
+NEW LEVERS (all measured against a located fault): `column_fill_incomplete` falsifier (goal-named column
+with ONLY its top data cell filled = the "drag the fill handle" intent no op carries; under-claims only);
+LIVE-READ write-target disambiguation (duplicate headers → the one empty-or-top-only column is the fill
+that clobbers nothing; Class B ablatable); OVERWRITE WITHHOLD on multi-table sheets (set_cell onto an
+occupied cell relayed + withheld for the run — the confirm-on-re-emission variant was tried and measured
+UNSOUND: retry op-carrying is indistinguishable from deliberate re-emission); chart_count emit-gap +
+static_defect (goal-stated "two charts" vs drawn); **TEMP-DIVERSIFIED BEST-OF-N** (with --parallel 1 the
+temp-0 decode is DETERMINISTIC — 18 byte-identical redraws measured — so defect-triggered redraws now
+take temp 0.35/0.7; this pulled the second chart reliably); forced-step grammar drops infeasible() (the
+done()-escape by another name, measured cop-out); "column bar chart" TYPE dialect (goal-phrase table,
+Class B); COLUMN-pair chart span unification (cat tail-trimmed vs val keeping a grand total = mismatched
+series); **EXTENT-AWARE CHART PLACEMENT (user direction: the fixed rect PLOPPED CHARTS ON THE DATA,
+stacked)** — anchor cell one clear column right of the data at the range's top row, daemon reads the
+cell's real Position; ALSO killed a phantom ' '-cell scoring flake the old on-data anchor produced.
+**HONEST RESIDUAL: d681960f MISS** — observation solved (reads the real scale), integrity held (marks
+protected, 0 false-pass), but the model maps a mark to the UPPER scale band (42→'Average' not 'Pass');
+gold wants approximate-VLOOKUP semantics. Comprehension residual — reported, not patched.
+**USER (end of night): these sheets are BASIC and the raw behavior was messy — "if it can't pass this
+it is not ready for the real world." Conceded without qualification; the defensible claim is the failure
+surface shrinking along named engineerable lines (7→17→19+ distinct golds, integrity intact), and that
+these benchmarks are the FLOOR. Real sheets are messier; multi-table was the first step off the toy tier.**
+NEXT: variance oscillators (the 5 flip tasks are the cheapest points) > independent-assumption
+corroboration (f9584479 frontier) > VM re-stress of the full 30.
+
 ## ════ TURN-11 STATE — 2026-07-04 — RESOLVE ROUND, 3-ROUND STRESS, THE PRE-REGISTERED GAUNTLET ════
 **THREE FULL-30 ROUNDS (host, real metrics): 17 → 14 → 16, 0 false-pass in all 90 scored runs; 19
 DISTINCT tasks have golded at least once.** Round-2's drop was MY goal-literal detector nagging quoted

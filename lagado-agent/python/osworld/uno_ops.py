@@ -498,7 +498,19 @@ def apply_one_op(doc, resolve_sheet, op):
             rname = rname.strip()
             if rname:
                 addrs.append(sh.getCellRangeByName(rname).getRangeAddress())
-        rect = Rectangle(); rect.X = 9000; rect.Y = 500; rect.Width = 14000; rect.Height = 9000
+        # Position: optional anchor CELL (0-based col/row) from the caller — extent-aware placement
+        # BESIDE the data (2026-07-04, user: the fixed rect plopped charts ON TOP of the tables, and
+        # two charts stacked exactly). The cell's own Position gives exact geometry (no width
+        # guessing). Defaults keep the old fixed rect (floor untouched).
+        rect = Rectangle()
+        rect.X = int(op.get("x", 9000)); rect.Y = int(op.get("y", 500))
+        if "anchor_col" in op:
+            try:
+                pos = sh.getCellByPosition(int(op["anchor_col"]), int(op.get("anchor_row", 0))).Position
+                rect.X = pos.X + 300; rect.Y = pos.Y
+            except Exception:
+                pass
+        rect.Width = 14000; rect.Height = 9000
         # (colh=False, rowh=True) is correct for BOTH orientations (measured on the saved-xlsx
         # round-trip): rows → val=B12:G12 cat=B1:G1 (the proven 0a2e43bf shape); columns with
         # header-free ranges ("A2:A36;E2:E36") → val=E2:E36 cat=A2:A36. Flipping the flags per

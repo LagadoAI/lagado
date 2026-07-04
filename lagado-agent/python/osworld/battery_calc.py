@@ -58,17 +58,92 @@ def find_header_row(rows):
             return i + 1
     return 1
 
+def _blank(v):
+    return v is None or (isinstance(v, str) and not v.strip())
+
+def segment_regions(grid, ncols, coltypes=(), colfmt=()):
+    """MULTI-TABLE OBSERVATION (2026-07-04, the turn-11 fracture line): segment a sheet's typed grid into
+    TABLE REGIONS — row-blocks split on fully-blank rows, then column-groups split on columns blank within
+    the block (covers both stacked tables [347ef137, d681960f] and side-by-side tables [7e429b8d]). Each
+    region gets its own title line (a lone leading text cell), header row, candidates (ABSOLUTE letters),
+    and data span. Pure function over the grid — deterministic, no task knowledge. 1-based rows throughout.
+    Returns a list of region dicts; a plain single-table sheet returns exactly one region."""
+    nrows = len(grid)
+    def cell(r, c):                                   # 1-based row, 0-based col
+        row = grid[r - 1] if 0 < r <= nrows else []
+        return row[c] if c < len(row) else None
+    def row_blank(r):
+        return all(_blank(cell(r, c)) for c in range(ncols))
+    # row-blocks: maximal runs of non-blank rows
+    blocks, r = [], 1
+    while r <= nrows:
+        if row_blank(r):
+            r += 1; continue
+        r0 = r
+        while r <= nrows and not row_blank(r):
+            r += 1
+        blocks.append((r0, r - 1))
+    regions = []
+    for r0, r1 in blocks:
+        # column-groups: maximal runs of columns non-blank somewhere within the block
+        used = [any(not _blank(cell(r, c)) for r in range(r0, r1 + 1)) for c in range(ncols)]
+        c = 0
+        while c < ncols:
+            if not used[c]:
+                c += 1; continue
+            c0 = c
+            while c < ncols and used[c]:
+                c += 1
+            c1 = c - 1
+            # region's own last data row (a block can outlive a narrow side table: 7e429b8d's A:B
+            # ends at row 7 while the D:F table beside it runs to 12)
+            rr1 = max(r for r in range(r0, r1 + 1)
+                      if any(not _blank(cell(r, cc)) for cc in range(c0, c1 + 1)))
+            # title: a lone leading text cell spanning nothing else (347ef137 'Personal Costs - 2019')
+            title, hr0 = None, r0
+            first_vals = [cell(r0, cc) for cc in range(c0, c1 + 1)]
+            nonblank = [v for v in first_vals if not _blank(v)]
+            if rr1 > r0 and len(nonblank) == 1 and isinstance(nonblank[0], str):
+                title, hr0 = nonblank[0].strip(), r0 + 1
+            sub = [[cell(r, cc) for cc in range(c0, c1 + 1)] for r in range(hr0, rr1 + 1)]
+            hrow = hr0 + find_header_row(sub) - 1     # absolute 1-based header row
+            headers = [cell(hrow, cc) for cc in range(c0, c1 + 1)]
+            samples = [[cell(r, cc) for cc in range(c0, c1 + 1)]
+                       for r in range(hrow + 1, min(hrow + 4, rr1 + 1))]
+            cands = []
+            for i, cc in enumerate(range(c0, c1 + 1)):
+                hdr = headers[i] if headers[i] is not None else ""
+                cands.append({"letter": col_letter(cc), "header": str(hdr),
+                              "samples": [row[i] for row in samples], "idx0": cc,
+                              "ntype": coltypes[cc] if cc < len(coltypes) else "number",
+                              "fmt": colfmt[cc] if cc < len(colfmt) else None})
+            reg = {"cols": cands, "row0": r0, "row1": rr1, "header_row": hrow,
+                   "data_start": hrow + 1, "rows": max(rr1 - hrow, 0), "title": title}
+            # SMALL-TABLE FULL CONTENT (measured on d681960f: a 6-row grade-scale table rendered as
+            # 3 samples made the model declare the scale "not provided" and INVENT one — a compact
+            # reference table's semantics ARE its rows). Carry every data row for tables ≤10 rows so
+            # the card can show the whole mapping. Observation completeness, not leading.
+            if 0 < reg["rows"] <= 10:
+                reg["data"] = [[cell(r, cc) for cc in range(c0, c1 + 1)]
+                               for r in range(hrow + 1, rr1 + 1)]
+            regions.append(reg)
+    return regions
+
 def detect(g, sheets_detail):
     """For each sheet: find the header row (not assumed row 1), build candidate columns (letter, header,
-    samples), and the data-start row. Returns {sheet: {cols, rows, data_start, header_row}}."""
+    samples), and the data-start row. Returns {sheet: {cols, rows, data_start, header_row}}.
+    MULTI-TABLE (2026-07-04): the full used grid is also segmented into table regions; when a sheet holds
+    MORE than one table the region list rides along under 'regions' and region-aware consumers engage.
+    Single-table sheets keep the exact legacy fields (the top-8 read basis unchanged) — floor untouched."""
     out = {}
     for sd in sheets_detail:
         name = sd["name"]
         ncols = max(sd["extent"]["cols"], 1)
         nrows = sd["extent"]["rows"]
         lastcol = col_letter(ncols - 1)
-        topr = g.client("read", {"sheet": name, "range": "A1:%s%d" % (lastcol, min(max(nrows, 1), 8))})
-        top = topr.get("cells", []) if topr.get("ok") else []
+        topr = g.client("read", {"sheet": name, "range": "A1:%s%d" % (lastcol, min(max(nrows, 1), 400))})
+        grid = topr.get("cells", []) if topr.get("ok") else []
+        top = grid[:8]                                     # legacy basis — byte-identical to the old read
         hrow = find_header_row(top)                       # 1-based
         headers = top[hrow - 1] if len(top) >= hrow else []
         samples = top[hrow:hrow + 3] if len(top) > hrow else []
@@ -81,8 +156,51 @@ def detect(g, sheets_detail):
             ntype = coltypes[c] if c < len(coltypes) else "number"
             cands.append({"letter": col_letter(c), "header": str(hdr), "samples": colsamp,
                           "idx0": c, "ntype": ntype, "fmt": colfmt[c] if c < len(colfmt) else None})
-        out[name] = {"cols": cands, "rows": nrows, "data_start": hrow + 1, "header_row": hrow}
+        info = {"cols": cands, "rows": nrows, "data_start": hrow + 1, "header_row": hrow}
+        try:
+            regions = segment_regions(grid, ncols, coltypes, colfmt)
+        except Exception:
+            regions = []                                   # observation must never break the floor
+        if len(regions) > 1:
+            info["regions"] = regions
+        out[name] = info
     return out
+
+def _sheet_cols(info):
+    """The sheet's resolvable candidate columns: the UNION of region candidates on a multi-table sheet
+    (each tagged with its region index), else the legacy flat list. Duplicate headers across regions stay
+    duplicated — resolution fail-closes on them unless a region context disambiguates."""
+    regs = (info or {}).get("regions") or []
+    if len(regs) > 1:
+        return [dict(c, region=i) for i, rg in enumerate(regs) for c in rg["cols"]]
+    return (info or {}).get("cols", [])
+
+def _region_of_col(info, letter, region_hint=None):
+    """The region record owning a column letter on a multi-table sheet (region_hint wins when the letter
+    exists in several stacked regions). None on single-table sheets — legacy geometry applies."""
+    regs = (info or {}).get("regions") or []
+    if len(regs) <= 1:
+        return None
+    if region_hint is not None and 0 <= region_hint < len(regs) and \
+       any(c["letter"] == letter for c in regs[region_hint]["cols"]):
+        return regs[region_hint]
+    owners = [rg for rg in regs if any(c["letter"] == letter for c in rg["cols"])]
+    return owners[0] if len(owners) == 1 else None
+
+def _range_region(info, rng):
+    """The region record containing an A1 range's anchor cell, for multi-table sheets; None otherwise.
+    Geometry consumers (clamps, chart anchors, spans) must scope to the table the range lives in — the
+    flat sheet extent would drag a range across a table boundary."""
+    regs = (info or {}).get("regions") or []
+    m = re.match(r"([A-Za-z]+)(\d+)", (rng or "").replace("$", ""))
+    if len(regs) <= 1 or not m:
+        return None
+    col0, row0 = _col_idx(m.group(1)), int(m.group(2))
+    for rg in regs:
+        idxs = [c["idx0"] for c in rg["cols"]]
+        if rg["row0"] <= row0 <= rg["row1"] and idxs and min(idxs) <= col0 <= max(idxs):
+            return rg
+    return None
 
 def live_detect(g):
     """Re-perceive the WHOLE workbook from the live session (per-op observation). Used after each
@@ -180,6 +298,28 @@ GRAMMAR_B = (
 def candidate_cards(detected):
     lines = []
     for sheet, info in detected.items():
+        regs = info.get("regions") or []
+        if len(regs) > 1:
+            # MULTI-TABLE sheet (2026-07-04): one card per table, WITH absolute row spans — here the
+            # rows are the load-bearing observation (which table a range lands in). The single-table
+            # rendering below stays byte-identical (the A/B-measured brittleness case was spans on
+            # single-table cards; multi-table sheets had no golds to regress).
+            lines.append("Sheet %r contains %d SEPARATE tables:" % (sheet, len(regs)))
+            for i, rg in enumerate(regs, 1):
+                t = " titled %r" % rg["title"] if rg.get("title") else ""
+                lines.append("Table %d%s (headers in row %d, data in rows %d-%d):"
+                             % (i, t, rg["header_row"], rg["data_start"], rg["row1"]))
+                for c in rg["cols"]:
+                    samp = ", ".join(str(s) for s in c["samples"][:3] if s is not None)
+                    lines.append("  column %s  header=%r  e.g. %s" % (c["letter"], c["header"], samp or "(empty)"))
+                if rg.get("data"):
+                    # small table → its rows ARE the observation (a scale/lookup table's semantics)
+                    lines.append("  full contents:")
+                    for ri, row in enumerate(rg["data"]):
+                        cells = ", ".join("%s%d=%r" % (c["letter"], rg["data_start"] + ri, v)
+                                          for c, v in zip(rg["cols"], row) if not _blank(v))
+                        lines.append("    %s" % (cells or "(empty row)"))
+            continue
         # A/B MEASURED 2026-07-03 (prompt-brittleness case study): stating the row SPAN here
         # ("data in rows 2-11") fixed 0326d92d's SUM anchors but DETERMINISTICALLY regressed
         # 37608790 (3/3 gold -> 0/3) and induced off-by-one chart/sort ranges on 3a7c8185.
@@ -243,7 +383,11 @@ EMIT_PROMPT = (
 # continue or done(). DERIVED from the proven constants so the single-shot floor stays byte-
 # identical: same op vocabulary, same docs, only the root rule and the framing differ.
 GRAMMAR_STEP = GRAMMAR_B.replace('root ::= "[" op ("," op)* "]"', 'root ::= op | "done()"', 1)
-GRAMMAR_STEP_FORCED = GRAMMAR_B.replace('root ::= "[" op ("," op)* "]"', 'root ::= op', 1)
+# The FORCED step exists because the model rubber-stamps done() over a detected problem; infeasible()
+# is the same escape hatch by another name (measured on 347ef137: forced step aimed at "emit the
+# second chart" → infeasible("cannot be done")). A forced step admits neither.
+GRAMMAR_STEP_FORCED = GRAMMAR_B.replace('root ::= "[" op ("," op)* "]"', 'root ::= op', 1) \
+                               .replace(' | "infeasible(reason=" str ")"', '', 1)
 
 def _ops_doc():
     return EMIT_PROMPT.split("Available operations:\n", 1)[1].rsplit("\nRefer to columns", 1)[0]
@@ -297,6 +441,16 @@ def emit_gaps(reasoning, nameops, instr=""):
     if re.search(_chartword, r) and re.search(_chartword, (instr or "").lower()) and \
        not any(n.get("kind") == "create_chart" for n in nameops):
         gaps.append("chart")
+    # CHART-COUNT completeness (goal-grounded, measured on 347ef137: the goal says "create two column
+    # bar charts", the emission carries ONE — compound-collapse dropped the second and nothing
+    # detected it). Fires only when the INSTRUCTION itself states an explicit chart count and the
+    # emission has fewer DISTINCT create_chart ops. Deterministic string check; a wrong firing nags.
+    mcount = re.search(r"\b(two|three|four|2|3|4)\b[^.]{0,40}\bcharts\b", (instr or "").lower())
+    if mcount and any(n.get("kind") == "create_chart" for n in nameops):
+        wantn = {"two": 2, "three": 3, "four": 4, "2": 2, "3": 3, "4": 4}[mcount.group(1)]
+        gotn = len({(n.get("title"), n.get("ranges")) for n in nameops if n.get("kind") == "create_chart"})
+        if gotn < wantn:
+            gaps.append("chart_count:%d:%d" % (wantn, gotn))
     if "pivot" in r and not any(n.get("kind") == "create_pivot" for n in nameops):
         gaps.append("pivot")
     # TOTAL-ROW completeness: the model's reasoning commits to a labeled total/sum ROW but no total_row op was
@@ -394,7 +548,12 @@ def gap_feedback(gaps):
                      "columns=\"{Header1},{Header2}\") computes a SUM row for you (correct rows guaranteed); "
                      "individual formula cells use set_cell(sheet=\"S\", cell=\"A1\", value=\"=FORMULA\").")
     for gp in gaps:
-        if gp.startswith("goal_literal:"):
+        if gp.startswith("chart_count:"):
+            wantn, gotn = gp.split(":")[1], gp.split(":")[2]
+            lines.append("- the goal asks for %s charts but you emitted only %s create_chart operation(s). "
+                         "Keep your operations and ALSO emit a SEPARATE create_chart(...) for EACH remaining "
+                         "chart the goal asks for (each with its own ranges and title)." % (wantn, gotn))
+        elif gp.startswith("goal_literal:"):
             lines.append("- the goal asks for the text \"%s\" to be written, but no operation writes it. "
                          "Keep your other operations and ALSO emit set_cell(...) with that exact text at "
                          "the cell the goal names." % gp.split(":", 1)[1])
@@ -452,6 +611,9 @@ def compose_feedback(fails, fired):
         elif f["falsifier"] == "named_target_empty":
             lines.append("- the goal names the column %s but it is still ENTIRELY EMPTY — keep your other "
                          "operations and ALSO emit the operation that fills it." % f["range"])
+        elif f["falsifier"] == "column_fill_incomplete":
+            lines.append("- the goal names the column %s but only its FIRST cell is filled — fill the "
+                         "WHOLE column over the table's data rows (compute_column fills every row)." % f["range"])
     return "\n".join(lines)
 
 CHAT = "http://localhost:8080/v1/chat/completions"   # applies the GGUF's own chat template (model-agnostic)
@@ -482,8 +644,17 @@ def static_defects(nameops, instr, detected):
                 d += 1
     low = (instr or "").lower()
     opblob = " ".join(str(v) for o in nameops for v in o.values()).lower()
+    # goal-stated chart count vs drawn charts (measured on 347ef137: the two-chart draw EXISTS at
+    # temp-0 — one draw carried both, the next kept one; a shortfall marks the draw defective so
+    # best-of-N hunts for the complete one). Internal check only; counts only when charts were drawn.
+    mcount = re.search(r"\b(two|three|four|2|3|4)\b[^.]{0,40}\bcharts\b", low)
+    if mcount:
+        wantn = {"two": 2, "three": 3, "four": 4, "2": 2, "3": 3, "4": 4}[mcount.group(1)]
+        gotn = len({(o.get("title"), o.get("ranges")) for o in nameops if o.get("kind") == "create_chart"})
+        if 0 < gotn < wantn:
+            d += wantn - gotn
     for sheet, info in (detected or {}).items():
-        for c in info.get("cols", []):
+        for c in _sheet_cols(info):
             h = str(c.get("header") or "").strip()
             if len(h) < 3 or h.lower() not in low:
                 continue
@@ -517,16 +688,17 @@ def author_B(instr, detected, log, feedback=None, temperature=0.0, additive=Fals
     log.setdefault("emit_raw", [])
     log["emit_raw"].append(raw)
     ops = parse_B_nameops(raw)
-    # STATIC BEST-OF-N (the variance lever, 2026-07-03): temp-0 draws vary run-to-run (llama.cpp
-    # batching nondeterminism — the turn-4 finding); a defective draw (truncated formula, goal-
-    # named column left untouched) costs a gold that another draw wins. Re-draw on DETECTED static
-    # defects only, up to 2 extra seeds; keep the fewest-defect draw (tie → earliest). Judged by
-    # internal checks alone — the evaluator plays no part.
+    # STATIC BEST-OF-N (the variance lever, 2026-07-03): a defective draw (truncated formula, goal-
+    # named column left untouched, goal-count chart shortfall) costs a gold another draw wins.
+    # Re-draw on DETECTED static defects only; keep the fewest-defect draw (tie → earliest). Judged
+    # by internal checks alone — the evaluator plays no part. Since --parallel 1 the temp-0 decode
+    # is DETERMINISTIC (measured 2026-07-04: 18 byte-identical redraws across seeds), so the
+    # re-draws take TEMPERATURE — diversity only ever escalates on a defective temp-0 draw.
     best, best_d = ops, static_defects(ops, instr, detected)
-    for t in (1, 2):
+    for t, retemp in ((1, 0.35), (2, 0.7)):
         if best_d == 0:
             break
-        raw2 = _chat(emit, grammar=GRAMMAR_B, temperature=temperature,
+        raw2 = _chat(emit, grammar=GRAMMAR_B, temperature=max(temperature, retemp),
                      seed=seed + 1000 * t, max_tokens=800)
         log["emit_raw"].append(raw2)
         ops2 = parse_B_nameops(raw2)
@@ -663,7 +835,25 @@ def merge_nameops(carried, new):
     viz = ("create_chart", "create_pivot", "export_csv", "export_pdf")
     return [o for o in merged if o.get("kind") not in viz] + [o for o in merged if o.get("kind") in viz]
 
-def apply_B(g, nameops, log):
+CHART_TYPE_PHRASES = [
+    # VERB-DIALECT grounding for the chart TYPE (turn-5 lesson: the goal's own phrasing wins over our
+    # enum translation; measured on 347ef137 — the goal's "column bar charts" is the standard name for
+    # a VERTICAL bar chart, the model translated it to type="bar" = horizontal). Longest phrase first;
+    # only an EXACT "<kind> chart(s)" phrase in the goal overrides a CONFLICTING emitted type.
+    # Class B, ablatable.
+    ("column bar chart", "column"), ("vertical bar chart", "column"), ("horizontal bar chart", "bar"),
+    ("column chart", "column"), ("bar chart", "bar"), ("line chart", "line"), ("pie chart", "pie"),
+]
+
+def ground_chart_type(nop, instr):
+    low = (instr or "").lower()
+    for phrase, ctype in CHART_TYPE_PHRASES:
+        if phrase in low or phrase.replace("chart", "charts") in low:
+            if nop.get("type") and nop["type"] != ctype:
+                nop["type"] = ctype
+            return
+
+def apply_B(g, nameops, log, instr=""):
     """Interleaved apply: each op applies through the session, then we RE-DETECT so later ops resolve
     against the live world. compute_column names are resolved here (exact+unique or FAIL-CLOSED).
     Returns (written_regions, fails) — written_regions = [(sheet, a1range)] for read-back."""
@@ -709,6 +899,26 @@ def apply_B(g, nameops, log):
             v = nop["value"]
             if isinstance(v, str) and v.startswith("="):
                 v = _norm_quotes(v)               # formula-typed set: same quote ownership as compute
+            # OVERWRITE WITHHOLD — MULTI-TABLE SHEETS ONLY (measured on d681960f: the model wrote a
+            # grade literal INTO the Marks column, clobbering observed data on a task that says
+            # "don't touch irrelevant regions"). A set_cell landing on a cell that already holds a
+            # DIFFERENT non-blank value is withheld for the whole run, the observed value relayed.
+            # Fail-closed on purpose: a re-emission channel was tried and measured UNSOUND — retry's
+            # op-carrying re-presents withheld ops verbatim, indistinguishable from deliberate
+            # re-emission, and the marks got clobbered anyway. Region-gated so the single-table
+            # floor is byte-identical; ablatable.
+            if len((live.get(nop.get("sheet"), {}).get("regions") or [])) > 1:
+                rr0 = g.client("read", {"sheet": nop["sheet"],
+                                        "range": "%s:%s" % (nop["cell"], nop["cell"])})
+                cur = ((rr0.get("cells") or [[None]])[0] or [None])[0]
+                if not _blank(cur) and str(cur) != str(nop.get("value")):
+                    log.setdefault("overwrite_withheld", []).append(
+                        ["set_cell", nop.get("sheet"), nop.get("cell"), str(nop.get("value"))])
+                    fails.append({"name": nop.get("cell"),
+                                  "why": "would OVERWRITE existing data (cell %s on %s already holds %r) — "
+                                         "write to an EMPTY cell instead"
+                                         % (nop["cell"], nop["sheet"], cur)})
+                    continue
             g.client("apply", {"op": {"op": "set", "sheet": nop["sheet"], "cell": nop["cell"],
                                       "value": v}})
             live = live_detect(g)  # a set_cell may have written a header → re-perceive
@@ -727,13 +937,47 @@ def apply_B(g, nameops, log):
             # first); the resolver below still owns binding soundness (unique-or-fail-closed). No prompt, no
             # grammar, no retry-nag, no training — the model's first natural emission is accepted as-is.
             formula = ground_bare_refs(formula, sheet, live)
-            tcol = resolve_name(sheet, target, live, [])     # throwaway fails — unresolved target → create
+            tres = resolve_col(sheet, target, live, [], write_target=True)   # throwaway fails — unresolved target → create
+            tcol, treg = (tres if tres else (None, None))
+            if tcol is None and len((live.get(sheet, {}).get("regions") or [])) > 1:
+                # LIVE-READ write-target disambiguation (Class B, ablatable; the resolve-time samples
+                # window goes stale the moment an earlier op writes into the column — measured on
+                # 7e429b8d: attempt-0's F2 formula made the form column look non-empty). Among the
+                # duplicate-header hits, a column whose region span is EMPTY or filled ONLY in its top
+                # cell is the one fill that clobbers nothing; exactly one such column binds.
+                want = (target or "").strip().lower()
+                hits = [c for c in _sheet_cols(live.get(sheet, {}))
+                        if c["header"].strip().lower() == want]
+                fillable = []
+                for c in hits:
+                    rgc = _region_of_col(live.get(sheet), c["letter"], region_hint=c.get("region"))
+                    if not rgc:
+                        continue
+                    rr0 = g.client("read", {"sheet": sheet, "range": "%s%d:%s%d"
+                                            % (c["letter"], rgc["data_start"], c["letter"], rgc["row1"])})
+                    vals = [v for row in (rr0.get("cells") or []) for v in row]
+                    if vals and (all(_blank(v) for v in vals) or
+                                 (not _blank(vals[0]) and all(_blank(v) for v in vals[1:]))):
+                        fillable.append(c)
+                if len(fillable) == 1:
+                    tcol, treg = fillable[0]["letter"], fillable[0].get("region")
             if tcol is None:
+                if len((live.get(sheet, {}).get("regions") or [])) > 1:
+                    # multi-table sheet: a flat append would land the new column outside every table —
+                    # fail-closed; the resolve fail drives the retry feedback instead
+                    fails.append({"name": target, "sheet": sheet,
+                                  "why": "target not found on a multi-table sheet (no auto-create)"})
+                    live = live_detect(g)
+                    continue
                 tcol = create_target_column(g, sheet, target, live)
                 live = live_detect(g)
-            ds = live.get(sheet, {}).get("data_start", 2)   # header-row-aware first data row
+            rg = _region_of_col(live.get(sheet), tcol, region_hint=treg)
+            regs = live.get(sheet, {}).get("regions") or []
+            ridx = treg if treg is not None else (regs.index(rg) if rg in regs else None)
+            # header-row-aware first data row — the target's own TABLE on a multi-table sheet
+            ds = rg["data_start"] if rg else live.get(sheet, {}).get("data_start", 2)
             refsheets = set()
-            a1 = substitute_names(formula, sheet, live, fails, row=ds, refsheets=refsheets)
+            a1 = substitute_names(formula, sheet, live, fails, row=ds, refsheets=refsheets, region=ridx)
             # HARNESS OWNS SYNTAX: a compute_column body is ALWAYS a formula. The model inconsistently
             # omits the leading '=' (e.g. "{Sales}-{Sales Return}"); without it setFormula stores the
             # string as TEXT and fillAuto then series-increments the trailing digit ("B2-C2"→"B2-C3"…),
@@ -745,8 +989,13 @@ def apply_B(g, nameops, log):
                 continue  # fail-closed: a referenced name didn't resolve
             # Extent = data rows of the target OR any sheet the formula references (row-aligned). A
             # fresh target sheet has only its header (1 row); the referenced data sheet sets the span.
-            cand = [live.get(sheet, {}).get("rows", 2)] + [live.get(s, {}).get("rows", 2) for s in refsheets]
-            extent = max([r for r in cand if r and r >= 2] or [2])
+            # On a multi-table sheet the target's own TABLE bounds the span — the flat extent would
+            # run the fill into the next stacked table.
+            if rg:
+                extent = rg["row1"]
+            else:
+                cand = [live.get(sheet, {}).get("rows", 2)] + [live.get(s, {}).get("rows", 2) for s in refsheets]
+                extent = max([r for r in cand if r and r >= 2] or [2])
             rng = "%s%d:%s%d" % (tcol, ds, tcol, extent)
             rr = g.client("apply", {"op": {"op": "set_formula_range", "sheet": sheet,
                                            "range": rng, "formula": a1}})
@@ -767,14 +1016,23 @@ def apply_B(g, nameops, log):
             cinfo = info.get("cols", [])
             first_letter = cinfo[0]["letter"] if cinfo else "A"
             toks = [t.strip().strip("{}").strip() for t in (nop.get("columns") or "").split(",") if t.strip()]
-            letters = [l for l in (resolve_name(sheet, t, live, fails) for t in toks) if l]
+            rescols = [resolve_col(sheet, t, live, fails) for t in toks]
+            letters = [rc[0] for rc in rescols if rc]
             probe_col = letters[0] if letters else first_letter
+            # multi-table: the named columns' OWN table bounds the scan and anchors the label column —
+            # a flat 500-row scan would walk into the next stacked table and sum it too
+            trg = _region_of_col(info, probe_col, region_hint=next((rc[1] for rc in rescols if rc), None))
+            scan_end = ds + 500
+            if trg:
+                ds = trg["data_start"]
+                scan_end = trg["row1"]
+                first_letter = trg["cols"][0]["letter"]
             label = nop.get("label", "Total")
-            rb = g.client("read", {"sheet": sheet, "range": "%s%d:%s%d" % (probe_col, ds, probe_col, ds + 500)})
+            rb = g.client("read", {"sheet": sheet, "range": "%s%d:%s%d" % (probe_col, ds, probe_col, scan_end)})
             vals = [row[0] if row else None for row in rb.get("cells", [])] if rb.get("ok") else []
             # read the label column too so a re-apply (op-accumulation) OVERWRITES a prior total row instead of
             # stacking a new one below it: a row whose first cell already == the label is a previous total, not data.
-            lbcol = g.client("read", {"sheet": sheet, "range": "%s%d:%s%d" % (first_letter, ds, first_letter, ds + 500)})
+            lbcol = g.client("read", {"sheet": sheet, "range": "%s%d:%s%d" % (first_letter, ds, first_letter, scan_end)})
             firsts = [row[0] if row else None for row in lbcol.get("cells", [])] if lbcol.get("ok") else []
             last = ds - 1
             for i, v in enumerate(vals):
@@ -802,9 +1060,13 @@ def apply_B(g, nameops, log):
                 # as ground_bare_refs: unresolved → scan the whole sheet as before).
                 rspec = (nop.get("range") or "").strip()
                 if rspec and not re.match(r"^[A-Za-z]+\d+(:[A-Za-z]+\d+)?$", rspec.replace("$", "")):
-                    letter = resolve_name(nop.get("sheet"), rspec.strip("{}").strip(), live, [])
+                    fres = resolve_col(nop.get("sheet"), rspec.strip("{}").strip(), live, [])
+                    letter, freg = (fres if fres else (None, None))
                     info = live.get(nop.get("sheet")) or {}
-                    if letter and info:
+                    frg = _region_of_col(info, letter, region_hint=freg) if letter else None
+                    if letter and frg:                  # multi-table: the named column's OWN table span
+                        nop["range"] = "%s%d:%s%d" % (letter, frg["data_start"], letter, frg["row1"])
+                    elif letter and info:
                         ds = info.get("data_start", 2)
                         nop["range"] = "%s%d:%s%d" % (letter, ds, letter, ds + info.get("rows", 0) - 1)
                     else:
@@ -821,16 +1083,18 @@ def apply_B(g, nameops, log):
             live = live_detect(g)
         elif k == "dedup_column":
             sheet = nop.get("sheet")
-            src = resolve_name(sheet, (nop.get("source") or "").strip("{}").strip(), live, fails)
+            sres = resolve_col(sheet, (nop.get("source") or "").strip("{}").strip(), live, fails)
             tgt = resolve_name(sheet, (nop.get("target") or "").strip("{}").strip(), live, fails)
+            src = sres[0] if sres else None
             if src is None or tgt is None:
                 live = live_detect(g)
                 continue                                # fail-closed; the resolve fail drives retry
             info = live.get(sheet) or {}
-            ds = info.get("data_start", 2)
+            drg = _region_of_col(info, src, region_hint=sres[1])
+            ds = drg["data_start"] if drg else info.get("data_start", 2)
+            r1 = drg["row1"] if drg else ds + info.get("rows", 0) - 1
             rr = g.client("apply", {"op": {"op": "dedup_column", "sheet": sheet, "source": src,
-                                           "target": tgt, "row0": ds,
-                                           "row1": ds + info.get("rows", 0) - 1}})
+                                           "target": tgt, "row0": ds, "row1": r1}})
             if not rr.get("ok"):
                 fails.append({"name": nop.get("target"), "why": "apply error: %s" % rr.get("error", "")[:80]})
             live = live_detect(g)
@@ -843,7 +1107,9 @@ def apply_B(g, nameops, log):
             # that: WIDEN the range's column span to the sheet's used columns (rows untouched,
             # never shrink). Deterministic geometry, no task knowledge.
             info = live.get(sheet) or {}
-            letters = [c.get("letter") for c in info.get("cols", []) if c.get("letter")]
+            srg = _range_region(info, rng)              # multi-table: widen/clamp within the range's OWN table
+            scols = srg["cols"] if srg else info.get("cols", [])
+            letters = [c.get("letter") for c in scols if c.get("letter")]
             m0 = re.match(r"([A-Za-z]+)(\d+):([A-Za-z]+)(\d+)$", rng)
             if m0 and letters:
                 lo = min(letters + [m0.group(1).upper()], key=_col_idx)
@@ -851,7 +1117,7 @@ def apply_B(g, nameops, log):
                 # ...and CLAMP the end row to the observed data extent: an over-long range drags
                 # empty rows into the sort and scrambles them against the real data (observed:
                 # a 2-37 range on 2-36 data). Never clamp above the model's start row.
-                last = info.get("data_start", 2) + info.get("rows", 0) - 1
+                last = srg["row1"] if srg else info.get("data_start", 2) + info.get("rows", 0) - 1
                 end = int(m0.group(4))
                 if int(m0.group(2)) <= last < end:
                     end = last
@@ -877,6 +1143,7 @@ def apply_B(g, nameops, log):
             # lookup below depends on it (an unresolved name here anchored a chart to the header row).
             if nop.get("sheet") not in live and len(live) == 1:
                 nop["sheet"] = list(live)[0]
+            ground_chart_type(nop, instr)               # goal-phrase dialect ("column bar chart" = vertical)
             grounded = ground_chart_ranges(nop.get("ranges", ""), nop.get("sheet"), live)
             # ORIENTATION from geometry: the ranges themselves declare it — all single-column parts
             # = column series, all single-row parts = row series. The model's data_in label is used
@@ -906,6 +1173,18 @@ def apply_B(g, nameops, log):
                 gparts = newparts
                 grounded = ";".join(gparts)
                 gm = _reparse()
+            # COLUMN-pair SPAN UNIFICATION (measured on 347ef137): cat A3:A14 (label tail trimmed —
+            # the totals row has a blank label) with val I3:I15 (the grand total IS numeric, so the
+            # empty-trim keeps it) = mismatched series lengths; LO then saves a chart the evaluator
+            # can't match. Two vertical parts sharing a start row must be row-aligned — both end at
+            # the SHORTER extent (rows without a category label aren't categories). Mirror of the
+            # row-pair unification below.
+            if len(gm) == 2 and all(m and m.group(1).upper() == m.group(3).upper() for m in gm) and \
+               gm[0].group(2) == gm[1].group(2) and gm[0].group(4) != gm[1].group(4):
+                lo_end = min(int(gm[0].group(4)), int(gm[1].group(4)))
+                gparts = ["%s%s:%s%d" % (m.group(1), m.group(2), m.group(3), lo_end) for m in gm]
+                grounded = ";".join(gparts)
+                gm = _reparse()
             # ROW-pair SPAN UNIFICATION: same start column, different end columns (cat B1:G1 with
             # val B12:F12 — a sloppy draw) dodges the same-span grounding below and saves refs the
             # evaluator can't match (measured, round-2 sweep). Rebuild both parts over the UNION
@@ -926,11 +1205,13 @@ def apply_B(g, nameops, log):
             if len(gm) == 2 and all(m and m.group(2) == m.group(4) for m in gm) and \
                gm[0].group(1) == gm[1].group(1) and gm[0].group(3) == gm[1].group(3):
                 info_ = live.get(nop.get("sheet")) or {}
-                last_row = info_.get("data_start", 2) + info_.get("rows", 0) - 1
+                crg = _range_region(info_, gparts[0])   # multi-table: re-anchor within the chart's OWN table
+                cds = crg["data_start"] if crg else info_.get("data_start", 2)
+                last_row = crg["row1"] if crg else info_.get("data_start", 2) + info_.get("rows", 0) - 1
                 rr_ = g.client("read", {"sheet": nop.get("sheet"), "range": gparts[1]})
                 row_ = (rr_.get("cells") or [[]])[0]
                 if info_ and row_ and all(v in (None, "") for v in row_) and \
-                   int(gm[1].group(2)) != last_row and last_row >= info_.get("data_start", 2):
+                   int(gm[1].group(2)) != last_row and last_row >= cds:
                     gparts[1] = "%s%d:%s%d" % (gm[1].group(1), last_row, gm[1].group(3), last_row)
                     grounded = ";".join(gparts)
                     gm = _reparse()
@@ -968,6 +1249,14 @@ def apply_B(g, nameops, log):
             op = {"op": "create_chart", "sheet": nop.get("sheet"), "ranges": grounded,
                   "type": nop.get("type", "line"), "title": nop.get("title", ""),
                   "data_in": data_in, "name": cname}
+            # EXTENT-AWARE PLACEMENT (2026-07-04, user direction): a chart goes BESIDE the data —
+            # right of the used columns, vertically aligned with its own range's top row (matches
+            # how the human-made golds sit; two per-table charts land beside their own tables
+            # instead of stacking on the data). Position is unscored; this is document hygiene.
+            info_p = live.get(nop.get("sheet")) or {}
+            mtop = re.match(r"[A-Za-z]+(\d+)", gparts[0]) if gparts else None
+            op["anchor_col"] = len(info_p.get("cols", [])) + 1      # one clear column right of the data
+            op["anchor_row"] = max((int(mtop.group(1)) if mtop else 1) - 1, 0)
             rr = g.client("apply", {"op": op})
             if not rr.get("ok"):
                 fails.append({"name": nop.get("ranges"), "why": "apply error: %s" % rr.get("error", "")[:80]})
@@ -1044,7 +1333,7 @@ def semantic_col(sheet, name, live):
     info = live.get(sheet)
     if not info:
         return None
-    cols = [(c["letter"], c["header"].strip()) for c in info["cols"] if c["header"].strip()]
+    cols = [(c["letter"], c["header"].strip()) for c in _sheet_cols(info) if c["header"].strip()]
     if not cols:
         return None
     qv = _embed(name.strip())
@@ -1063,26 +1352,47 @@ def semantic_col(sheet, name, live):
         return scored[0][1]
     return None
 
-def resolve_name(sheet, name, detected, fails):
+def resolve_name(sheet, name, detected, fails, region=None):
     """Exact, unique header match → column letter. Ambiguous/missing → None (fail-closed, logged)."""
+    res = resolve_col(sheet, name, detected, fails, region)
+    return res[0] if res else None
+
+def resolve_col(sheet, name, detected, fails, region=None, write_target=False):
+    """resolve_name with region identity: → (letter, region_idx|None). On a multi-table sheet the search
+    space is the UNION of region candidates; a `region` context restricts duplicate headers to that table
+    FIRST (row-aligned binding — a compute over table 2 must mean table 2's 'Marks'), else duplicates
+    across tables stay fail-closed exactly like duplicates within a sheet."""
     if name is None:
         return None
     if name.strip().startswith("#"):                      # candidate-selection by index
         res = _index_col(sheet, name.strip()[1:], detected, fails)
-        return res[1] if res else None
+        return (res[1], None) if res else None
     want = name.strip().lower()
     info = detected.get(sheet)
     if not info:
         fails.append({"name": name, "why": "unknown sheet %r" % sheet}); return None
-    hits = [c["letter"] for c in info["cols"] if c["header"].strip().lower() == want]
+    cands = _sheet_cols(info)
+    hits = [c for c in cands if c["header"].strip().lower() == want]
+    if len(hits) > 1 and region is not None:
+        rhits = [c for c in hits if c.get("region") == region]
+        if rhits:
+            hits = rhits
+    if len(hits) > 1 and write_target:
+        # Class B grounding (ablatable, WRITE targets only — 7e429b8d: 'Officer Name' heads both the
+        # filled lookup table AND the empty form column): among duplicate headers, exactly ONE column
+        # observed empty = the only fill that doesn't clobber source data — bind to it. Read targets
+        # never take this path (they stay fail-closed on duplicates).
+        empt = [c for c in hits if all(_blank(s) for s in (c.get("samples") or [None]))]
+        if len(empt) == 1:
+            hits = empt
     if len(hits) == 1:
-        return hits[0]
+        return (hits[0]["letter"], hits[0].get("region"))
     lc = _letter_col(sheet, name.strip(), detected)    # column-letter target notation
     if lc:
-        return lc[1]
+        return (lc[1], region)
     sem = semantic_col(sheet, name, detected)          # latent-binding fallback (margin-gated, fail-closed)
     if sem:
-        return sem
+        return (sem, None)
     fails.append({"name": name, "sheet": sheet, "why": "%d header matches (need exactly 1)" % len(hits)})
     return None
 
@@ -1104,12 +1414,13 @@ def _index_col(sheet, idx_str, detected, fails):
     """Candidate-selection by index: {#N} → the Nth (1-based) detected column of `sheet`. Always lands on
     a REAL column (or fail-closed if out of range) — the model cannot invent a column."""
     info = detected.get(sheet)
+    cols = _sheet_cols(info)
     try:
         n = int(idx_str)
     except (ValueError, TypeError):
         fails.append({"name": "#%s" % idx_str, "why": "non-integer index"}); return None
-    if info and 1 <= n <= len(info["cols"]):
-        return (sheet, info["cols"][n - 1]["letter"])
+    if info and 1 <= n <= len(cols):
+        return (sheet, cols[n - 1]["letter"])
     fails.append({"name": "#%s" % idx_str, "sheet": sheet, "why": "index out of range"}); return None
 
 def _letter_col(sheet, token, detected):
@@ -1119,52 +1430,66 @@ def _letter_col(sheet, token, detected):
     if not info or not re.fullmatch(r"[A-Za-z]+", token):
         return None
     L = token.upper()
-    letters = [c["letter"] for c in info["cols"]]
-    if L in letters and not any(c["header"].strip().upper() == L for c in info["cols"]):
+    cols = _sheet_cols(info)
+    letters = [c["letter"] for c in cols]
+    if L in letters and not any(c["header"].strip().upper() == L for c in cols):
         return (sheet, L)
     return None
 
-def resolve_ref(token, default_sheet, detected, fails):
+def resolve_ref(token, default_sheet, detected, fails, region=None):
     """Resolve a formula reference to (sheet, letter), accepting ANY unambiguous notation — the harness
     owns notation so the model's choice of style can't break correctness. Order per sheet: exact unique
     HEADER → column LETTER ({B}) → index ({#N}); bare names also try WORKBOOK-WIDE unique header. Ambiguous
     /missing → None (fail-closed, logged). Sound: letters+indices are unique; headers fail-closed on dup."""
+    res = resolve_ref_full(token, default_sheet, detected, fails, region)
+    return (res[0], res[1]) if res else None
+
+def resolve_ref_full(token, default_sheet, detected, fails, region=None):
+    """resolve_ref with region identity: → (sheet, letter, region_idx|None). `region` = the referencing
+    op's table context on a multi-table sheet — duplicate headers bind within it first (row-aligned),
+    else fail-closed as ever."""
     token = token.strip()
     if "." in token:
         sh, _, hdr = token.partition(".")
         sh = sh.strip(); hdr = hdr.strip()
         if hdr.startswith("#"):
-            return _index_col(sh, hdr[1:], detected, fails)
+            res = _index_col(sh, hdr[1:], detected, fails)
+            return (res[0], res[1], None) if res else None
         info = detected.get(sh)
         if not info:
             fails.append({"name": token, "why": "unknown sheet %r" % sh}); return None
-        hits = [c["letter"] for c in info["cols"] if c["header"].strip().lower() == hdr.lower()]
+        hits = [c for c in _sheet_cols(info) if c["header"].strip().lower() == hdr.lower()]
         if len(hits) == 1:
-            return (sh, hits[0])
+            return (sh, hits[0]["letter"], hits[0].get("region"))
         lc = _letter_col(sh, hdr, detected)
         if lc:
-            return lc
+            return (lc[0], lc[1], None)
         fails.append({"name": token, "sheet": sh, "why": "%d header matches (need 1)" % len(hits)}); return None
     if token.startswith("#"):
-        return _index_col(default_sheet, token[1:], detected, fails)
+        res = _index_col(default_sheet, token[1:], detected, fails)
+        return (res[0], res[1], None) if res else None
     want = token.lower()
     info = detected.get(default_sheet)
     if info:
-        hits = [c["letter"] for c in info["cols"] if c["header"].strip().lower() == want]
+        hits = [c for c in _sheet_cols(info) if c["header"].strip().lower() == want]
+        if len(hits) > 1 and region is not None:
+            rhits = [c for c in hits if c.get("region") == region]
+            if rhits:
+                hits = rhits
         if len(hits) == 1:
-            return (default_sheet, hits[0])
+            return (default_sheet, hits[0]["letter"], hits[0].get("region"))
         if len(hits) > 1:
             fails.append({"name": token, "sheet": default_sheet, "why": "%d on-sheet matches" % len(hits)}); return None
-    allhits = [(s, c["letter"]) for s, i in detected.items()
-               for c in i["cols"] if c["header"].strip().lower() == want]
+    allhits = [(s, c["letter"], c.get("region")) for s, i in detected.items()
+               for c in _sheet_cols(i) if c["header"].strip().lower() == want]
     if len(allhits) == 1:
         return allhits[0]
     lc = _letter_col(default_sheet, token, detected)   # column-letter notation, default sheet
     if lc:
-        return lc
+        return (lc[0], lc[1], region)
     sem = semantic_col(default_sheet, token, detected)  # latent-binding fallback (margin-gated, fail-closed)
     if sem:
-        return (default_sheet, sem)
+        return (default_sheet, sem, None)
     fails.append({"name": token, "why": "%d workbook matches (need exactly 1)" % len(allhits)}); return None
 
 CELLREF = re.compile(r"(?:([^\s!(){}'\"+\-*/,=<>]+)!)?\$?([A-Za-z]{1,3})\$?(\d+)")
@@ -1183,7 +1508,7 @@ def ground_result_date_type(g, sheet, a1, rng, live):
     header refs and raw A2-style refs). Only ACTS on a positive match; silent + harmless otherwise."""
     seen = set()
     def hdr_of(s2, l2):
-        col = next((c for c in live.get(s2, {}).get("cols", []) if c["letter"] == l2), None)
+        col = next((c for c in _sheet_cols(live.get(s2, {})) if c["letter"] == l2), None)
         return (col.get("header") if col else "") or ""
     def is_date_word(h):
         return "date" in h.lower()
@@ -1198,7 +1523,7 @@ def ground_result_date_type(g, sheet, a1, rng, live):
         if (s2, l2) in seen:
             continue
         seen.add((s2, l2))
-        col = next((c for c in live.get(s2, {}).get("cols", []) if c["letter"] == l2), None)
+        col = next((c for c in _sheet_cols(live.get(s2, {})) if c["letter"] == l2), None)
         if col and (col.get("ntype") == "date" or is_date_word(col.get("header") or "")):
             declared_date = True
     if not declared_date:
@@ -1220,6 +1545,9 @@ def clamp_range_to_data(rng, sheet, live):
     range. Leaves non-rectangular / unparseable ranges untouched (fail-open)."""
     m = re.match(r"([A-Za-z]+)(\d+):([A-Za-z]+)(\d+)$", (rng or "").replace("$", ""))
     last = live.get(sheet, {}).get("rows")
+    rg = _range_region(live.get(sheet), rng)
+    if rg:
+        last = rg["row1"]                       # multi-table: clamp to the range's OWN table, not the sheet
     if not m or not last:
         return rng
     if int(m.group(4)) > last:
@@ -1271,11 +1599,14 @@ def ground_chart_ranges(ranges, sheet, live):
             # Column-oriented (each part one vertical column) — already structured; the row-rebuild
             # below would shred it. ONE grounding applies: a part that STARTS at the header row is
             # the model including the label in the series — shift its start to the first data row
-            # (the saved chart keys header-free refs; the gold shape).
-            hrow = live.get(sheet, {}).get("header_row", 1)
-            ds = live.get(sheet, {}).get("data_start", hrow + 1)
+            # (the saved chart keys header-free refs; the gold shape). Multi-table: each part's OWN
+            # table decides its header row (a part anchored in the second stacked table must shift
+            # against THAT table's header, not the sheet's).
             out = []
-            for m in m2:
+            for p, m in zip(parts, m2):
+                rg = _range_region(live.get(sheet), p)
+                hrow = rg["header_row"] if rg else live.get(sheet, {}).get("header_row", 1)
+                ds = rg["data_start"] if rg else live.get(sheet, {}).get("data_start", hrow + 1)
                 start = ds if int(m.group(2)) == hrow else int(m.group(2))
                 out.append("%s%d:%s%s" % (m.group(1), start, m.group(3), m.group(4)))
             return ";".join(out)
@@ -1285,6 +1616,9 @@ def ground_chart_ranges(ranges, sheet, live):
     cols = sorted({_col_idx(c) for c, _ in refs})
     rows = sorted({int(r) for _, r in refs})
     hrow = live.get(sheet, {}).get("header_row", 1)
+    rg = _range_region(live.get(sheet), "%s%d" % (col_letter(cols[0]), rows[0]))
+    if rg:
+        hrow = rg["header_row"]                 # multi-table: the referenced table's own header row
     datarows = [r for r in rows if r != hrow]
     if not datarows or len(cols) < 2:
         return ranges
@@ -1302,7 +1636,7 @@ def ground_bare_refs(formula, sheet, live):
     bind surface (the advisor's break cases): skip a name inside a "string literal", in function position
     (name immediately followed by '('), or already braced; match the LONGEST header first so a short header
     ("Sales") never lands inside a longer one ("Sales Tax"). Returns the formula with natural refs braced."""
-    cols = live.get(sheet, {}).get("cols", [])
+    cols = _sheet_cols(live.get(sheet, {}))
     headers = sorted({c["header"].strip() for c in cols if c["header"].strip()}, key=len, reverse=True)
     out = formula
     for h in headers:
@@ -1314,7 +1648,7 @@ def ground_bare_refs(formula, sheet, live):
             out = out[:m.start()] + "{" + m.group(0) + "}" + out[m.end():]
     return out
 
-def substitute_names(formula, default_sheet, detected, fails, row, refsheets=None):
+def substitute_names(formula, default_sheet, detected, fails, row, refsheets=None, region=None):
     """Replace {Header} / {Sheet.Header} with A1 refs at the given row. Cross-sheet refs use the proven
     Excel `Sheet!Cell` syntax. Fail-closed: any braced token that doesn't uniquely resolve aborts (None).
     NOTE (2026-06-23): we deliberately do NOT resolve BARE (unbraced) column names. A bare name is an
@@ -1324,13 +1658,16 @@ def substitute_names(formula, default_sheet, detected, fails, row, refsheets=Non
     not a post-hoc guess here. refsheets (if given) collects every sheet the formula references."""
     aborted = [False]
     def repl(m):
-        res = resolve_ref(m.group(1).strip(), default_sheet, detected, fails)
+        res = resolve_ref_full(m.group(1).strip(), default_sheet, detected, fails, region=region)
         if res is None:
             aborted[0] = True; return m.group(1)
-        sh, letter = res
+        sh, letter, reg = res
         if refsheets is not None:
             refsheets.add(sh)
         r = detected.get(sh, {}).get("data_start", row)   # each ref uses its own sheet's first data row
+        rg = _region_of_col(detected.get(sh), letter, region_hint=reg)
+        if rg is not None:                                # multi-table: the ref's own TABLE sets the row
+            r = rg["data_start"]
         ref = "%s%d" % (letter, r)
         return ref if sh == default_sheet else "%s!%s" % (sh, ref)
     out = NAME_TOK.sub(repl, formula)
@@ -1352,12 +1689,14 @@ def falsify_empty_named_targets(g, instr, nameops=()):
     written_texts = {str(v).strip().lower() for o in (nameops or ()) for v in o.values()
                      if isinstance(v, str) and len(v.strip()) >= 3}
     for sheet, info in live_detect(g).items():
-        ds = info.get("data_start", 2)
-        last = ds + info.get("rows", 0) - 1
-        if last < ds:
-            continue
-        headers_all = [str(cc.get("header") or "").strip() for cc in info.get("cols", [])]
-        for c in info.get("cols", []):
+        cols_all = _sheet_cols(info)                  # multi-table: every table's columns are named targets
+        headers_all = [str(cc.get("header") or "").strip() for cc in cols_all]
+        for c in cols_all:
+            rg = _region_of_col(info, c["letter"], region_hint=c.get("region"))
+            ds = rg["data_start"] if rg else info.get("data_start", 2)
+            last = rg["row1"] if rg else ds + info.get("rows", 0) - 1
+            if last < ds:
+                continue
             h = str(c.get("header") or "").strip()
             if len(h) < 3 or h.lower() in written_texts:
                 continue
@@ -1380,6 +1719,15 @@ def falsify_empty_named_targets(g, instr, nameops=()):
             if vals and all(v in (None, "") for v in vals):
                 fired.append({"falsifier": "named_target_empty",
                               "range": "'%s' (column %s on %s)" % (h, c["letter"], sheet)})
+            elif len(vals) >= 3 and vals[0] not in (None, "") and \
+                    all(v in (None, "") for v in vals[1:]):
+                # PARTIAL FILL (measured on 7e429b8d): the model authors a correct formula, sets it in
+                # the FIRST data cell and says "drag the fill handle down" — an intent no emitted op
+                # carries; the column's remaining rows stay empty and nothing detected it. A goal-named
+                # column with ONLY its top data cell filled = an unfinished deliverable. Under-claims
+                # and nags only — never a false pass.
+                fired.append({"falsifier": "column_fill_incomplete",
+                              "range": "'%s' (column %s on %s, rows %d-%d)" % (h, c["letter"], sheet, ds, last)})
     return fired
 
 def falsify(g, written_regions):
@@ -1488,11 +1836,13 @@ def corroborate(g, instr, detected, der1_written, mainlog):
     der2_f = {}
     for nop in der2:
         if nop["kind"] == "compute_column":
-            tcol = resolve_name(nop["sheet"], nop["target"], live, [])
-            if tcol:
-                ds = live.get(nop["sheet"], {}).get("data_start", 2)
+            tres = resolve_col(nop["sheet"], nop["target"], live, [])
+            if tres:
+                tcol, treg = tres
+                rg = _region_of_col(live.get(nop["sheet"]), tcol, region_hint=treg)
+                ds = rg["data_start"] if rg else live.get(nop["sheet"], {}).get("data_start", 2)
                 der2_f[(nop["sheet"], tcol)] = substitute_names(nop["formula"].replace("'", '"'),
-                                                                nop["sheet"], live, [], row=ds)
+                                                                nop["sheet"], live, [], row=ds, region=treg)
     agree, detail = True, []
     for (sheet, rng, f1) in der1_written:
         col = re.match(r"[A-Za-z]+", rng).group(0)
@@ -1577,7 +1927,7 @@ def run_core(g, task, cond, file_path, log, score_fn):
                 nameops = [n for n in nameops if n.get("kind") != "format_cells"]
             carried = nameops
             log["nameops"] = nameops
-            written, resolve_fails = apply_B(g, nameops, log)
+            written, resolve_fails = apply_B(g, nameops, log, instr)
             fired = falsify(g, written) + falsify_empty_named_targets(g, instr, nameops)
             log["n_ops"] = len(nameops)
             if nameops and not resolve_fails and not fired and not gaps:
@@ -1589,7 +1939,7 @@ def run_core(g, task, cond, file_path, log, score_fn):
             # ADD-type notes (missing ops / empty chart data / unfilled named targets) need the
             # additive retry stance.
             additive = bool(gaps) or any("EMPTY" in f.get("why", "") for f in resolve_fails) or \
-                any(f.get("falsifier") == "named_target_empty" for f in fired)
+                any(f.get("falsifier") in ("named_target_empty", "column_fill_incomplete") for f in fired)
             log.setdefault("feedbacks", []).append(feedback)
         log["attempts"] = attempt + 1
 
@@ -1631,7 +1981,7 @@ def run_core(g, task, cond, file_path, log, score_fn):
                     applied.append((nop, "WITHHELD: your analysis styles only cells matching a "
                                          "condition — use format_cells_where"))
                     continue
-                w2, f2 = apply_B(g, [nop], log)
+                w2, f2 = apply_B(g, [nop], log, instr)
                 written += w2
                 steps_taken += 1
                 if f2:
@@ -1665,7 +2015,7 @@ def run_core(g, task, cond, file_path, log, score_fn):
             # (guarded creates, replace-by-name charts, deterministic pivot names, overwrite
             # writes), so ONE full re-apply in dependency order resolves every such case.
             if steps_taken:
-                w3, _refails = apply_B(g, merge_nameops([], nameops), log)
+                w3, _refails = apply_B(g, merge_nameops([], nameops), log, instr)
                 written += w3
             fired = falsify(g, written) + falsify_empty_named_targets(g, instr, nameops)
 
