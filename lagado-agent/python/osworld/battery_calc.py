@@ -99,11 +99,16 @@ def segment_regions(grid, ncols, coltypes=(), colfmt=()):
             # ends at row 7 while the D:F table beside it runs to 12)
             rr1 = max(r for r in range(r0, r1 + 1)
                       if any(not _blank(cell(r, cc)) for cc in range(c0, c1 + 1)))
-            # title: a lone leading text cell spanning nothing else (347ef137 'Personal Costs - 2019')
+            # title: a lone leading text cell spanning nothing else (347ef137 'Personal Costs - 2019').
+            # MULTI-COLUMN regions only: in a 1-column region EVERY row has exactly one cell, so the
+            # heuristic ate the real header and promoted the first data VALUE to header (measured on
+            # abed40dc: 'Names with Duplicates' became a title, 'Keira Daily' became the header, and
+            # the model's value-reference then bound lexically — the true abed40dc breakage, earlier
+            # misattributed to decode variance).
             title, hr0 = None, r0
             first_vals = [cell(r0, cc) for cc in range(c0, c1 + 1)]
             nonblank = [v for v in first_vals if not _blank(v)]
-            if rr1 > r0 and len(nonblank) == 1 and isinstance(nonblank[0], str):
+            if rr1 > r0 and c1 > c0 and len(nonblank) == 1 and isinstance(nonblank[0], str):
                 title, hr0 = nonblank[0].strip(), r0 + 1
             sub = [[cell(r, cc) for cc in range(c0, c1 + 1)] for r in range(hr0, rr1 + 1)]
             hrow = hr0 + find_header_row(sub) - 1     # absolute 1-based header row
@@ -290,6 +295,7 @@ GRAMMAR_B = (
     ' | "format_cells_where(sheet=" str ", match=" str ", fill_color=" str ", font_color=" str ", range=" str ")"'
     ' | "set_decimal_separator(sheet=" str ", separator=" str ")"'
     ' | "export_pdf(sheet=" str ", name=" str ", fit_pages=" str ")"'
+    ' | "set_zoom(sheet=" str ", percent=" str ")"'
     ' | "dedup_column(sheet=" str ", source=" str ", target=" str ")"'
     ' | "infeasible(reason=" str ")"\n'
     'str ::= "\\"" [^"\\\\]* "\\""\n'
@@ -372,6 +378,7 @@ EMIT_PROMPT = (
     "  format_cells_where(sheet=\"S\", match=\"weekend\", fill_color=\"#rrggbb\", font_color=\"\", range=\"\")  style every cell matching a predicate: \"weekend\" = dates on Saturday/Sunday, \"max\" = the largest number, any other match = exact cell text; range=\"{{Header}}\" or A1 range limits the scan (\"\" = whole sheet)\n"
     "  set_decimal_separator(sheet=\"S\", separator=\",\")    display ALL numbers with this decimal separator (localized format; values stay numbers)\n"
     "  export_pdf(sheet=\"S\", name=\"\", fit_pages=\"1\")      export as a PDF next to the document, scaled to fit N pages (name=\"\" keeps the document's file name)\n"
+    "  set_zoom(sheet=\"S\", percent=\"100\")               set the sheet's view zoom percentage\n"
     "  dedup_column(sheet=\"S\", source=\"{{Header1}}\", target=\"{{Header2}}\")  copy the source column's UNIQUE values into the target column, keeping first-occurrence order\n"
     "  infeasible(reason=\"...\")                          ONLY if the request cannot be done in this application at all — emit it ALONE (no other operations) and state why\n\n"
     "Refer to columns by {{Header}} name where a name is asked; use A1 cell refs for ranges. "
@@ -450,7 +457,7 @@ def resample_divergence(g, instr, nameops, written, resolve_fails, fired, gaps, 
         if gp == "conditional_format":
             continue                              # owned by the pre-apply withhold, not resample
         n = 1
-        if gp.startswith("chart_count:"):
+        if gp.startswith(("chart_count:", "pivot_count:")):
             n = max(int(gp.split(":")[1]) - int(gp.split(":")[2]), 1)
         faults.extend([("gap", gp)] * n)
     faults += [("fail", f) for f in resolve_fails if "entirely EMPTY" not in f.get("why", "")]
@@ -497,7 +504,8 @@ def resample_divergence(g, instr, nameops, written, resolve_fails, fired, gaps, 
     w3, refails = apply_B(g, merge_nameops([], nameops), log, instr)
     written += w3
     # RE-VERIFY: the observation decides the exit, not the resample's say-so.
-    fired = falsify(g, written) + falsify_empty_named_targets(g, instr, nameops)
+    fired = falsify(g, written) + falsify_empty_named_targets(g, instr, nameops) + \
+        falsify_style_contract(instr, nameops)
     gaps = emit_gaps(log.get("reasoning", ""), nameops, instr)
     if "conditional_format" in gaps:
         gaps.remove("conditional_format")
@@ -531,6 +539,15 @@ def emit_gaps(reasoning, nameops, instr=""):
         gotn = len({(n.get("title"), n.get("ranges")) for n in nameops if n.get("kind") == "create_chart"})
         if gotn < wantn:
             gaps.append("chart_count:%d:%d" % (wantn, gotn))
+    # PIVOT-COUNT completeness (Pile 2, 2026-07-05 — the chart_count machinery on its second
+    # ≥2-task class: 535364ea "two pivot tables" → one emitted; 30e3e107 "three pivot tables" →
+    # one emitted). Goal-stated numeral vs distinct create_pivot ops; fact-only feedback.
+    mpc = re.search(r"\b(two|three|four|2|3|4)\b[^.]{0,40}\bpivot tables?\b", (instr or "").lower())
+    if mpc and any(n.get("kind") == "create_pivot" for n in nameops):
+        wantn = {"two": 2, "three": 3, "four": 4, "2": 2, "3": 3, "4": 4}[mpc.group(1)]
+        gotn = len({_op_key(n) for n in nameops if n.get("kind") == "create_pivot"})
+        if gotn < wantn:
+            gaps.append("pivot_count:%d:%d" % (wantn, gotn))
     if "pivot" in r and not any(n.get("kind") == "create_pivot" for n in nameops):
         gaps.append("pivot")
     # TOTAL-ROW completeness: the model's reasoning commits to a labeled total/sum ROW but no total_row op was
@@ -635,6 +652,9 @@ def gap_feedback(gaps):
         if gp.startswith("chart_count:"):
             wantn, gotn = gp.split(":")[1], gp.split(":")[2]
             lines.append("- the goal asks for %s charts; the document currently has %s." % (wantn, gotn))
+        elif gp.startswith("pivot_count:"):
+            wantn, gotn = gp.split(":")[1], gp.split(":")[2]
+            lines.append("- the goal asks for %s pivot tables; the emission has %s." % (wantn, gotn))
         elif gp.startswith("goal_literal:"):
             lines.append("- the goal asks for the text \"%s\" to be written, but no operation writes it. "
                          "Keep your other operations and ALSO emit set_cell(...) with that exact text at "
@@ -644,6 +664,25 @@ def gap_feedback(gaps):
                          "your other operations and ALSO emit merge_cells(sheet=\"S\", range=\"%s\")."
                          % (gp.split(":", 1)[1], gp.split(":", 1)[1]))
     return "\n".join(lines)
+
+def _balance_trailing_parens(f):
+    """HARNESS OWNS SYNTAX (Pile 2, 2026-07-05 — 37608790): grammar-constrained draws sometimes
+    append surplus trailing ')' (=TRIM(RIGHT(...))))  — LibreOffice stores the unparseable formula
+    as TEXT and the column never computes. Strip only SURPLUS closers at the very END, counted
+    outside string literals; balanced or under-closed formulas pass through unchanged."""
+    if not isinstance(f, str) or not f.lstrip().startswith("="):
+        return f
+    def balance(s):
+        d, inq = 0, False
+        for ch in s:
+            if ch == '"':
+                inq = not inq
+            elif not inq:
+                d += (ch == "(") - (ch == ")")
+        return d
+    while balance(f) < 0 and f.rstrip().endswith(")"):
+        f = f.rstrip()[:-1]
+    return f
 
 def _norm_quotes(f):
     """HARNESS OWNS SYNTAX: LibreOffice string literals need DOUBLE quotes; models emit single —
@@ -693,6 +732,9 @@ def compose_feedback(fails, fired):
         elif f["falsifier"] == "named_target_empty":
             lines.append("- the goal names the column %s but it is still ENTIRELY EMPTY — keep your other "
                          "operations and ALSO emit the operation that fills it." % f["range"])
+        elif f["falsifier"] == "style_contract":
+            lines.append("- the goal names the color %s for the property %s; no applied operation "
+                         "sets it." % tuple(f["range"].split(" ", 1)))
         elif f["falsifier"] == "column_fill_incomplete":
             lines.append("- the goal names the column %s; most of its data rows are still empty." % f["range"])
     return "\n".join(lines)
@@ -732,6 +774,12 @@ def static_defects(nameops, instr, detected):
     if mcount:
         wantn = {"two": 2, "three": 3, "four": 4, "2": 2, "3": 3, "4": 4}[mcount.group(1)]
         gotn = len({(o.get("title"), o.get("ranges")) for o in nameops if o.get("kind") == "create_chart"})
+        if 0 < gotn < wantn:
+            d += wantn - gotn
+    mpc = re.search(r"\b(two|three|four|2|3|4)\b[^.]{0,40}\bpivot tables?\b", low)
+    if mpc:
+        wantn = {"two": 2, "three": 3, "four": 4, "2": 2, "3": 3, "4": 4}[mpc.group(1)]
+        gotn = len({_op_key(o) for o in nameops if o.get("kind") == "create_pivot"})
         if 0 < gotn < wantn:
             d += wantn - gotn
     for sheet, info in (detected or {}).items():
@@ -796,7 +844,8 @@ def parse_B_nameops(text):
     verbs = ("compute_column", "set_cell", "add_sheet", "rename_sheet", "copy_sheet", "total_row",
              "format_cells", "merge_cells", "sort_range", "set_number_format", "create_chart", "create_pivot",
              "freeze_panes", "export_csv", "transpose_range", "reorder_columns", "hide_rows_where",
-             "format_cells_where", "set_decimal_separator", "export_pdf", "infeasible", "dedup_column")
+             "format_cells_where", "set_decimal_separator", "export_pdf", "infeasible", "dedup_column",
+             "set_zoom")
     for verb, body in scan_calls(text, verbs):
         kw = parse_kv(body)
         if verb == "add_sheet":
@@ -857,6 +906,8 @@ def parse_B_nameops(text):
         elif verb == "export_pdf":
             nameops.append({"kind": "export_pdf", "sheet": kw.get("sheet"), "name": kw.get("name", ""),
                             "fit_pages": kw.get("fit_pages", "1")})
+        elif verb == "set_zoom":
+            nameops.append({"kind": "set_zoom", "sheet": kw.get("sheet"), "percent": kw.get("percent", "100")})
         elif verb == "infeasible":
             nameops.append({"kind": "infeasible", "reason": kw.get("reason", "")})
         elif verb == "dedup_column":
@@ -979,7 +1030,44 @@ def apply_B(g, nameops, log, instr=""):
         elif k == "set_cell":
             v = nop["value"]
             if isinstance(v, str) and v.startswith("="):
-                v = _norm_quotes(v)               # formula-typed set: same quote ownership as compute
+                v = _balance_trailing_parens(_norm_quotes(v))   # same syntax ownership as compute
+            # DUPLICATE-HEADER WITHHOLD (Pile 2, 2026-07-05 — 37608790: the model wrote 'First
+            # Name'/'Last Name' into B2/C2, one row BELOW the real headers, then computed around
+            # them). A TEXT set equal to the target column's own detected header, landing anywhere
+            # but that header's row, duplicates structure the sheet already declares — withheld,
+            # fact relayed. Ablatable.
+            if isinstance(v, str) and v.strip() and not v.startswith("="):
+                mtc = re.match(r"([A-Za-z]+)(\d+)$", (nop.get("cell") or "").replace("$", ""))
+                info_t = live.get(nop.get("sheet")) or {}
+                if mtc:
+                    tl, trow = mtc.group(1).upper(), int(mtc.group(2))
+                    rg_t = _range_region(info_t, nop["cell"])
+                    hrow_t = rg_t["header_row"] if rg_t else info_t.get("header_row", 1)
+                    cands_t = (rg_t or info_t).get("cols", [])
+                    hdr_t = next((c["header"] for c in cands_t if c["letter"] == tl), "")
+                    if trow != hrow_t and str(hdr_t).strip() and \
+                       str(hdr_t).strip().casefold() == v.strip().casefold():
+                        log.setdefault("rejected_keys", []).append(_op_key(nop))
+                        fails.append({"name": nop.get("cell"),
+                                      "why": "not applied: %r is already the header of column %s (row %d)"
+                                             % (v.strip(), tl, hrow_t)})
+                        continue
+            # GOAL-ECHO WITHHOLD (Pile 2, 2026-07-05 — 1334ca3e: no verb existed for a zoom request,
+            # so the model fabricated the request's own words into virgin A1, corrupting an otherwise
+            # untouched sheet). A multi-word TEXT whose words ALL come from the instruction, and which
+            # the instruction does NOT quote as content-to-write, is narration — not document content.
+            # Withheld, fact relayed. Ablatable.
+            if isinstance(v, str) and v.strip() and not v.startswith("="):
+                words_v = re.findall(r"[a-z]{3,}", v.lower())
+                low_i = (instr or "").lower()
+                quoted = [q.lower() for q in re.findall(r'"([^"]{3,60})"', instr or "")]
+                if len(words_v) >= 3 and all(w in low_i for w in words_v) and \
+                   v.strip().lower() not in quoted:
+                    log.setdefault("rejected_keys", []).append(_op_key(nop))
+                    fails.append({"name": nop.get("cell"),
+                                  "why": "not applied: %r repeats the instruction wording; the "
+                                         "instruction does not ask for this text in a cell" % v.strip()})
+                    continue
             # OVERWRITE WITHHOLD — MULTI-TABLE SHEETS ONLY (measured on d681960f: the model wrote a
             # grade literal INTO the Marks column, clobbering observed data on a task that says
             # "don't touch irrelevant regions"). A set_cell landing on a cell that already holds a
@@ -1056,7 +1144,7 @@ def apply_B(g, nameops, log, instr=""):
             for s_ in live:
                 if " " in s_ and ("%s!" % s_) in formula and ("'%s'!" % s_) not in formula:
                     formula = formula.replace("%s!" % s_, "'%s'!" % s_)
-            formula = _norm_quotes(formula)
+            formula = _balance_trailing_parens(_norm_quotes(formula))
             # GROUND the model's NATURAL column references (2026-06-23): it names columns by the header it
             # perceived; we bind those names against the LIVE structure rather than demand the {brace} dialect.
             # ground_bare_refs braces only SOUND occurrences (guarded for literals/function-position/longest-
@@ -1181,7 +1269,7 @@ def apply_B(g, nameops, log, instr=""):
             live = live_detect(g)
         elif k in ("format_cells", "merge_cells", "set_number_format", "freeze_panes", "export_csv",
                    "transpose_range", "reorder_columns", "hide_rows_where", "format_cells_where",
-                   "set_decimal_separator", "export_pdf"):
+                   "set_decimal_separator", "export_pdf", "set_zoom"):
             if k == "format_cells_where":
                 # A {Header} (or bare header) range resolves to that column's data span — the model
                 # names the column it means; the harness owns the geometry (same fail-open contract
@@ -1461,6 +1549,24 @@ def semantic_col(sheet, name, live):
     info = live.get(sheet)
     if not info:
         return None
+    # VALUE-AS-REFERENCE REJECTION (Pile 2, 2026-07-05 — abed40dc): a token equal to an OBSERVED
+    # cell value is a value-reference, not a column-reference; binding it to a column is a mis-bind
+    # by construction (measured: source="Keira Daily" — a data cell — latent-bound to a column and
+    # the dedup landed rows off). Lexical header matches never reach here; this only guards the
+    # semantic fallback. Fail-closed: the fact lands in feedback and the retry re-references.
+    want_v = name.strip().casefold()
+    observed = set()
+    for c in _sheet_cols(info):
+        for s_ in (c.get("samples") or []):
+            if isinstance(s_, str) and s_.strip():
+                observed.add(s_.strip().casefold())
+    for rg_ in (info.get("regions") or []):
+        for row_ in (rg_.get("data") or []):
+            for s_ in row_:
+                if isinstance(s_, str) and s_.strip():
+                    observed.add(s_.strip().casefold())
+    if want_v in observed:
+        return None
     cols = [(c["letter"], c["header"].strip()) for c in _sheet_cols(info) if c["header"].strip()]
     if not cols:
         return None
@@ -1707,6 +1813,7 @@ EXISTING_SHEET_FIELDS = {
     "create_pivot": ["source"], "freeze_panes": ["sheet"], "export_csv": ["sheet"],
     "transpose_range": ["sheet"], "reorder_columns": ["sheet"], "hide_rows_where": ["sheet"],
     "format_cells_where": ["sheet"], "set_decimal_separator": ["sheet"], "export_pdf": ["sheet"],
+    "set_zoom": ["sheet"],
     "dedup_column": ["sheet"],
 }
 
@@ -1800,6 +1907,27 @@ def substitute_names(formula, default_sheet, detected, fails, row, refsheets=Non
         return ref if sh == default_sheet else "%s!%s" % (sh, ref)
     out = NAME_TOK.sub(repl, formula)
     return None if aborted[0] else out
+
+def falsify_style_contract(instr, nameops):
+    """STYLE-CONTRACT falsifier (2026-07-05 — 21ab7b40 FALSE-PASS: goal said 'green (#00ff00)
+    FONT', the op painted FILL; values corroborated, the claim gate passed, score 0). A hex color
+    the GOAL states verbatim next to a property word (font/fill/background) is a named deliverable;
+    if no applied style op carries that hex in that property, the claim is blocked. Op-log-grounded
+    and goal-verbatim — detects absence only, never confirms; wrong firings under-claim."""
+    fired = []
+    low = (instr or "").lower()
+    for m in re.finditer(r"#[0-9a-f]{6}", low):
+        hexv = m.group(0)
+        ctx = low[max(m.start() - 30, 0):m.end() + 30]
+        prop = "font_color" if "font" in ctx else \
+               ("fill_color" if ("fill" in ctx or "background" in ctx or "highlight" in ctx) else None)
+        if prop is None:
+            continue
+        ok = any(n.get("kind") in ("format_cells", "format_cells_where") and
+                 (n.get(prop) or "").strip().lower() == hexv for n in nameops)
+        if not ok:
+            fired.append({"falsifier": "style_contract", "range": "%s %s" % (hexv, prop)})
+    return fired
 
 # ── READ-BACK + SOUND FALSIFIERS (falsify only; pass ≠ correct) ──────────────────
 def falsify_empty_named_targets(g, instr, nameops=()):
@@ -2058,7 +2186,8 @@ def run_core(g, task, cond, file_path, log, score_fn):
             carried = nameops
             log["nameops"] = nameops
             written, resolve_fails = apply_B(g, nameops, log, instr)
-            fired = falsify(g, written) + falsify_empty_named_targets(g, instr, nameops)
+            fired = falsify(g, written) + falsify_empty_named_targets(g, instr, nameops) + \
+                falsify_style_contract(instr, nameops)
             log["n_ops"] = len(nameops)
             if nameops and not resolve_fails and not fired and not gaps:
                 break                            # emitted ops, no detected fault — stop (NOT a correctness
@@ -2143,7 +2272,8 @@ def run_core(g, task, cond, file_path, log, score_fn):
                     break
                 # OBSERVE: recompute the detected faults on the live document — the loop's exit is
                 # the OBSERVATION going clean, not the model's say-so.
-                fired = falsify(g, written) + falsify_empty_named_targets(g, instr, nameops)
+                fired = falsify(g, written) + falsify_empty_named_targets(g, instr, nameops) + \
+                    falsify_style_contract(instr, [o for o, _n in applied])
                 gaps = emit_gaps(log.get("reasoning", ""), [o for o, _n in applied], instr)
                 problems = (compose_feedback(resolve_fails, fired) + "\n" + gap_feedback(gaps)).strip()
                 if not problems:
@@ -2159,7 +2289,8 @@ def run_core(g, task, cond, file_path, log, score_fn):
             if steps_taken:
                 w3, _refails = apply_B(g, merge_nameops([], nameops), log, instr)
                 written += w3
-            fired = falsify(g, written) + falsify_empty_named_targets(g, instr, nameops)
+            fired = falsify(g, written) + falsify_empty_named_targets(g, instr, nameops) + \
+                falsify_style_contract(instr, nameops)
 
     log["falsifiers_fired"] = fired
     no_fault = (len(written) > 0 and len(fired) == 0 and len(resolve_fails) == 0)

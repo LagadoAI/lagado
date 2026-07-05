@@ -325,6 +325,13 @@ class Daemon:
                     uno_ops.patch_xlsx_freeze(os.path.abspath(self.file), o.get("sheet"), fc, fr)
                 except Exception as e:
                     patch_err = "freeze patch: %s" % e   # store succeeded; report, don't fail it
+            # Zoom is VIEW state like freeze — re-impose any logged set_zoom on the saved file.
+            if o.get("op") == "set_zoom":
+                try:
+                    uno_ops.patch_xlsx_zoom(os.path.abspath(self.file), o.get("sheet"),
+                                            o.get("percent", "100"))
+                except Exception as e:
+                    patch_err = "zoom patch: %s" % e     # store succeeded; report, don't fail it
             # LO's export drops programmatic font colors — re-impose them on the saved file for
             # the cells the op actually matched (recorded by apply_one_op).
             if o.get("op") in ("format_cells_where", "format_cells") and \

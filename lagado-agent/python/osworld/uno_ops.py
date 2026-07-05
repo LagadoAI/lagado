@@ -547,6 +547,14 @@ def apply_one_op(doc, resolve_sheet, op):
                 chart.HasMainTitle = True; chart.Title.String = op["title"]
             except Exception:
                 pass
+    elif kind == "set_zoom":
+        # Zoom is VIEW state (the freeze_panes finding: headless LO has no view, a store drops it).
+        # Validate here so a bad percent fails the op loudly; the actual write happens as a
+        # zip-patch on the SAVED file at reconcile (patch_xlsx_zoom), the exact record the
+        # evaluator's openpyxl zoom rule reads.
+        p = int(float(str(op.get("percent", "100")).strip().rstrip("%") or 100))
+        if not (10 <= p <= 400):
+            raise ValueError("zoom percent out of range: %r" % op.get("percent"))
     elif kind == "create_pivot":
         # Build a DataPilot (the app's Pivot Table) so the saved xlsx carries an OOXML pivotTable part the
         # evaluator reads back via worksheet._pivots. Field columns are 0-based indices INTO the source range
@@ -677,6 +685,54 @@ def patch_xlsx_freeze(path, sheet_name, cols, rows):
     with _zip.ZipFile(tmp, "w", _zip.ZIP_DEFLATED) as z:
         for n in names:
             z.writestr(n, contents[n])
+    _os.replace(tmp, path)
+
+
+def patch_xlsx_zoom(path, sheet_name, percent):
+    """Write a view zoom percentage into a SAVED xlsx (stdlib-only, guest-safe — the freeze_panes
+    zip-patch family). Zoom lives in <sheetView zoomScale="N" zoomScaleNormal="N">; headless LO
+    drops view state on store. sheet_name None/''/unknown → first sheet. Idempotent."""
+    import os as _os
+    import re as _re
+    import zipfile as _zip
+    p = int(float(str(percent or 100).strip().rstrip("%") or 100))
+    with _zip.ZipFile(path) as z:
+        names = z.namelist()
+        contents = {n: z.read(n) for n in names}
+    wb = contents["xl/workbook.xml"].decode("utf-8")
+    rels = contents["xl/_rels/workbook.xml.rels"].decode("utf-8")
+    sheets = []
+    for tag in _re.findall(r"<sheet\b[^>]*>", wb):
+        nm = _re.search(r'name="([^"]*)"', tag)
+        rid = _re.search(r'r:id="([^"]*)"', tag)
+        if nm and rid:
+            sheets.append((nm.group(1), rid.group(1)))
+    if not sheets:
+        return
+    rid = next((r for n, r in sheets if n == (sheet_name or "")), sheets[0][1])
+    tgt = None
+    for tag in _re.findall(r"<Relationship\b[^>]*>", rels):
+        if 'Id="%s"' % rid in tag:
+            m = _re.search(r'Target="([^"]*)"', tag)
+            tgt = m.group(1) if m else None
+            break
+    if not tgt:
+        return
+    sheet_path = tgt.lstrip("/") if tgt.startswith("/") else "xl/" + tgt
+    if sheet_path not in contents:
+        return
+    xml = contents[sheet_path].decode("utf-8")
+    def _set_zoom_attrs(mv):
+        tag = _re.sub(r'\szoomScale(?:Normal)?="[^"]*"', "", mv.group(1))
+        return tag + ' zoomScale="%d" zoomScaleNormal="%d"' % (p, p) + mv.group(2)
+    xml, n = _re.subn(r"(<sheetView\b[^>/]*?)(\s*/?>)", _set_zoom_attrs, xml, count=1)
+    if not n:
+        return
+    contents[sheet_path] = xml.encode("utf-8")
+    tmp = path + ".zoomtmp"
+    with _zip.ZipFile(tmp, "w", _zip.ZIP_DEFLATED) as z:
+        for nn in names:
+            z.writestr(nn, contents[nn])
     _os.replace(tmp, path)
 
 

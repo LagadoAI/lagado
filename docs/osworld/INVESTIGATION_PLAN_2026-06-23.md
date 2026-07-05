@@ -6,6 +6,34 @@
 > command below. The `.md` docs stayed here. PYTHONPATH accordingly:
 > `PYTHONPATH=/home/alucard/projects/OSWorld:/home/alucard/projects/lagado/lagado-agent/python/osworld`.
 
+## ════ TURN-14 STATE — 2026-07-05 — PILES 1-2 BUILT: 20/30 GOLD; STYLE-CONTRACT FALSE-PASS CLOSED ════
+**LEVER TAXONOMY RATIFIED (memory lagado-propose-verify-doctrine): Pile 1 interface-faithfulness KEEP;
+Pile 2 general emission-defect repairs KEEP (the transferable capability); Pile 3 goal-dialect rules
+FROZEN (no new without ≥2-task class). Accepted cost: host caps ~22-24 without Pile 3.**
+**BUILT (Piles 1-2): MILESTONE SWEEP 20/30 GOLD** (+1334ca3e +abed40dc +1d17d234 +8b1ce5f2 over the 17
+floor; aa3a8974 render-skip). Levers, each measured: value-as-reference rejection in semantic_col
+(abed40dc: "Keira Daily" was latent-bound); _balance_trailing_parens (37608790 ')))'-formula stored as
+text); duplicate-header withhold (37608790 wrote 'First/Last Name' INTO B2/C2); goal-echo withhold
+(1334ca3e fabricated the request text into virgin A1); pivot_count gap+static defect (chart_count's 2nd
+class: 535364ea/30e3e107); **set_zoom verb + patch_xlsx_zoom** (zoom is VIEW state — the freeze-panes
+zip-patch family; evaluator rule = zoomScale<260; model emitted it FIRST TRY once the verb existed);
+**single-column TITLE-GUARD in segment_regions** — a 1-col region's every row has one cell, so the
+title heuristic ATE the header and promoted 'Keira Daily' (a data value) to header — the TRUE abed40dc
+breakage, previously misattributed to decode variance. PIVOT EVIDENCE: both pivot evaluators compare
+STRUCTURE only (row/col/data fields via openpyxl._pivots) — placement/Filter-cell artifacts unscored;
+the planned dest-stacking geometry was scrapped before building (evidence beats plan).
+**INTEGRITY: the milestone sweep itself contained a REAL FALSE-PASS (21ab7b40 self_done over score 0 —
+goal said '#00ff00 FONT', op painted FILL; corroboration sees only written cells, style invisible)
+→ falsify_style_contract (goal-verbatim hex + property word vs the applied op's fields; op-log-grounded,
+absence-only) — VERIFIED closed: 21ab7b40 now self_done=False; 8b1ce5f2 unaffected (2/2).**
+RESIDUAL MISSES (9): 37608790 Rank-formula quality (First+Last now CORRECT values; D honest-detected
+every run); 535364ea model reads "two pivots" as one crosstab (count nag fires, model persists —
+defensible English reading); 30e3e107 count+proportion semantics; 21ab7b40 font-field swap (Pile 3
+frozen); 21df9241 units-in-format (Pile 1 lever designed, unbuilt); 0326d92d row-fill compound;
+4f07fbe9 edit-in-place (contract compiler); 1de60575 pivot cols dialect (Pile 3); 2bd59342 infeasible
+knowledge (VM). NEXT (user command pending): VM re-stress → ablation run (core vs crutches) →
+contract compiler / second app.
+
 ## ════ TURN-13 STATE — 2026-07-05 — PREFIX-COMMIT/RESAMPLE LOOP (DSpark-shaped); 17/30; FULL MISS DOSSIER ════
 **USER DOCTRINE ADOPTED (see memory lagado-propose-verify-doctrine): amnesiac proposer / sound verifier /
 prefix-commit / resample-at-divergence at every granularity; contract from STRUCTURE > dialogue >
