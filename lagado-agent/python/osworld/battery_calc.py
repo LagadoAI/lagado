@@ -431,6 +431,29 @@ def author_step(instr, g, reasoning, applied, problems, log, forced=False, tempe
     ops = parse_B_nameops(raw)
     return ops[0] if ops else None
 
+def emit_per_reasoning_steps(instr, detected, reasoning, word, log):
+    """PER-OWN-STEP EMISSION (Pile 2, 2026-07-05 — reason→emit collapse on COUNTED artifacts:
+    535364ea's own reasoning plans TWO pivots in its '### Step' sections; the one-pass EMIT keeps
+    one and every retry re-collapses). Re-run the SAME EMIT prompt against each of the model's OWN
+    reasoning sections that mentions the artifact — every word of context is the model's; the
+    harness only segments its text. Zero external content. Returns the artifact ops parsed from
+    the segment emissions."""
+    segs = [sg for sg in re.split(r"\n(?=#{2,4}\s|\bStep \d)", reasoning or "")
+            if word in sg.lower()]
+    if len(segs) < 2:
+        return []
+    cards = candidate_cards(detected)
+    kind = "create_pivot" if word == "pivot" else "create_chart"
+    out = []
+    for sg in segs[:4]:
+        raw = _chat(EMIT_PROMPT.format(instr=instr, cards=cards, reasoning=sg.strip()),
+                    grammar=GRAMMAR_B, temperature=0.0, seed=7, max_tokens=800)
+        log.setdefault("seg_emit_raw", []).append(raw[:300])
+        for op_ in parse_B_nameops(raw):
+            if op_.get("kind") == kind:
+                out.append(op_)
+    return out
+
 def resample_divergence(g, instr, nameops, written, resolve_fails, fired, gaps, log):
     """PREFIX-COMMIT + RESAMPLE-AT-DIVERGENCE (2026-07-05 — the DSpark-shaped loop, user doctrine).
     Applied ops are COMMITTED truth; each LOCALIZED fault is a divergence point that gets ONE
@@ -463,9 +486,25 @@ def resample_divergence(g, instr, nameops, written, resolve_fails, fired, gaps, 
     faults += [("fail", f) for f in resolve_fails if "entirely EMPTY" not in f.get("why", "")]
     faults += [("fired", f) for f in fired]
     steps = 0
+    seg_done = False
     for kind, f in faults:
         if steps >= 5:
             break                                 # rail, not a policy — utility scheduling comes later
+        if kind == "gap" and str(f).startswith(("chart_count:", "pivot_count:")) and not seg_done:
+            # counted-artifact collapse: recover from the model's OWN reasoning sections (its
+            # decomposition already exists there — measured), one emission per section.
+            seg_done = True
+            word = "pivot" if str(f).startswith("pivot") else "chart"
+            for nop2 in emit_per_reasoning_steps(instr, live_detect(g), reasoning, word, log):
+                if any(_op_key(o) == _op_key(nop2) for o, _n in applied):
+                    continue
+                w2, f2 = apply_B(g, [nop2], log, instr)
+                written += w2
+                steps += 1
+                applied.append((nop2, "per-step emission: %s" % ("failed" if f2 else "applied")))
+                log.setdefault("resample_acc", []).append(["seg", str(f)[:40],
+                                                           "fail" if f2 else "applied"])
+            continue
         problem = (compose_feedback([f], []) if kind == "fail" else
                    compose_feedback([], [f]) if kind == "fired" else gap_feedback([f]))
         if not problem:
@@ -737,6 +776,12 @@ def compose_feedback(fails, fired):
                          "sets it." % tuple(f["range"].split(" ", 1)))
         elif f["falsifier"] == "column_fill_incomplete":
             lines.append("- the goal names the column %s; most of its data rows are still empty." % f["range"])
+        elif f["falsifier"] == "structural_target_holes":
+            lines.append("- the column %s has empty cells in rows where the other columns hold data." % f["range"])
+    for f in fired:
+        if f.get("rows"):
+            for i, row in enumerate(f["rows"]):
+                lines.append("- observed row %d near %s: %s" % (i + 1, f["range"], str(row)[:140]))
     return "\n".join(lines)
 
 CHAT = "http://localhost:8080/v1/chat/completions"   # applies the GGUF's own chat template (model-agnostic)
@@ -1131,6 +1176,49 @@ def apply_B(g, nameops, log, instr=""):
                         if rr.get("ok"):
                             written.append((nop["sheet"], span, v))
                             filled = True
+            # ROW-FILL-SHAPE (Pile 2, 2026-07-05 — 0326d92d: the TRANSPOSE of the fill-handle
+            # gesture). A FORMULA seeded in a row DIRECTLY UNDER the table's last data row, whose
+            # relative refs all live in the seed's own COLUMN (=SUM(B2:B10) at B12), with every
+            # cell to its right across the table's columns EMPTY, is the app's fill-RIGHT gesture.
+            # Same guards as the column form: empty-only span, adjacent-row-only, refs elsewhere
+            # never match. Works on single-table sheets too (flat geometry).
+            if not filled and isinstance(v, str) and v.startswith("=") and mcell:
+                info_r = live.get(nop.get("sheet")) or {}
+                rowc = int(mcell.group(2))
+                seedc = mcell.group(1).upper()
+                rg_r = next((cr for cr in (info_r.get("regions") or []) if cr["row1"] + 1 == rowc), None)
+                last_used = rg_r["row1"] if rg_r else info_r.get("rows", 0)
+                colset = (rg_r or info_r).get("cols", [])
+                letters_r = [c["letter"] for c in colset]
+                if last_used and rowc == last_used + 1 and seedc in letters_r and \
+                   letters_r.index(seedc) < len(letters_r) - 1:
+                    refs = re.findall(r"(?<![:$\w])([A-Za-z]{1,3})\$?\d+(?![\w])", v)
+                    refs_ok = bool(refs) and all(r_.upper() == seedc for r_ in refs)
+                    endc = letters_r[-1]
+                    right = "%s%d:%s%d" % (col_letter(_col_idx(seedc) + 1), rowc, endc, rowc)
+                    rrr = g.client("read", {"sheet": nop["sheet"], "range": right})
+                    rvals = [x for row in (rrr.get("cells") or []) for x in row]
+                    if refs_ok and rvals and all(_blank(x) for x in rvals):
+                        # AGGREGATE-EXTENT alignment (sort-clamp family; measured 0326d92d: the
+                        # model's =SUM(C2:C10) under a table whose data ends at row 11 skips the
+                        # last data row). A range in the seed's own column that starts at the
+                        # table's data start and ends short extends to rowc-1 — geometry, not
+                        # semantics: the seed sits directly UNDER the table it aggregates.
+                        ds_r = (rg_r or {}).get("data_start", info_r.get("data_start", 2))
+                        def _extend(mr):
+                            c1_, r1_, c2_, r2_ = mr.group(1), int(mr.group(2)), mr.group(3), int(mr.group(4))
+                            if c1_.upper() == seedc and c2_.upper() == seedc and \
+                               r1_ == ds_r and r1_ < r2_ < rowc - 1:
+                                return "%s%d:%s%d" % (c1_, r1_, c2_, rowc - 1)
+                            return mr.group(0)
+                        v = re.sub(r"([A-Za-z]{1,3})(\d+):([A-Za-z]{1,3})(\d+)", _extend, v)
+                        span = "%s%d:%s%d" % (seedc, rowc, endc, rowc)
+                        rr = g.client("apply", {"op": {"op": "set_formula_range",
+                                                       "sheet": nop["sheet"], "range": span,
+                                                       "formula": v}})
+                        if rr.get("ok"):
+                            written.append((nop["sheet"], span, v))
+                            filled = True
             if not filled:
                 g.client("apply", {"op": {"op": "set", "sheet": nop["sheet"], "cell": nop["cell"],
                                           "value": v}})
@@ -1203,6 +1291,27 @@ def apply_B(g, nameops, log, instr=""):
                 a1 = "=" + a1.lstrip()
             if a1 is None:
                 continue  # fail-closed: a referenced name didn't resolve
+            # UNIT-IN-FORMAT normalization (Pile 1 — the ground_result_date_type family; 21df9241:
+            # the evaluator compares dtype; gold stores NUMBERS with the unit in the FORMAT, the
+            # model emits ROUND(...)&" M" TEXT). Exactly that shape becomes the numeric ROUND with
+            # the suffix as a number-format code — value unchanged, only its TYPE. Ablatable.
+            unit_fmt = None
+            mu = re.match(r'^=\s*ROUND\((.+?)\s*/\s*(1000000000|1000000|1000)\s*,\s*(\d+)\s*\)'
+                          r'\s*&\s*"([^"]{1,8})"\s*$', a1)
+            if mu:
+                # v2 (gold-form verified 21df9241): "change the REPRESENTATION" is the app's
+                # format-scaling — value stays the RAW expression, the format's comma count IS the
+                # divisor (each ',' ÷1000). Derived entirely from the model's own formula.
+                nd = int(mu.group(3))
+                commas = {"1000": ",", "1000000": ",,", "1000000000": ",,,"}[mu.group(2)]
+                unit_fmt = "0" + ("." + "0" * nd if nd else "") + commas + ('"%s"' % mu.group(4))
+                a1 = "=" + mu.group(1).strip()
+            else:
+                mu2 = re.match(r'^=\s*(ROUND\(.+,\s*(\d+)\s*\))\s*&\s*"([^"]{1,8})"\s*$', a1)
+                if mu2:
+                    nd = int(mu2.group(2))
+                    unit_fmt = "0" + ("." + "0" * nd if nd else "") + ('"%s"' % mu2.group(3))
+                    a1 = "=" + mu2.group(1)
             # Extent = data rows of the target OR any sheet the formula references (row-aligned). A
             # fresh target sheet has only its header (1 row); the referenced data sheet sets the span.
             # On a multi-table sheet the target's own TABLE bounds the span — the flat extent would
@@ -1219,6 +1328,9 @@ def apply_B(g, nameops, log, instr=""):
                 fails.append({"name": a1, "range": rng, "why": "apply error: %s" % rr.get("error", "")[:80]})
                 continue
             written.append((sheet, rng, a1))
+            if unit_fmt:
+                g.client("apply", {"op": {"op": "set_number_format", "sheet": sheet,
+                                          "range": rng, "format": unit_fmt}})
             ground_result_date_type(g, sheet, a1, rng, live)
             live = live_detect(g)
         elif k == "total_row":
@@ -1938,6 +2050,7 @@ def falsify_empty_named_targets(g, instr, nameops=()):
     (≥3 chars, case-insensitive) with a fully empty data span — no inference from reasoning text.
     Wrong firings only UNDER-claim and nag (never a false pass)."""
     fired = []
+    any_named = [False]
     low = (instr or "").lower()
     # Content an op WROTE (a title via set_cell) can be re-detected as a "header" over an empty
     # column — that is a delivered artifact, not an unfilled target (measured: 'Demographic
@@ -1967,6 +2080,8 @@ def falsify_empty_named_targets(g, instr, nameops=()):
                     if w in low and sum(1 for hh in headers_all if w in hh.lower()) == 1:
                         named = True
                         break
+            if named:
+                any_named[0] = True
             if not named:
                 continue
             r = g.client("read", {"sheet": sheet,
@@ -1986,6 +2101,34 @@ def falsify_empty_named_targets(g, instr, nameops=()):
                 # never a false pass.
                 fired.append({"falsifier": "column_fill_incomplete",
                               "range": "'%s' (column %s on %s, rows %d-%d)" % (h, c["letter"], sheet, ds, last)})
+    # ── CONTRACT COMPILER v1 (2026-07-05 — the f9584479 under-specified-goal FALSE-PASS class:
+    # 'fill the missing totals' names no deliverable, falsifiers had nothing to bind, corroboration
+    # shared the model's assumptions). When a WRITE-shaped goal binds to NO named header anywhere,
+    # the STRUCTURE speaks for the user: holes in a live-headed column at rows where ≥2 sibling
+    # columns hold data are structural deliverables — the claim stays blocked while they exist.
+    # Absence-detection only; wrong firings under-claim, never a false pass.
+    if not any_named[0] and re.search(r"\b(fill|complete|calculat|comput|missing|total)\w*\b", low):
+        for sheet, info in live_detect(g).items():
+            for rg in (info.get("regions") or [info]):
+                cols_r = rg.get("cols", [])
+                ds_r = rg.get("data_start", 2)
+                last_r = rg.get("row1", ds_r + rg.get("rows", 0) - 1)
+                if last_r < ds_r or len(cols_r) < 3:
+                    continue
+                lc0, lc1 = cols_r[0]["letter"], cols_r[-1]["letter"]
+                rr_ = g.client("read", {"sheet": sheet,
+                                        "range": "%s%d:%s%d" % (lc0, ds_r, lc1, last_r)})
+                grid_ = rr_.get("cells") or []
+                for ci, c in enumerate(cols_r):
+                    if not str(c.get("header") or "").strip():
+                        continue
+                    holes = sum(1 for row in grid_
+                                if ci < len(row) and _blank(row[ci]) and
+                                sum(1 for j, x in enumerate(row) if j != ci and not _blank(x)) >= 2)
+                    if holes:
+                        fired.append({"falsifier": "structural_target_holes",
+                                      "range": "'%s' (column %s on %s, %d empty cell(s) beside "
+                                               "filled rows)" % (c["header"], c["letter"], sheet, holes)})
     return fired
 
 def falsify(g, written_regions):
@@ -2007,6 +2150,18 @@ def falsify(g, written_regions):
         is_text_op = ("&" in formula) or ("CONCAT" in formula.upper()) or ("TEXT(" in formula.upper())
         if is_text_op and cells and all(isinstance(v, (int, float)) for v in cells):
             fired.append({"falsifier": "text_formula_numeric", "range": rng, "sample": cells[:3]})
+        # RESULT-PREVIEW (Pile 2, 2026-07-05 — 37608790: the model authors a formula BLIND and
+        # retries blind; a human looks at what the formula produced next to its inputs. Attach the
+        # OBSERVED left-context rows to the fired fault — pure observation, the model's own output
+        # beside its own input; no instruction content.)
+        if fired and fired[-1]["range"] == rng and \
+           fired[-1]["falsifier"] in ("error_values", "text_formula_numeric"):
+            m0 = re.match(r"([A-Za-z]+)(\d+)", rng.replace("$", ""))
+            if m0:
+                r0 = int(m0.group(2))
+                ctx = g.client("read", {"sheet": sheet,
+                                        "range": "A%d:%s%d" % (r0, m0.group(1), r0 + 1)})
+                fired[-1]["rows"] = (ctx.get("cells") or [])[:2]
         # F3: extent shortfall — empty cells inside the written range
         empties = sum(1 for v in cells if v is None or v == "")
         if empties:
