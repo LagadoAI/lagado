@@ -1,28 +1,27 @@
-"""In-guest settle-episode recorder (deployed into the VM, run detached).
+"""In-guest settle-monitor episode recorder v8 (deployed into the VM, run detached).
 
-Captures via a single continuous ffmpeg x11grab stream (6 fps, guest-side scaled
-to 480x270 rawvideo over a pipe), computes the 8x6 per-cell changed-fraction
-features inline (same grid geometry as host features.py), fires its own stimulus
-at t=2 s (shell command or PYAUTO: pyautogui code), and writes one JSON per
-episode.
+MULTI-CHANNEL (single-sense recorders are banned — 2026-07-06 standing rule; the
+pixel-only versions burned two days on this guest's headless-compositor traps):
+  [0:49]  pixel changed-fractions, 8x6 grid + whole-frame (gnome-screenshot with
+          present-forcing; context-dependently flaky here — ONE VOTER, not truth)
+  [49]    window-list changed this tick (0/1, wmctrl hash vs previous)
+  [50]    window count / 8
+  [51]    app process count (soffice.bin + gimp) / 8
+Dropped pixel frames are logged (unlink-first guard) — blind gaps, never stale reads.
 
-Capture is gnome-screenshot (compositor path), ~3.3 Hz. HARD-WON LESSON
-(2026-07-06, frame-probe photographic proof): on this guest (Xorg + gnome-shell
-on a qemu dummy display), ALL root-buffer captures — ffmpeg x11grab, xwd,
-Pillow XGetImage — read a stale/half-live framebuffer, NOT the live screen
-(x11grab frames showed a Calc window while wmctrl proved none existed). The
-only captures that always matched live truth are compositor-path ones:
-gnome-screenshot, pyautogui single-shots via the execute channel, and the
-OSWorld /screenshot endpoint. gs_probe validated this loop: 3.33 Hz sustained,
-launch paint = 0.25 diff 0.5 s after fire, wmctrl-corroborated, zero errors.
+STIMULI: SHELL:<cmd> | PYAUTO:<code> | UNO:<verb>:<json> — UNO verbs go through the
+resident session daemon's client (uno_client.py, local socket) in a background
+thread; the call's synchronous return time is recorded as t_stim_done = the
+app-truth completion timestamp (the teaching oracle for label generation).
 
 Usage: python3 guest_rec.py <name> <duration_s> <stim> [dump_dir]
-  (stim '' = none; dump_dir set -> also save every 10th frame as PNG there)
 """
+import hashlib
 import json
 import os
 import subprocess
 import sys
+import threading
 import time
 
 import numpy as np
@@ -34,19 +33,39 @@ pyautogui.FAILSAFE = False
 GRID_COLS, GRID_ROWS = 8, 6
 PIXEL_EPS = 12
 W, H = 480, 270
+N_PIX = GRID_COLS * GRID_ROWS + 1
 OUT_DIR = "/home/user/reflex_out"
+UNO_CLIENT = "/tmp/uno_client.py"
+UNO_SOCK = "/tmp/lagado_session.sock"
+
+EVAL_OK = False   # probed once in main()
 
 
-def grab(slot):
-    """Live-truth capture via the compositor path; ~300 ms per call.
+def _eval_ok():
+    """Can we ask the compositor to present directly? (Eval is often locked on
+    newer GNOME; probe once, fall back to synthetic-input nudge.)"""
+    r = subprocess.run(["gdbus", "call", "--session", "--dest", "org.gnome.Shell",
+                        "--object-path", "/org/gnome/Shell", "--method",
+                        "org.gnome.Shell.Eval", "global.stage.queue_redraw()"],
+                       capture_output=True, text=True, timeout=10)
+    return r.returncode == 0 and "true" in r.stdout
 
-    JIGGLE (jiggle-probe, 2026-07-06): gnome-shell on this headless display only
-    re-presents its stage on input events — without the 1 px nudge every other
-    frame, window paints are invisible to ANY capture (five void runs). ~1 Hz
-    dose; 3.3 Hz forced repaints starved the llvmpipe guest. unlink-first makes
-    a failed capture a dropped frame, never a stale read."""
-    if slot % 2 == 0:
+
+def force_present(slot):
+    """The compositor presents frames only for an audience on this headless guest:
+    direct command when allowed, else a 1 px input nudge every other frame."""
+    if EVAL_OK:
+        subprocess.run(["gdbus", "call", "--session", "--dest", "org.gnome.Shell",
+                        "--object-path", "/org/gnome/Shell", "--method",
+                        "org.gnome.Shell.Eval", "global.stage.queue_redraw()"],
+                       capture_output=True, timeout=10)
+    elif slot % 2 == 0:
         pyautogui.moveRel(1 if slot % 4 else -1, 0)
+
+
+def grab_pixels(slot):
+    """One voter. unlink-first: a failed capture is a dropped frame, never stale."""
+    force_present(slot)
     f = "/tmp/reflex_cap_%d.png" % (slot % 2)
     try:
         os.unlink(f)
@@ -59,7 +78,7 @@ def grab(slot):
     return np.asarray(img, dtype=np.int16)
 
 
-def feats_from(prev, arr):
+def pixel_feats(prev, arr):
     changed = (np.abs(arr - prev).max(axis=2) > PIXEL_EPS)
     h, w = changed.shape
     ch, cw = h // GRID_ROWS, w // GRID_COLS
@@ -73,43 +92,97 @@ def feats_from(prev, arr):
     return out
 
 
-def fire(stim):
-    if stim.startswith("PYAUTO:"):
-        exec(stim[len("PYAUTO:"):], {"pyautogui": pyautogui, "time": time})
-    else:
-        subprocess.Popen(stim, shell=True)
+def window_sense():
+    r = subprocess.run("DISPLAY=:0 wmctrl -l", shell=True, capture_output=True,
+                       text=True, timeout=10)
+    lines = [ln for ln in r.stdout.splitlines() if ln.strip()]
+    return hashlib.md5(r.stdout.encode()).hexdigest(), len(lines)
+
+
+def proc_sense():
+    r = subprocess.run("pgrep -c soffice.bin; pgrep -c gimp", shell=True,
+                       capture_output=True, text=True, timeout=10)
+    vals = [int(x) if x.strip().isdigit() else 0 for x in r.stdout.splitlines()[:2]]
+    return sum(vals)
+
+
+class Stim:
+    """Fires the stimulus; UNO verbs run threaded so capture never blocks, and
+    their synchronous return = app-truth completion (t_done)."""
+
+    def __init__(self, spec):
+        self.spec = spec
+        self.t_fired = -1.0
+        self.t_done = -1.0
+        self.ok = None
+
+    def fire(self, t0):
+        self.t_fired = time.time() - t0
+        if self.spec.startswith("UNO:"):
+            _, verb, payload = self.spec.split(":", 2)
+
+            def run():
+                r = subprocess.run(["python3", UNO_CLIENT, verb, payload,
+                                    "--sock=%s" % UNO_SOCK],
+                                   capture_output=True, text=True, timeout=180)
+                self.t_done = time.time() - t0
+                self.ok = '"ok": true' in r.stdout or '"ok":true' in r.stdout
+
+            threading.Thread(target=run, daemon=True).start()
+        elif self.spec.startswith("PYAUTO:"):
+            exec(self.spec[len("PYAUTO:"):], {"pyautogui": pyautogui, "time": time})
+        else:
+            cmd = self.spec[len("SHELL:"):] if self.spec.startswith("SHELL:") else self.spec
+            subprocess.Popen(cmd, shell=True)
 
 
 def main():
-    name, duration, stim = sys.argv[1], float(sys.argv[2]), sys.argv[3]
+    global EVAL_OK
+    name, duration, spec = sys.argv[1], float(sys.argv[2]), sys.argv[3]
     dump_dir = sys.argv[4] if len(sys.argv) > 4 else ""
     if dump_dir:
         os.makedirs(dump_dir, exist_ok=True)
     os.makedirs(OUT_DIR, exist_ok=True)
-    ts, feats = [], []
-    t_stim = -1.0
-    prev = None
+    try:
+        EVAL_OK = _eval_ok()
+    except Exception:
+        EVAL_OK = False
+    stim = Stim(spec) if spec else None
+    ts, feats, dropped = [], [], []
+    prev_px = None
+    prev_wh = None
     n = 0
     t0 = time.time()
     while time.time() - t0 < duration:
-        if stim and t_stim < 0 and (time.time() - t0) >= 2.0:
-            fire(stim)
-            t_stim = time.time() - t0
-        arr = grab(n)
+        if stim and stim.t_fired < 0 and (time.time() - t0) >= 2.0:
+            stim.fire(t0)
+        arr = grab_pixels(n)
+        wh, wc = window_sense()
+        pc = proc_sense()
         if arr is None:
+            dropped.append(round(time.time() - t0, 2))
             n += 1
             time.sleep(0.2)
+            prev_wh = wh
             continue
         if dump_dir and n % 10 == 0:
             Image.fromarray(arr.astype(np.uint8)).save(
                 os.path.join(dump_dir, "f%03d_t%04.1f.png" % (n, time.time() - t0)))
         n += 1
-        if prev is not None:
-            feats.append(feats_from(prev, arr))
+        if prev_px is not None:
+            row = pixel_feats(prev_px, arr)
+            row.append(1.0 if (prev_wh is not None and wh != prev_wh) else 0.0)
+            row.append(wc / 8.0)
+            row.append(pc / 8.0)
+            feats.append(row)
             ts.append(time.time() - t0)
-        prev = arr
+        prev_px = arr
+        prev_wh = wh
+    out = {"t": ts, "feats": feats, "t_stim": stim.t_fired if stim else -1.0,
+           "t_stim_done": stim.t_done if stim else -1.0,
+           "stim_ok": stim.ok if stim else None, "dropped": dropped, "name": name}
     path = os.path.join(OUT_DIR, name + ".json")
-    json.dump({"t": ts, "feats": feats, "t_stim": t_stim, "name": name}, open(path, "w"))
+    json.dump(out, open(path, "w"))
     open(path + ".done", "w").write("ok")
 
 

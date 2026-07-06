@@ -30,6 +30,7 @@ from ncps.torch import CfC
 W_FUTURE = 2.0        # settle horizon (s)
 K_BASELINE = 3        # production-shaped: N stable observations
 SEED = 7
+N_PIX = 49            # feature layout: [0:49]=pixel grid, 49=win_changed, 50+=aux
 
 
 def load_episodes(data_dir):
@@ -37,15 +38,25 @@ def load_episodes(data_dir):
     for p in sorted(glob.glob(os.path.join(data_dir, "ep*.npz"))):
         z = np.load(p, allow_pickle=True)
         eps.append({"t": z["t"], "feats": z["feats"], "t_stim": float(z["t_stim"]),
+                    "t_done": float(z["t_stim_done"]) if "t_stim_done" in z else -1.0,
                     "name": str(z["name"]), "rnd": int(z["rnd"]), "path": p})
     return eps
 
 
 def calibrate_eps(train_eps):
     """Noise floor from stimulus-free episodes (quiet + blink), skipping frame 0."""
-    vals = np.concatenate([e["feats"][1:, -1] for e in train_eps
+    vals = np.concatenate([e["feats"][1:, N_PIX - 1] for e in train_eps
                            if e["name"] in ("quiet", "blink_idle")])
     return max(float(np.quantile(vals, 0.99)) * 1.5, 1e-4)
+
+
+def busy_signal(ep, eps):
+    """FUSED per-frame busy flag: pixel change above noise floor OR window-list
+    changed. The monitor's inputs and its truth use the same fused senses."""
+    px = ep["feats"][:, N_PIX - 1] > eps
+    if ep["feats"].shape[1] > N_PIX:
+        return px | (ep["feats"][:, N_PIX] > 0.5)
+    return px
 
 
 GAP_MAX = 1.5   # capture-blind interval: cannot certify quiet through it
@@ -56,7 +67,8 @@ def label_episode(ep, eps):
 
     A frame is unlabeled if its future window is missing OR contains a capture
     gap > GAP_MAX (blind interval: the world may have churned unseen)."""
-    t, total = ep["t"], ep["feats"][:, -1]
+    t = ep["t"]
+    busy = busy_signal(ep, eps)
     n = len(t)
     settled = np.zeros(n, dtype=np.float32)
     valid = np.zeros(n, dtype=bool)
@@ -69,7 +81,15 @@ def label_episode(ep, eps):
         if gap_after[span].any():
             continue                      # blind gap inside window -> unlabeled
         valid[i] = True
-        settled[i] = 1.0 if not (total[fut] > eps).any() else 0.0
+        settled[i] = 1.0 if not busy[fut].any() else 0.0
+    # TEACHING ORACLE (visible-consequence session verbs only): the daemon call's
+    # [fired, returned] interval is app-truth "world busy" — overrides hindsight,
+    # even where the senses saw nothing. Headless verbs (uno_open/uno_close) are
+    # deliberate negatives: internally busy, visibly settled — hindsight stands.
+    if ep["name"] == "uno_reload" and ep["t_done"] > 0:
+        in_oracle = (t >= ep["t_stim"]) & (t <= ep["t_done"])
+        settled[in_oracle] = 0.0
+        valid[in_oracle] = True
     valid[0] = False                      # first frame is the all-ones artifact
     return settled, valid
 
@@ -79,14 +99,16 @@ def eval_start(ep):
 
 
 def run_baseline(ep, eps):
-    """First fire time of the K-consecutive-quiet rule, from eval start."""
-    t, total = ep["t"], ep["feats"][:, -1]
+    """First fire of the K-consecutive-quiet rule on the FUSED senses (production
+    parity: pixel delta OR window churn), from eval start."""
+    t = ep["t"]
+    busy = busy_signal(ep, eps)
     start = eval_start(ep)
     streak = 0
     for i in range(len(t)):
         if t[i] < start:
             continue
-        streak = streak + 1 if total[i] <= eps else 0
+        streak = 0 if busy[i] else streak + 1
         if streak >= K_BASELINE:
             return t[i]
     return None
@@ -111,10 +133,11 @@ def score_fire(ep, eps, t_fire):
 
 
 def to_tensors(ep):
-    # changed-fractions span ~5 orders of magnitude (noise floor 1e-4 .. 1.0);
-    # raw values are all ~0 to a randomly-initialized net. Log-scale to [0,1].
-    f = np.log10(ep["feats"] + 1e-6)          # [-6, 0]
-    x = torch.tensor((f + 6.0) / 6.0, dtype=torch.float32)
+    # pixel changed-fractions span ~5 orders of magnitude -> log-scale to [0,1];
+    # the non-pixel channels (win_changed, counts) are already O(1): pass through.
+    f = ep["feats"].astype(np.float64)
+    f[:, :N_PIX] = (np.log10(f[:, :N_PIX] + 1e-6) + 6.0) / 6.0
+    x = torch.tensor(f, dtype=torch.float32)
     dt = np.diff(ep["t"], prepend=ep["t"][0])
     dt[0] = np.median(dt[1:]) if len(dt) > 1 else 0.2
     return x.unsqueeze(0), torch.tensor(dt, dtype=torch.float32).unsqueeze(0)
