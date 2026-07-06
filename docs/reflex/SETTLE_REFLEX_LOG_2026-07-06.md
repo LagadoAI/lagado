@@ -117,3 +117,20 @@ all future recordings).
 N=3 in the real VM, official env.evaluate, LAGADO_SETTLE_MONITOR=1 at the reconcile-gui seam:
 3/3 score=1.0 on the render-sensitive early-release risk case. The settle monitor is validated
 in production position: trained -> gated -> promoted -> served -> wired -> ACTIVATED.
+
+## 2026-07-06 — FULL-PRESSURE SWEEP: heldout-30 with monitor DEFAULT-ON = 20/30 GOLD, 0 false-pass
+
+The promoted settle monitor ran live on ALL 30 held-out tasks (official env.evaluate, flag
+default-on, fd91cc7). Verdict: **20/30 GOLD, 0 false passes** — equal to the best documented
+baseline (19-20/30) with the fixed 4s sleep replaced by the CfC release on every task.
+
+settle_audit.py (committed this session) over the 30 records:
+- mode=cfc on 30/30 — zero fail-opens, the service never dropped a tick
+- releases 1.87-3.34s (ticks 3-8); zero releases under the 1.0s suspicion line
+- miss-vs-gold settle tempo: 2.44s vs 2.61s mean — NO early-release signature; all 10
+  misses are the known semantic/op-vocab residuals, none monitor-attributable
+- 43.4s of dead wait removed across the sweep (the monitor's earn at zero integrity cost)
+
+This run doubles as the pre-ablation baseline. Next: brutal_settle.sh (committed) —
+A service-kill fail-open, B render-class N=3, C ambient-churn no-early-release, D forced
+2s cap seam probe. Then the per-grounding ablation.
