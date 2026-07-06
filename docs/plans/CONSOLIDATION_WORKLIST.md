@@ -17,7 +17,11 @@ The architecture (reasoner / monitor bank / deterministic skeleton / membrane) m
    33.8 tok/op vs 16.2 selection floor = **52% shrink available via compact positional GBNF, no
    training**. CAVEAT: verbose pythonic form is code-shaped and may feed the coder's priors —
    adopting the compact grammar requires a battery A/B (accuracy must hold at 20/30, 0 false-pass).
-   Next: (a) compact-grammar A/B, (b) bounded/skippable reasoning for simple tasks (bigger prize).
+   **A/B VERDICT (same day): compact REJECTED** — 18/30 (−2) AND one FALSE PASS (a9f325aa,
+   self_done over score 0.00; first in weeks). Kwarg names = semantic slot-anchors + falsifier
+   contracts, not overhead; the 52% is NOT available in this direction at this scale. Compact arm
+   stays in the code flag-gated (default off) as the documented negative result. Remaining lever:
+   bounded/skippable REASON stage (4.1:1) — separately gated, future.
 5. **App-phase retirements (when app work resumes).** ColBERT mean-pool embedder (:8082) is
    FALSIFIED by R1b for binding — replace with reasoner-served last-token embeddings; one model
    serves chat+grammar+embeddings (verified 2026-06-23).
