@@ -99,3 +99,15 @@ than the deterministic rule. Failure mode = the single fixed fail-closed thresho
 read-out (+~0.4s, likely kills FS) and more data (32 episodes → threshold instability across folds).
 IQ4_XS quant A/B same day: FAILED regression (net −1 on flips, 17/30 vs 20/30) — Q4_K_M keeps the
 reasoner seat; dialect-sensitivity applies to quants, not just models.
+
+---
+
+## PROMOTE (2026-07-06, late): expert #1 passes — 5 folds, 52 episodes, clean sweep
+
+CFC FS=0 miss=0 latency=1.978s vs floor FS=2 miss=0 latency=2.233s — beats the deterministic
+rule on ALL THREE pre-registered axes; more reliable AND faster in every fold. What changed from
+the HOLD: +20 episodes (v9, session-fix held all rounds) and joint train-side (threshold,patience)
+selection — which chose conservative K=3/0.50 everywhere. Weights + gate report committed alongside.
+Per doctrine the deterministic floor REMAINS as fallback; harness wiring of the monitor = next
+work-list item. Damage-listener validation deferred (guest server died before pull; listener rides
+all future recordings).

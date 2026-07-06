@@ -1,0 +1,134 @@
+{
+ "folds": 5,
+ "episodes": 52,
+ "baseline": {
+  "false_settle": 2,
+  "miss": 0,
+  "mean_latency_s": 2.233
+ },
+ "cfc": {
+  "false_settle": 0,
+  "miss": 0,
+  "mean_latency_s": 1.978
+ },
+ "params": 37745,
+ "us_per_tick": 77.2,
+ "reports": [
+  {
+   "eps": 0.00010370371091994457,
+   "params": 37745,
+   "threshold": 0.5,
+   "us_per_tick": 77.2,
+   "baseline": {
+    "detector": "BASELINE",
+    "episodes": 11,
+    "false_settle": 1,
+    "miss": 0,
+    "mean_latency_s": 1.866,
+    "fires_scored": 10
+   },
+   "cfc": {
+    "detector": "CFC",
+    "episodes": 11,
+    "false_settle": 0,
+    "miss": 0,
+    "mean_latency_s": 1.27,
+    "fires_scored": 11
+   },
+   "heldout_round": 0
+  },
+  {
+   "eps": 0.0001126157476392109,
+   "params": 37745,
+   "threshold": 0.5,
+   "us_per_tick": 78.1,
+   "baseline": {
+    "detector": "BASELINE",
+    "episodes": 11,
+    "false_settle": 0,
+    "miss": 0,
+    "mean_latency_s": 2.509,
+    "fires_scored": 11
+   },
+   "cfc": {
+    "detector": "CFC",
+    "episodes": 11,
+    "false_settle": 0,
+    "miss": 0,
+    "mean_latency_s": 2.307,
+    "fires_scored": 11
+   },
+   "heldout_round": 1
+  },
+  {
+   "eps": 0.00010011574340751395,
+   "params": 37745,
+   "threshold": 0.5,
+   "us_per_tick": 77.3,
+   "baseline": {
+    "detector": "BASELINE",
+    "episodes": 10,
+    "false_settle": 0,
+    "miss": 0,
+    "mean_latency_s": 2.381,
+    "fires_scored": 10
+   },
+   "cfc": {
+    "detector": "CFC",
+    "episodes": 10,
+    "false_settle": 0,
+    "miss": 0,
+    "mean_latency_s": 2.167,
+    "fires_scored": 10
+   },
+   "heldout_round": 2
+  },
+  {
+   "eps": 0.00010370371091994457,
+   "params": 37745,
+   "threshold": 0.5,
+   "us_per_tick": 77.3,
+   "baseline": {
+    "detector": "BASELINE",
+    "episodes": 11,
+    "false_settle": 1,
+    "miss": 0,
+    "mean_latency_s": 1.855,
+    "fires_scored": 10
+   },
+   "cfc": {
+    "detector": "CFC",
+    "episodes": 11,
+    "false_settle": 0,
+    "miss": 0,
+    "mean_latency_s": 1.7,
+    "fires_scored": 11
+   },
+   "heldout_round": 3
+  },
+  {
+   "eps": 0.0001126157476392109,
+   "params": 37745,
+   "threshold": 0.5,
+   "us_per_tick": 78.3,
+   "baseline": {
+    "detector": "BASELINE",
+    "episodes": 9,
+    "false_settle": 0,
+    "miss": 0,
+    "mean_latency_s": 2.556,
+    "fires_scored": 9
+   },
+   "cfc": {
+    "detector": "CFC",
+    "episodes": 9,
+    "false_settle": 0,
+    "miss": 0,
+    "mean_latency_s": 2.444,
+    "fires_scored": 9
+   },
+   "heldout_round": 4
+  }
+ ],
+ "verdict": "PROMOTE"
+}
