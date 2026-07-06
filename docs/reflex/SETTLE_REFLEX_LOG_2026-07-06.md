@@ -81,3 +81,21 @@ stage present [probe-proven], host RAM/volume exhaustion); recorder+trainer hard
 (freshness guard, blind-gap label masking, flat-stimulus tripwire, comm pkills, volume prune,
 4G guest). The CfC itself remains untested on honest data — by design, not accident: every void
 verdict was caught by the integrity rails before it could masquerade as a model result.
+
+---
+
+## FIRST HONEST GATE (v8, 2026-07-06 evening): HOLD — fast but not yet trustworthy
+
+v8 recorder integrated with the session plane (UNO daemon owns LibreOffice lifecycle; its call
+returns = teaching-oracle timestamps), multi-channel senses (pixels as one voter + window-list +
+process counts), fused labels. 32 clean episodes over 3 rounds (round-2 tail + round 3 lost to a
+guest-server death; per-round session redeploy fix required — uno_close kills the resident soffice).
+
+3-fold CV, held-out rounds: BASELINE FS=1 miss=0 latency=2.252s | CFC (37,745 params)
+FS=2 miss=2 latency=0.038s → **HOLD** by the pre-registered rule. The signal is now REAL: loss
+converges every fold (vs unlearnable on single-sense data), and correct fires are ~59× faster
+than the deterministic rule. Failure mode = the single fixed fail-closed threshold (0.85 → 2 FS;
+0.95 → 2 misses), i.e. the decision layer, not the net. Next levers: 2-consecutive-tick patience
+read-out (+~0.4s, likely kills FS) and more data (32 episodes → threshold instability across folds).
+IQ4_XS quant A/B same day: FAILED regression (net −1 on flips, 17/30 vs 20/30) — Q4_K_M keeps the
+reasoner seat; dialect-sensitivity applies to quants, not just models.

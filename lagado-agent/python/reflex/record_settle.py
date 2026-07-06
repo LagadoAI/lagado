@@ -118,7 +118,7 @@ def main():
     try:
         env.reset()
         g = Guest(env)
-        deploy_daemon(g, pick_uno_python(g))          # the session plane, integrated
+        unopy = pick_uno_python(g)
         push_file(env, os.path.join(REFLEX_DIR, "guest_rec.py"), "/home/user/guest_rec.py")
         probe = gpy(env, "import numpy,pyautogui;print('DEPS-OK')")
         if "DEPS-OK" not in probe:
@@ -126,6 +126,9 @@ def main():
         gpy(env, 'import subprocess;subprocess.run("pkill gimp",shell=True)')
         time.sleep(3)
         for rnd in range(rounds):
+            # fresh session per round: uno_close ends the resident soffice's last
+            # doc and the daemon dies with it (found the hard way in v8full round 1)
+            deploy_daemon(g, unopy)
             push_file(env, XLSX_POOL[rnd % len(XLSX_POOL)],
                       "/home/user/reflex_%d.xlsx" % rnd)
             for name, dur, stim in episodes_for_round(rnd):
