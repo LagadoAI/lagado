@@ -6,6 +6,15 @@
 > command below. The `.md` docs stayed here. PYTHONPATH accordingly:
 > `PYTHONPATH=/home/alucard/projects/OSWorld:/home/alucard/projects/lagado/lagado-agent/python/osworld`.
 
+## ════ TURN-17 STATE — 2026-07-06 — VM N=3 VARIANCE: divergence CLOSES, VM floor 20/30 = host ════
+**VM N=3 on the two 'cross-env' suspects: both = DECODE VARIANCE, not structural. a9f325aa GOLD 3/3
+(it was NEVER a real miss — the re-stress caught one bad draw the extent_shortfall falsifier correctly
+BLOCKED; integrity held, honest miss not false-pass) → VM FLOOR 20/30, MATCHING host exactly. 1d17d234
+= 2/3 (WRONG/GOLD/GOLD), the lone flaky → ceiling 21.** The host↔VM gap is now essentially closed:
+the two divergent tasks were temp-0 draws, not environment structure. Thesis holds tight — harness
+transfers, VM≈host. No urgent variance lever needed (falsifiers already hold integrity on bad draws).
+NEXT: ablation (core vs crutches — the transferability price tag).
+
 ## ════ TURN-16 STATE — 2026-07-06 — RENDER-PARITY CLASS CLOSED: VM 19/30 (real harness bug, not dialect) ════
 **BOTH VM render misses GOLDED → VM floor 17→19/30, 0 false-pass. The fix was a REAL HARNESS BUG in
 the reconcile GUI-reload, diagnosed by measurement, NOT a Pile-3 render-format crutch.** Diagnostic
