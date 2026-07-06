@@ -178,7 +178,8 @@ def main():
             ts.append(time.time() - t0)
         prev_px = arr
         prev_wh = wh
-    out = {"t": ts, "feats": feats, "t_stim": stim.t_fired if stim else -1.0,
+    out = {"t": ts, "feats": feats, "t0_epoch": t0,
+       "t_stim": stim.t_fired if stim else -1.0,
            "t_stim_done": stim.t_done if stim else -1.0,
            "stim_ok": stim.ok if stim else None, "dropped": dropped, "name": name}
     path = os.path.join(OUT_DIR, name + ".json")

@@ -172,25 +172,52 @@ def train(train_eps, eps):
     return model
 
 
+K_PATIENCE = 1   # set per-fold by pick_threshold (train-side joint selection over
+                 # threshold x patience; single-tick K=2 alone was measured WORSE:
+                 # FS unchanged, misses 2->6 — the errors are sustained, not blips)
+
+
 def cfc_fire_time(model, ep, thresh):
     x, dt = to_tensors(ep)
     with torch.no_grad():
         p = torch.sigmoid(model(x, timespans=dt)[0].squeeze(-1).squeeze(0)).numpy()
     start = eval_start(ep)
+    streak = 0
     for i in range(1, len(p)):
-        if ep["t"][i] >= start and p[i] > thresh:
+        if ep["t"][i] < start:
+            continue
+        streak = streak + 1 if p[i] > thresh else 0
+        if streak >= K_PATIENCE:
             return float(ep["t"][i])
     return None
 
 
 def pick_threshold(model, train_eps, eps):
-    """Highest-recall threshold with ZERO train false-settles (fail-closed)."""
-    for thresh in np.arange(0.50, 0.96, 0.05):
-        fs = sum(score_fire(ep, eps, cfc_fire_time(model, ep, thresh))[0]
-                 for ep in train_eps)
-        if fs == 0:
-            return float(thresh)
-    return 0.95
+    """Joint train-side selection of (threshold, patience): among configs with ZERO
+    train false-settles, take the one with fewest misses, then lowest latency."""
+    global K_PATIENCE
+    best = None
+    for k in (1, 2, 3):
+        K_PATIENCE = k
+        for thresh in np.arange(0.50, 0.96, 0.05):
+            fs = miss = 0
+            lats = []
+            for ep in train_eps:
+                f, lat, m = score_fire(ep, eps, cfc_fire_time(model, ep, thresh))
+                fs += f
+                miss += m
+                if lat is not None:
+                    lats.append(lat)
+            if fs == 0:
+                cand = (miss, float(np.mean(lats)) if lats else 99.0, k, float(thresh))
+                if best is None or cand < best:
+                    best = cand
+    if best is None:
+        K_PATIENCE = 3
+        return 0.95
+    K_PATIENCE = best[2]
+    print("  train-selected: K=%d thresh=%.2f (train miss=%d)" % (best[2], best[3], best[0]))
+    return best[3]
 
 
 def evaluate(name, fire_fn, eval_eps, eps):

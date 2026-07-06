@@ -119,6 +119,10 @@ def main():
         env.reset()
         g = Guest(env)
         unopy = pick_uno_python(g)
+        # membrane sensor v0 rides along for VALIDATION (never a monitor input yet)
+        push_file(env, os.path.join(REFLEX_DIR, "damage_listener.py"),
+                  "/home/user/damage_listener.py")
+        gpy(env, "import subprocess;subprocess.Popen(['python3','/home/user/damage_listener.py'])")
         push_file(env, os.path.join(REFLEX_DIR, "guest_rec.py"), "/home/user/guest_rec.py")
         probe = gpy(env, "import numpy,pyautogui;print('DEPS-OK')")
         if "DEPS-OK" not in probe:
@@ -166,6 +170,11 @@ def main():
             env.close()
         except Exception:
             pass
+    gpy(env, "open('/home/user/damage_stop','w').write('1')")
+    dmg = gpy(env, "print(open('/home/user/damage_log.jsonl').read()[:20000])", retries=3)
+    if dmg.strip():
+        open(os.path.join(out_dir, "damage_log.jsonl"), "w").write(dmg)
+        print("damage-log pulled (%d bytes)" % len(dmg), flush=True)
     print("RECORDED %d episodes -> %s" % (n, out_dir), flush=True)
     json.dump({"episodes": n}, open(os.path.join(out_dir, "meta.json"), "w"))
 
