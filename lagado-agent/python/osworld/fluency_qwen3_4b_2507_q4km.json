@@ -1,0 +1,89 @@
+{
+ "model": "Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
+ "theta": 0.08,
+ "binding_correct": 5,
+ "binding_total": 10,
+ "emission_ok": true,
+ "cases": [
+  {
+   "ref": "the movie titles",
+   "bound": "Garbage Movie titles",
+   "expect": "Garbage Movie titles",
+   "margin": 0.2319,
+   "top": 0.9573,
+   "correct": true
+  },
+  {
+   "ref": "amount spent",
+   "bound": "Spent ($)",
+   "expect": "Spent ($)",
+   "margin": 0.136,
+   "top": 0.8199,
+   "correct": true
+  },
+  {
+   "ref": "how many items were sold",
+   "bound": null,
+   "expect": "Units Sold",
+   "margin": 0.02,
+   "top": 0.7601,
+   "correct": false
+  },
+  {
+   "ref": "employee salaries",
+   "bound": null,
+   "expect": "Annual Salary",
+   "margin": 0.0564,
+   "top": 0.8284,
+   "correct": false
+  },
+  {
+   "ref": "the profit column",
+   "bound": "Costs",
+   "expect": "Net Profit",
+   "margin": 0.0847,
+   "top": 0.8725,
+   "correct": false
+  },
+  {
+   "ref": "customer emails",
+   "bound": null,
+   "expect": "E-mail Address",
+   "margin": 0.0276,
+   "top": 0.8244,
+   "correct": false
+  },
+  {
+   "ref": "when the loan was issued",
+   "bound": null,
+   "expect": null,
+   "margin": 0.0238,
+   "top": 0.7643,
+   "correct": true
+  },
+  {
+   "ref": "Rank",
+   "bound": "Rank",
+   "expect": null,
+   "margin": 0.0862,
+   "top": 1.0,
+   "correct": false
+  },
+  {
+   "ref": "the date",
+   "bound": null,
+   "expect": null,
+   "margin": 0.0325,
+   "top": 0.7979,
+   "correct": true
+  },
+  {
+   "ref": "the weather forecast",
+   "bound": null,
+   "expect": null,
+   "margin": 0.0448,
+   "top": 0.7399,
+   "correct": true
+  }
+ ]
+}
