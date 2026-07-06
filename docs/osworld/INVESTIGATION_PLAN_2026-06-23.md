@@ -6,6 +6,34 @@
 > command below. The `.md` docs stayed here. PYTHONPATH accordingly:
 > `PYTHONPATH=/home/alucard/projects/OSWorld:/home/alucard/projects/lagado/lagado-agent/python/osworld`.
 
+## ════ TURN-15 STATE — 2026-07-05 — THE VM RE-STRESS: 17/30 OFFICIAL, 0 FALSE-PASS (June baseline 7/30) ════
+**THE THESIS NUMBER: full heldout-30 in the REAL OSWorld VM, official env.evaluate(): 17/30 GOLD,
+0 false-pass in every scored run — 2.4× the June baseline, same weights, harness only.**
+VM GOLDS (17): 0a2e43bf 0cecd4f3 1334ca3e(set_zoom!) 1954cced 347ef137(multi-table charts) 3a7c8185
+3aaa4e37 4172ea6e 4188d3a4(freeze patch) 51719eea(cross-sheet) 51b11269 6054afcb 7a4e4bc8 8b1ce5f2
+aa3a8974(export_pdf — FIRST EVER score, host-unscoreable) abed40dc eb03d19a.
+HOST(20) vs VM(17) DIVERGENCE — 4 lost, 1 gained, all classified: [RENDER/LOCALE ×2] 6e99a1ad a01fbce3
+— CORRECT verbs emitted (set_number_format / set_decimal_separator), guest-LO render pipeline scores
+differ from the host replication (the documented host-render limit, now measured); [CROSS-ENV DECODE
+VARIANCE ×2] 1d17d234 (drew rename_sheet junk), a9f325aa (wrong-shape draw, extent_shortfall falsifier
+BLOCKED the claim — integrity held) — same brain, guest observation differs slightly (guest-LO detect
+fields) → different draws; the membrane/conversion story at the env boundary. Falsifiers fired correctly
+in-guest (structural_target_holes 21ab7b40, column_fill_incomplete 21df9241, FAIL-CLOSED 2bd59342).
+**INFRA POST-MORTEM (the VM was unbootable — SIX distinct blockers since June, each measured):**
+(1) rootful podman sock path stale → USER socket /run/user/1000/podman/podman.sock; (2) brain launched
+outside start_brain.sh held 9.2GB RSS → guest couldn't allocate (canonical script → 0.7GB; ALWAYS use
+it); (3) my own chain-races (nohup/pkill self-matches) → chain runs via the tool's background runner +
+script file, pgrep bracket-patterns; (4) kernel 7.0.13 (Jun 30) dropped legacy ip_tables modules →
+container nat table dead → `sudo modprobe ip_tables` (PERSIST FILE STILL NOT WRITTEN — redo
+/etc/modules-load.d!); (5) passt update (Jun 11) → rootlessport delivers published ports INSIDE the
+netns to the container's own eth0 addr, bypassing PREROUTING → qemu-docker's DNAT-to-guest never
+matches → provider patch adds OUTPUT-chain DNAT at the container IP; (6) qemu-docker's entrypoint
+FLUSHES nat during setup → rules must WAIT for its PREROUTING rules then install (detached exec).
+All six fixes in provider_fedora_rootless.patch (regenerated) / runbook. memory_ok floor guard worked
+twice (aborted pre-OOM); transient page-cache dips breach it between tasks → prune volumes / run
+short batches. NEXT (discussion pending): render-parity levers (Pile 1) → VM N=3 variance → ablation
+(core vs crutches) → second app.
+
 ## ════ TURN-14 STATE — 2026-07-05 — PILES 1-2 BUILT: 20/30 GOLD; STYLE-CONTRACT FALSE-PASS CLOSED ════
 **LEVER TAXONOMY RATIFIED (memory lagado-propose-verify-doctrine): Pile 1 interface-faithfulness KEEP;
 Pile 2 general emission-defect repairs KEEP (the transferable capability); Pile 3 goal-dialect rules
