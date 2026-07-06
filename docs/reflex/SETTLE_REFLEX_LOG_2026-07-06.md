@@ -111,3 +111,9 @@ selection — which chose conservative K=3/0.50 everywhere. Weights + gate repor
 Per doctrine the deterministic floor REMAINS as fallback; harness wiring of the monitor = next
 work-list item. Damage-listener validation deferred (guest server died before pull; listener rides
 all future recordings).
+
+## ACTIVATION GATE PASSED (2026-07-06, night): aa3a8974 x3 = 3/3 GOLD, monitor LIVE
+
+N=3 in the real VM, official env.evaluate, LAGADO_SETTLE_MONITOR=1 at the reconcile-gui seam:
+3/3 score=1.0 on the render-sensitive early-release risk case. The settle monitor is validated
+in production position: trained -> gated -> promoted -> served -> wired -> ACTIVATED.
