@@ -6,6 +6,25 @@
 > command below. The `.md` docs stayed here. PYTHONPATH accordingly:
 > `PYTHONPATH=/home/alucard/projects/OSWorld:/home/alucard/projects/lagado/lagado-agent/python/osworld`.
 
+## ════ TURN-16 STATE — 2026-07-06 — RENDER-PARITY CLASS CLOSED: VM 19/30 (real harness bug, not dialect) ════
+**BOTH VM render misses GOLDED → VM floor 17→19/30, 0 false-pass. The fix was a REAL HARNESS BUG in
+the reconcile GUI-reload, diagnosed by measurement, NOT a Pile-3 render-format crutch.** Diagnostic
+chain (each theory FALSIFIED before the next): (1) format-code/LO-version parity? NO — guest LO 7.3
+renders our set_number_format 0.00 / set_decimal_separator ',' output BYTE-IDENTICAL to gold (in-guest
+apply+convert probe). (2) our GUI instance blocks the convert? NO — convert produces the CSV fine
+alongside our running instance (postconfig probe, both default+isolated profiles → 272B correct CSV).
+(3) THE ACTUAL CAUSE: the evaluator's postconfig does ctrl+s on our reload window (pops LO's 'keep
+xlsx format?' MODAL) THEN `libreoffice --convert-to` to build the sheet_print CSV it scores; our reload
+ran under the DEFAULT UserInstallation, so that convert FORWARDS into the modal-blocked instance →
+CSV never written → metric 'No such file' → auto-0. The 17 xlsx-compare golds were immune (they read
+the daemon-STORED file; a stuck ctrl+s is harmless). **FIX (uno_daemon op_reconcile): give the GUI
+reload its OWN UserInstallation profile → the evaluator's default-profile convert spawns a CLEAN
+converter. Window title unchanged → xlsx activate/ctrl+s unaffected. VERIFIED: 6e99a1ad+a01fbce3 GOLD
+2/2 real env.evaluate.** THE LESSON (banked): 'host-LO≠guest-LO render' was a MISLABEL — it read like
+a format-fidelity gap for months; it was a single-instance modal-forward bug in OUR reconcile. Measure
+the pipeline, don't trust the label. NEW VM TALLY: 19/30 GOLD, 0 false-pass. NEXT: VM N=3 variance
+(1d17d234/a9f325aa cross-env draws) → ablation (core vs crutches) → second app.
+
 ## ════ TURN-15 STATE — 2026-07-05 — THE VM RE-STRESS: 17/30 OFFICIAL, 0 FALSE-PASS (June baseline 7/30) ════
 **THE THESIS NUMBER: full heldout-30 in the REAL OSWorld VM, official env.evaluate(): 17/30 GOLD,
 0 false-pass in every scored run — 2.4× the June baseline, same weights, harness only.**

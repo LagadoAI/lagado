@@ -356,8 +356,19 @@ class Daemon:
         if gui and os.environ.get("DISPLAY"):
             env = dict(os.environ)
             env.setdefault("DISPLAY", ":0")
+            # ISOLATED PROFILE for the GUI reload (2026-07-06, render-task fix). The evaluator's
+            # postconfig does ctrl+s on this window (pops the "keep xlsx format?" modal) THEN runs
+            # `libreoffice --convert-to` to make the sheet_print CSV it scores. LibreOffice's
+            # single-instance is keyed on UserInstallation: a DEFAULT-profile reload makes that
+            # convert FORWARD into this modal-blocked instance → no CSV produced → render tasks
+            # auto-0 (measured on 6e99a1ad/a01fbce3; a clean-profile convert alongside proven to
+            # work). A dedicated profile means the evaluator's default-profile convert spawns its
+            # OWN clean converter. Window title is unchanged, so xlsx tasks' activate+ctrl+s (the
+            # 17 golds) are unaffected — they compare the daemon-stored file regardless.
+            gui_profile = "file:///tmp/lagado_reconcile_gui_profile"
             subprocess.Popen(
-                ["soffice", "--calc", os.path.abspath(saved_file)],
+                ["soffice", "--calc", "-env:UserInstallation=%s" % gui_profile,
+                 os.path.abspath(saved_file)],
                 env=env, start_new_session=True,
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         out = {"ok": True, "reloaded_gui": bool(gui and os.environ.get("DISPLAY"))}
