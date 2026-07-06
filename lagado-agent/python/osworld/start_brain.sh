@@ -24,5 +24,8 @@ echo "launching lean brain: ctx=$CTX, --no-mmap, full GPU offload, single slot"
 # --parallel 1: multi-slot continuous batching made temp-0 SAME-SEED outputs vary run-to-run
 # (the 2026-06-23 variance finding; server logs showed 4 slots). One slot = sequential decode =
 # reproducible draws, so best-of-N seed diversity is CONTROLLED diversity, not noise on noise.
+# --embeddings --pooling last: the SAME server also serves /v1/embeddings in the
+# reasoner's OWN latent space (last-token pooling = the binding lever, R1b 2026-06-23;
+# chat+grammar verified unaffected). Consumed by the membrane-fluency panel + semantic_col.
 exec "$LLAMA" -m "$MODEL" --port "$PORT" -c "$CTX" -ngl 99 --threads 8 -fa on \
-     -ctk q8_0 -ctv q8_0 --no-mmap --parallel 1
+     -ctk q8_0 -ctv q8_0 --no-mmap --parallel 1 --embeddings --pooling last
