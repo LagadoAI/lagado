@@ -12,9 +12,12 @@ The architecture (reasoner / monitor bank / deterministic skeleton / membrane) m
    the entire 2026-07-06 trap class. Validate against recorded v8 episodes. Needs VM time.
 3. **Settle monitor, round 2 (parked by decision 2026-07-06).** 2-consecutive-tick patience
    read-out + 2-3 more recording rounds → re-gate. Data whenever the VM next runs anyway.
-4. **Emission shrink (token-starvation path).** Measure current emission token counts in the
-   battery; move op-emission toward selection-shaped output (fewer tokens carrying decisions).
-   The reason→emit probe exists (Rust bin) — adapt or supersede with battery-side measurement.
+4. **Emission shrink (token-starvation path). MEASURED 2026-07-06** (57 task-runs, 151 ops):
+   REASON 366 tok/task vs EMIT 89 tok/task (4.1:1 — the prose stage is the elephant); emission
+   33.8 tok/op vs 16.2 selection floor = **52% shrink available via compact positional GBNF, no
+   training**. CAVEAT: verbose pythonic form is code-shaped and may feed the coder's priors —
+   adopting the compact grammar requires a battery A/B (accuracy must hold at 20/30, 0 false-pass).
+   Next: (a) compact-grammar A/B, (b) bounded/skippable reasoning for simple tasks (bigger prize).
 5. **App-phase retirements (when app work resumes).** ColBERT mean-pool embedder (:8082) is
    FALSIFIED by R1b for binding — replace with reasoner-served last-token embeddings; one model
    serves chat+grammar+embeddings (verified 2026-06-23).
