@@ -399,6 +399,80 @@ GRAMMAR_STEP_FORCED = GRAMMAR_B.replace('root ::= "[" op ("," op)* "]"', 'root :
 def _ops_doc():
     return EMIT_PROMPT.split("Available operations:\n", 1)[1].rsplit("\nRefer to columns", 1)[0]
 
+# ── COMPACT EMISSION (ADDITIVE, FLAG-GATED — LAGADO_COMPACT_EMIT=1) ─────────────────────────────
+# The EMIT stage switches to a positional pipe-separated dialect (one op per line:
+# verb|value|value|...) — same verbs, same field ORDER, derived MECHANICALLY from EMIT_PROMPT's
+# own signature doc block so the two arms cannot drift apart. Flag OFF: every *_ACTIVE alias
+# below binds the proven pythonic constant and the parse dispatcher routes to parse_B_nameops,
+# so the default path is behavior-identical (EMIT_PROMPT / GRAMMAR_B themselves are untouched).
+COMPACT_EMIT = os.environ.get("LAGADO_COMPACT_EMIT") == "1"
+
+def _field_order():
+    """Per-verb ordered field lists, read from EMIT_PROMPT's signature lines (the single source of
+    truth for kwarg order). The signature = the `verb(...)` prefix of each ops-doc line; kwargs are
+    taken in written order. Bounded at the FIRST ')' so kwarg-shaped text in a description
+    (create_pivot's cols=\"\"/func=\"count\" prose) never leaks into the order."""
+    orders = {}
+    for ln in _ops_doc().split("\n"):
+        m = re.match(r'\s*(\w+)\(([^)]*)\)', ln)
+        if m:
+            orders[m.group(1)] = [k for k, _v in re.findall(r'(\w+)="([^"]*)"', m.group(2))]
+    return orders
+
+FIELD_ORDER = _field_order()
+
+def _grammar_verbs():
+    """Verbs of the pythonic grammar, in GRAMMAR_B's own order (each op alternative is
+    terminal-leading: \"verb(...\")."""
+    return re.findall(r'"(\w+)\(', GRAMMAR_B)
+
+def _compact_ops_doc():
+    """EMIT_PROMPT's ops-doc block with each signature transformed line by line:
+    verb(k=\"P\", k2=\"P2\")  description  ->  verb|P|P2  description
+    (placeholders kept, descriptions kept verbatim)."""
+    out = []
+    for ln in _ops_doc().split("\n"):
+        m = re.match(r'(\s*)(\w+)\(([^)]*)\)(.*)$', ln)
+        if m:
+            indent, verb, sig, rest = m.groups()
+            vals = [v for _k, v in re.findall(r'(\w+)="([^"]*)"', sig)]
+            ln = indent + verb + "|" + "|".join(vals) + rest
+        out.append(ln)
+    return "\n".join(out)
+
+def _compact_alt(verb):
+    """One line-rule alternative with FIXED arity: \"verb\" \"|\" val \"|\" val ..."""
+    return '"%s"' % verb + ' "|" val' * len(FIELD_ORDER[verb])
+
+def _compact_grammar():
+    return ('root ::= line ("\\n" line)*\n'
+            'line ::= ' + " | ".join(_compact_alt(v) for v in _grammar_verbs()) + "\n"
+            'val ::= [^|\\n]*\n')
+
+if COMPACT_EMIT:
+    _no_order = [v for v in _grammar_verbs() if v not in FIELD_ORDER]
+    assert not _no_order, "compact emission: grammar verbs missing a FIELD_ORDER: %r" % _no_order
+    GRAMMAR_B_COMPACT = _compact_grammar()
+    # step variants derived the same way the pythonic ones are (root swap; forced drops infeasible)
+    GRAMMAR_STEP_COMPACT = GRAMMAR_B_COMPACT.replace(
+        'root ::= line ("\\n" line)*', 'root ::= line | "done()"', 1)
+    GRAMMAR_STEP_FORCED_COMPACT = GRAMMAR_B_COMPACT.replace(
+        'root ::= line ("\\n" line)*', 'root ::= line', 1) \
+        .replace(' | ' + _compact_alt("infeasible"), '', 1)
+    EMIT_PROMPT_COMPACT = EMIT_PROMPT.replace(_ops_doc(), _compact_ops_doc(), 1).replace(
+        "Emit ONLY the operations the goal needs, as a list of calls:",
+        "Emit ONLY the operations the goal needs, ONE PER LINE as: verb|value|value|... "
+        "(pipe-separated positional values in the documented order; leave a value empty to "
+        "skip it; no quotes, no brackets).", 1)
+    EMIT_PROMPT_ACTIVE, GRAMMAR_B_ACTIVE = EMIT_PROMPT_COMPACT, GRAMMAR_B_COMPACT
+    GRAMMAR_STEP_ACTIVE, GRAMMAR_STEP_FORCED_ACTIVE = GRAMMAR_STEP_COMPACT, GRAMMAR_STEP_FORCED_COMPACT
+else:
+    EMIT_PROMPT_ACTIVE, GRAMMAR_B_ACTIVE = EMIT_PROMPT, GRAMMAR_B
+    GRAMMAR_STEP_ACTIVE, GRAMMAR_STEP_FORCED_ACTIVE = GRAMMAR_STEP, GRAMMAR_STEP_FORCED
+
+def _active_ops_doc():
+    return _compact_ops_doc() if COMPACT_EMIT else _ops_doc()
+
 def author_step(instr, g, reasoning, applied, problems, log, forced=False, temperature=0.0):
     """ONE emission step against the LIVE document (act → OBSERVE detected faults → act).
     Returns a nameop, or None for done()/empty. `problems` = the CURRENT detected faults/gaps —
@@ -415,7 +489,7 @@ def author_step(instr, g, reasoning, applied, problems, log, forced=False, tempe
               "Your analysis:\n{reasoning}\n\n"
               "Operations ALREADY APPLIED to the document:\n{applied}\n\n"
               "PROBLEMS DETECTED in the document right now:\n{problems}\n\n"
-              "Available operations:\n" + _ops_doc() + "\n"
+              "Available operations:\n" + _active_ops_doc() + "\n"
               "Refer to columns by {{Header}} name where a name is asked; use A1 cell refs for ranges. " +
               ("The detected problems above are UNRESOLVED — emit the ONE operation that addresses "
                "the first of them:" if forced else
@@ -423,12 +497,12 @@ def author_step(instr, g, reasoning, applied, problems, log, forced=False, tempe
                "goal asks is already applied:")).format(
                   instr=instr, cards=cards, reasoning=reasoning, applied=applied_txt,
                   problems=problems or "(none detected)")
-    raw = _chat(prompt, grammar=GRAMMAR_STEP_FORCED if forced else GRAMMAR_STEP,
+    raw = _chat(prompt, grammar=GRAMMAR_STEP_FORCED_ACTIVE if forced else GRAMMAR_STEP_ACTIVE,
                 temperature=temperature, seed=7 + int(temperature * 1000), max_tokens=300)
     log.setdefault("step_raw", []).append(raw)
     if raw.strip().startswith("done"):
         return None
-    ops = parse_B_nameops(raw)
+    ops = parse_emitted_nameops(raw)
     return ops[0] if ops else None
 
 def emit_per_reasoning_steps(instr, detected, reasoning, word, log):
@@ -446,10 +520,10 @@ def emit_per_reasoning_steps(instr, detected, reasoning, word, log):
     kind = "create_pivot" if word == "pivot" else "create_chart"
     out = []
     for sg in segs[:4]:
-        raw = _chat(EMIT_PROMPT.format(instr=instr, cards=cards, reasoning=sg.strip()),
-                    grammar=GRAMMAR_B, temperature=0.0, seed=7, max_tokens=800)
+        raw = _chat(EMIT_PROMPT_ACTIVE.format(instr=instr, cards=cards, reasoning=sg.strip()),
+                    grammar=GRAMMAR_B_ACTIVE, temperature=0.0, seed=7, max_tokens=800)
         log.setdefault("seg_emit_raw", []).append(raw[:300])
-        for op_ in parse_B_nameops(raw):
+        for op_ in parse_emitted_nameops(raw):
             if op_.get("kind") == kind:
                 out.append(op_)
     return out
@@ -847,7 +921,7 @@ def author_B(instr, detected, log, feedback=None, temperature=0.0, additive=Fals
                       temperature=temperature, seed=seed, max_tokens=400).strip()
     log.setdefault("reasoning", reasoning)
     # call 2: EMIT (grammar-constrained). On retry, append the specific fault.
-    emit = EMIT_PROMPT.format(instr=instr, cards=cards, reasoning=reasoning)
+    emit = EMIT_PROMPT_ACTIVE.format(instr=instr, cards=cards, reasoning=reasoning)
     if feedback:
         # Two retry stances: CORRECTIVE (fix in place, change nothing else) vs ADDITIVE (the attempt
         # was incomplete — the old "change ONLY what these notes say" preamble actively FORBADE the
@@ -858,10 +932,10 @@ def author_B(instr, detected, log, feedback=None, temperature=0.0, additive=Fals
         else:
             emit += ("\n\nYour PREVIOUS attempt had these problems. Keep your operations EXACTLY as written "
                      "(same verbs, same targets, same structure) and change ONLY what these notes say:\n%s" % feedback)
-    raw = _chat(emit, grammar=GRAMMAR_B, temperature=temperature, seed=seed, max_tokens=800)
+    raw = _chat(emit, grammar=GRAMMAR_B_ACTIVE, temperature=temperature, seed=seed, max_tokens=800)
     log.setdefault("emit_raw", [])
     log["emit_raw"].append(raw)
-    ops = parse_B_nameops(raw)
+    ops = parse_emitted_nameops(raw)
     # STATIC BEST-OF-N (the variance lever, 2026-07-03): a defective draw (truncated formula, goal-
     # named column left untouched, goal-count chart shortfall) costs a gold another draw wins.
     # Re-draw on DETECTED static defects only; keep the fewest-defect draw (tie → earliest). Judged
@@ -872,15 +946,87 @@ def author_B(instr, detected, log, feedback=None, temperature=0.0, additive=Fals
     for t, retemp in ((1, 0.35), (2, 0.7)):
         if best_d == 0:
             break
-        raw2 = _chat(emit, grammar=GRAMMAR_B, temperature=max(temperature, retemp),
+        raw2 = _chat(emit, grammar=GRAMMAR_B_ACTIVE, temperature=max(temperature, retemp),
                      seed=seed + 1000 * t, max_tokens=800)
         log["emit_raw"].append(raw2)
-        ops2 = parse_B_nameops(raw2)
+        ops2 = parse_emitted_nameops(raw2)
         d2 = static_defects(ops2, instr, detected)
         if d2 < best_d:
             best, best_d = ops2, d2
     log.setdefault("emit_defects", []).append(best_d)
     return best
+
+def _nameop_from_kw(verb, kw):
+    """kw dict → nameop dict, the SINGLE construction shared by BOTH emission dialects (pythonic
+    parse_kv kwargs and compact positional fields) — the compact parser must produce EXACTLY the
+    dicts the pythonic parser produces, so the mapping (incl. defaults/coerce) lives once.
+    Returns None for an unknown verb or a set_cell with no value."""
+    if verb == "add_sheet":
+        return {"kind": "add_sheet", "name": kw.get("name")}
+    if verb == "rename_sheet":
+        return {"kind": "rename_sheet", "old": kw.get("old"), "new": kw.get("new")}
+    if verb == "copy_sheet":
+        return {"kind": "copy_sheet", "source": kw.get("source"), "new": kw.get("new"),
+                "before": kw.get("before", "")}
+    if verb == "set_cell" and "value" in kw:
+        return {"kind": "set_cell", "sheet": kw.get("sheet"), "cell": kw.get("cell"),
+                "value": coerce(kw["value"])}
+    if verb == "compute_column":
+        return {"kind": "compute_column", "sheet": kw.get("sheet"),
+                "target": kw.get("target"), "formula": kw.get("formula", "")}
+    if verb == "total_row":
+        return {"kind": "total_row", "sheet": kw.get("sheet"),
+                "label": kw.get("label", "Total"), "columns": kw.get("columns", "")}
+    if verb == "format_cells":
+        return {"kind": "format_cells", "sheet": kw.get("sheet"), "range": kw.get("range"),
+                "font_color": kw.get("font_color", ""), "fill_color": kw.get("fill_color", ""),
+                "bold": kw.get("bold", "")}
+    if verb == "merge_cells":
+        return {"kind": "merge_cells", "sheet": kw.get("sheet"), "range": kw.get("range")}
+    if verb == "sort_range":
+        return {"kind": "sort_range", "sheet": kw.get("sheet"), "range": kw.get("range"),
+                "key": kw.get("key", ""), "order": kw.get("order", "asc")}
+    if verb == "set_number_format":
+        return {"kind": "set_number_format", "sheet": kw.get("sheet"),
+                "range": kw.get("range"), "format": kw.get("format", "")}
+    if verb == "create_chart":
+        return {"kind": "create_chart", "sheet": kw.get("sheet"),
+                "ranges": kw.get("ranges", ""), "type": kw.get("type", "line"),
+                "title": kw.get("title", ""), "data_in": kw.get("data_in", "rows")}
+    if verb == "create_pivot":
+        return {"kind": "create_pivot", "source": kw.get("source"), "dest": kw.get("dest", "Sheet2"),
+                "rows": kw.get("rows", ""), "cols": kw.get("cols", ""),
+                "data": kw.get("data", ""), "func": kw.get("func", "sum")}
+    if verb == "freeze_panes":
+        return {"kind": "freeze_panes", "sheet": kw.get("sheet"), "range": kw.get("range", ""),
+                "rows": kw.get("rows", "0"), "cols": kw.get("cols", "0")}
+    if verb == "export_csv":
+        return {"kind": "export_csv", "sheet": kw.get("sheet"), "name": kw.get("name", "")}
+    if verb == "transpose_range":
+        return {"kind": "transpose_range", "sheet": kw.get("sheet"),
+                "source": kw.get("source", ""), "dest": kw.get("dest", "")}
+    if verb == "reorder_columns":
+        return {"kind": "reorder_columns", "sheet": kw.get("sheet"), "order": kw.get("order", "")}
+    if verb == "hide_rows_where":
+        return {"kind": "hide_rows_where", "sheet": kw.get("sheet"), "match": kw.get("match", "")}
+    if verb == "format_cells_where":
+        return {"kind": "format_cells_where", "sheet": kw.get("sheet"), "match": kw.get("match", ""),
+                "fill_color": kw.get("fill_color", ""), "font_color": kw.get("font_color", ""),
+                "range": kw.get("range", "")}
+    if verb == "set_decimal_separator":
+        return {"kind": "set_decimal_separator", "sheet": kw.get("sheet"),
+                "separator": kw.get("separator", ",")}
+    if verb == "export_pdf":
+        return {"kind": "export_pdf", "sheet": kw.get("sheet"), "name": kw.get("name", ""),
+                "fit_pages": kw.get("fit_pages", "1")}
+    if verb == "set_zoom":
+        return {"kind": "set_zoom", "sheet": kw.get("sheet"), "percent": kw.get("percent", "100")}
+    if verb == "infeasible":
+        return {"kind": "infeasible", "reason": kw.get("reason", "")}
+    if verb == "dedup_column":
+        return {"kind": "dedup_column", "sheet": kw.get("sheet"),
+                "source": kw.get("source", ""), "target": kw.get("target", "")}
+    return None
 
 def parse_B_nameops(text):
     """Parse name-level calls (UNRESOLVED — names stay in {braces}). Resolution happens at APPLY time
@@ -892,73 +1038,35 @@ def parse_B_nameops(text):
              "format_cells_where", "set_decimal_separator", "export_pdf", "infeasible", "dedup_column",
              "set_zoom")
     for verb, body in scan_calls(text, verbs):
-        kw = parse_kv(body)
-        if verb == "add_sheet":
-            nameops.append({"kind": "add_sheet", "name": kw.get("name")})
-        elif verb == "rename_sheet":
-            nameops.append({"kind": "rename_sheet", "old": kw.get("old"), "new": kw.get("new")})
-        elif verb == "copy_sheet":
-            nameops.append({"kind": "copy_sheet", "source": kw.get("source"), "new": kw.get("new"),
-                            "before": kw.get("before", "")})
-        elif verb == "set_cell" and "value" in kw:
-            nameops.append({"kind": "set_cell", "sheet": kw.get("sheet"), "cell": kw.get("cell"),
-                            "value": coerce(kw["value"])})
-        elif verb == "compute_column":
-            nameops.append({"kind": "compute_column", "sheet": kw.get("sheet"),
-                            "target": kw.get("target"), "formula": kw.get("formula", "")})
-        elif verb == "total_row":
-            nameops.append({"kind": "total_row", "sheet": kw.get("sheet"),
-                            "label": kw.get("label", "Total"), "columns": kw.get("columns", "")})
-        elif verb == "format_cells":
-            nameops.append({"kind": "format_cells", "sheet": kw.get("sheet"), "range": kw.get("range"),
-                            "font_color": kw.get("font_color", ""), "fill_color": kw.get("fill_color", ""),
-                            "bold": kw.get("bold", "")})
-        elif verb == "merge_cells":
-            nameops.append({"kind": "merge_cells", "sheet": kw.get("sheet"), "range": kw.get("range")})
-        elif verb == "sort_range":
-            nameops.append({"kind": "sort_range", "sheet": kw.get("sheet"), "range": kw.get("range"),
-                            "key": kw.get("key", ""), "order": kw.get("order", "asc")})
-        elif verb == "set_number_format":
-            nameops.append({"kind": "set_number_format", "sheet": kw.get("sheet"),
-                            "range": kw.get("range"), "format": kw.get("format", "")})
-        elif verb == "create_chart":
-            nameops.append({"kind": "create_chart", "sheet": kw.get("sheet"),
-                            "ranges": kw.get("ranges", ""), "type": kw.get("type", "line"),
-                            "title": kw.get("title", ""), "data_in": kw.get("data_in", "rows")})
-        elif verb == "create_pivot":
-            nameops.append({"kind": "create_pivot", "source": kw.get("source"), "dest": kw.get("dest", "Sheet2"),
-                            "rows": kw.get("rows", ""), "cols": kw.get("cols", ""),
-                            "data": kw.get("data", ""), "func": kw.get("func", "sum")})
-        elif verb == "freeze_panes":
-            nameops.append({"kind": "freeze_panes", "sheet": kw.get("sheet"), "range": kw.get("range", ""),
-                            "rows": kw.get("rows", "0"), "cols": kw.get("cols", "0")})
-        elif verb == "export_csv":
-            nameops.append({"kind": "export_csv", "sheet": kw.get("sheet"), "name": kw.get("name", "")})
-        elif verb == "transpose_range":
-            nameops.append({"kind": "transpose_range", "sheet": kw.get("sheet"),
-                            "source": kw.get("source", ""), "dest": kw.get("dest", "")})
-        elif verb == "reorder_columns":
-            nameops.append({"kind": "reorder_columns", "sheet": kw.get("sheet"), "order": kw.get("order", "")})
-        elif verb == "hide_rows_where":
-            nameops.append({"kind": "hide_rows_where", "sheet": kw.get("sheet"), "match": kw.get("match", "")})
-        elif verb == "format_cells_where":
-            nameops.append({"kind": "format_cells_where", "sheet": kw.get("sheet"), "match": kw.get("match", ""),
-                            "fill_color": kw.get("fill_color", ""), "font_color": kw.get("font_color", ""),
-                            "range": kw.get("range", "")})
-        elif verb == "set_decimal_separator":
-            nameops.append({"kind": "set_decimal_separator", "sheet": kw.get("sheet"),
-                            "separator": kw.get("separator", ",")})
-        elif verb == "export_pdf":
-            nameops.append({"kind": "export_pdf", "sheet": kw.get("sheet"), "name": kw.get("name", ""),
-                            "fit_pages": kw.get("fit_pages", "1")})
-        elif verb == "set_zoom":
-            nameops.append({"kind": "set_zoom", "sheet": kw.get("sheet"), "percent": kw.get("percent", "100")})
-        elif verb == "infeasible":
-            nameops.append({"kind": "infeasible", "reason": kw.get("reason", "")})
-        elif verb == "dedup_column":
-            nameops.append({"kind": "dedup_column", "sheet": kw.get("sheet"),
-                            "source": kw.get("source", ""), "target": kw.get("target", "")})
+        op = _nameop_from_kw(verb, parse_kv(body))
+        if op is not None:
+            nameops.append(op)
     return nameops
+
+def parse_compact_nameops(text):
+    """COMPACT-dialect parser: one op per line, `verb|value|value|...` positional in FIELD_ORDER.
+    Blank lines skipped; trailing whitespace tolerated; a done() line (step grammar) is skipped.
+    Same construction as the pythonic parser via _nameop_from_kw."""
+    nameops = []
+    for ln in text.split("\n"):
+        ln = ln.rstrip()
+        if not ln.strip() or ln.strip().startswith("done"):
+            continue
+        parts = ln.split("|")
+        verb = parts[0].strip()
+        fields = FIELD_ORDER.get(verb)
+        if fields is None:
+            continue
+        kw = {f: parts[i + 1] for i, f in enumerate(fields) if i + 1 < len(parts)}
+        op = _nameop_from_kw(verb, kw)
+        if op is not None:
+            nameops.append(op)
+    return nameops
+
+def parse_emitted_nameops(text):
+    """DISPATCHER — every emission-parse site (single-shot, best-of-N redraw, per-step, per-segment)
+    routes through here; the flag picks the dialect. nameops shape identical either way."""
+    return parse_compact_nameops(text) if COMPACT_EMIT else parse_B_nameops(text)
 
 def _op_key(o):
     """Identity of an op for cross-attempt dedup. Same key = the same intended op (a later attempt CORRECTS
