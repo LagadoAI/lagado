@@ -26,7 +26,10 @@ import sys
 import time
 
 import numpy as np
+import pyautogui
 from PIL import Image
+
+pyautogui.FAILSAFE = False
 
 GRID_COLS, GRID_ROWS = 8, 6
 PIXEL_EPS = 12
@@ -35,10 +38,22 @@ OUT_DIR = "/home/user/reflex_out"
 
 
 def grab(slot):
-    """Live-truth capture via the compositor path; ~300 ms per call."""
+    """Live-truth capture via the compositor path; ~300 ms per call.
+
+    JIGGLE (jiggle-probe, 2026-07-06): gnome-shell on this headless display only
+    re-presents its stage on input events — without the 1 px nudge every other
+    frame, window paints are invisible to ANY capture (five void runs). ~1 Hz
+    dose; 3.3 Hz forced repaints starved the llvmpipe guest. unlink-first makes
+    a failed capture a dropped frame, never a stale read."""
+    if slot % 2 == 0:
+        pyautogui.moveRel(1 if slot % 4 else -1, 0)
     f = "/tmp/reflex_cap_%d.png" % (slot % 2)
+    try:
+        os.unlink(f)
+    except OSError:
+        pass
     r = subprocess.run(["gnome-screenshot", "-f", f], capture_output=True, timeout=10)
-    if r.returncode != 0:
+    if r.returncode != 0 or not os.path.exists(f):
         return None
     img = Image.open(f).convert("RGB").resize((W, H))
     return np.asarray(img, dtype=np.int16)
@@ -60,8 +75,6 @@ def feats_from(prev, arr):
 
 def fire(stim):
     if stim.startswith("PYAUTO:"):
-        import pyautogui
-        pyautogui.FAILSAFE = False
         exec(stim[len("PYAUTO:"):], {"pyautogui": pyautogui, "time": time})
     else:
         subprocess.Popen(stim, shell=True)
@@ -84,6 +97,8 @@ def main():
             t_stim = time.time() - t0
         arr = grab(n)
         if arr is None:
+            n += 1
+            time.sleep(0.2)
             continue
         if dump_dir and n % 10 == 0:
             Image.fromarray(arr.astype(np.uint8)).save(

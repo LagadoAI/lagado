@@ -43,3 +43,41 @@ unlink-before-capture freshness guard + blind-gap masking in oracle labels) → 
 CV gate → verdict. If not: STOP and put the fork to the user — keep excavating this guest's
 compositor vs. move recording to the Lagado QEMU guest (QMP screendump capture, already trusted
 by the Rust harness). Verdict/fork report will be appended below.
+
+---
+
+## OVERNIGHT STOP REPORT (contract executed; machine suspended after this commit)
+
+**v6 (jiggle-fixed) tripwire FIRED → hard stop per contract.** Round-0 evidence:
+quiet 0.019 / launch_calc **0.000 across 211 frames (75 s)** / typing 0.002 / sidebar 0.071 /
+scroll 0.010 / **close_calc 0.945**. The close proves Calc launched, painted, and tore down
+visibly — the paint again landed outside the launch episode's watch, even with the jiggle that
+the probe validated at 0.9452 the same evening.
+
+**Sharpest remaining hypothesis (NOT yet tested — for the morning):** every context that ever
+saw a launch paint used **no file or the smallest xlsx** (gs_probe, jiggle probe: paint ≤2 s
+post-fire). The recorder loads a **full OSWorld task xlsx into a cold LibreOffice**; v4's
+timeline brackets its paint at 40–90 s post-fire; rounds using different pool files behaved
+differently (0.039 vs 0.000). Plain reading: cold-LO + heavy-file load exceeds every window
+tried (32 s, 75 s), and the paint keeps landing in inter-episode gaps where process-per-episode
+recording discards it as the first-frame artifact.
+
+**THE FORK (user decision, morning):**
+- **A. One cheap test on this guest** (~15 min): launch episode with (i) pre-warmed LO
+  (launch+close once off-camera before round 0), or (ii) 150 s window, or (iii) smallest-file
+  pool. If the tripwire passes, v7 = the real gate run here. Also worth folding in: one
+  guest_rec process per ROUND (episodes as segments) so no inter-episode blindness exists at all.
+- **B. Move recording to the Lagado QEMU guest** (Fedora/Cinnamon, QMP screendump capture —
+  the Rust harness's own trusted path). More wiring (~half a day: stimuli + episode driver on
+  that guest), but escapes this compositor's traps entirely, runs on the production-adjacent
+  surface, and doubles as the first cross-environment data point for the reflex-transfer story.
+
+**Recommendation:** A(i)+(iii) first — cheapest, and the close-episode evidence makes it likely;
+fall back to B if the tripwire fires again. B is worth doing eventually regardless (transfer story).
+
+**Score for the night:** 0 valid gate runs; 6 real bugs found+fixed (input scaling, HTTP-capture
+fragility, pkill self-match ×5-with-rule, stale root-buffer capture [photo-proven], input-gated
+stage present [probe-proven], host RAM/volume exhaustion); recorder+trainer hardened
+(freshness guard, blind-gap label masking, flat-stimulus tripwire, comm pkills, volume prune,
+4G guest). The CfC itself remains untested on honest data — by design, not accident: every void
+verdict was caught by the integrity rails before it could masquerade as a model result.

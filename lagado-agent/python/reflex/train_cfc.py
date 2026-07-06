@@ -48,16 +48,26 @@ def calibrate_eps(train_eps):
     return max(float(np.quantile(vals, 0.99)) * 1.5, 1e-4)
 
 
+GAP_MAX = 1.5   # capture-blind interval: cannot certify quiet through it
+
+
 def label_episode(ep, eps):
-    """Per-frame oracle settled labels + valid mask (future window exists)."""
+    """Per-frame oracle settled labels + valid mask.
+
+    A frame is unlabeled if its future window is missing OR contains a capture
+    gap > GAP_MAX (blind interval: the world may have churned unseen)."""
     t, total = ep["t"], ep["feats"][:, -1]
     n = len(t)
     settled = np.zeros(n, dtype=np.float32)
     valid = np.zeros(n, dtype=bool)
+    gap_after = np.append(np.diff(t) > GAP_MAX, False)
     for i in range(n):
         fut = (t > t[i]) & (t <= t[i] + W_FUTURE)
         if t[i] + W_FUTURE > t[-1]:
             continue                      # no future window -> unlabeled
+        span = (t >= t[i]) & (t <= t[i] + W_FUTURE)
+        if gap_after[span].any():
+            continue                      # blind gap inside window -> unlabeled
         valid[i] = True
         settled[i] = 1.0 if not (total[fut] > eps).any() else 0.0
     valid[0] = False                      # first frame is the all-ones artifact
