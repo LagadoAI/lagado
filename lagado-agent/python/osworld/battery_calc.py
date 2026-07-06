@@ -2388,7 +2388,7 @@ def settle_wait(g, log, floor_s=4.0):
     falls back to finishing the fixed sleep; env.evaluate() is never reached early on a
     monitor error."""
     env = getattr(g, "env", None)
-    if os.environ.get("LAGADO_SETTLE_MONITOR") != "1" or log.get("host") or env is None:
+    if os.environ.get("LAGADO_SETTLE_MONITOR", "1") == "0" or log.get("host") or env is None:
         time.sleep(floor_s)
         return
     t0 = time.time()
