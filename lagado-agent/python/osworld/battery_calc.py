@@ -2376,6 +2376,67 @@ def corroborate(g, instr, detected, der1_written, mainlog):
     mainlog["corrob_detail"] = detail
     return agree
 
+# ── settle wait (ADDITIVE, default = the original fixed sleep) ────────────────────
+def settle_wait(g, log, floor_s=4.0):
+    """Wait for the reconcile GUI reload's visible soffice window to SETTLE before the
+    evaluator activates it (the TURN-16 seam). Default behavior is byte-identical to the
+    original `time.sleep(floor_s)`. With LAGADO_SETTLE_MONITOR=1 on the VM path (host-side
+    guest screenshots available), the PROMOTED CfC settle monitor (reflex/, gate 2026-07-06:
+    FS 0 vs baseline 2, latency 1.98 vs 2.23 s) watches the guest and releases on observed
+    settle — earlier when the window is up fast, LATER (up to LAGADO_SETTLE_MAX, default 15 s)
+    when it is still churning at the 4 s mark. FAIL-OPEN everywhere: any monitor problem
+    falls back to finishing the fixed sleep; env.evaluate() is never reached early on a
+    monitor error."""
+    env = getattr(g, "env", None)
+    if os.environ.get("LAGADO_SETTLE_MONITOR") != "1" or log.get("host") or env is None:
+        time.sleep(floor_s)
+        return
+    t0 = time.time()
+    mon = None
+    info = {"mode": "cfc", "ticks": 0, "settled": False}
+    try:
+        rdir = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                             "..", "reflex"))
+        if rdir not in sys.path:
+            sys.path.insert(0, rdir)
+        from settle_client import SettleMonitor, TickFeaturizer
+        mon = SettleMonitor()
+        fz = TickFeaturizer()
+        cap_s = float(os.environ.get("LAGADO_SETTLE_MAX", "15"))
+        last = time.time()
+        while time.time() - t0 < cap_s:
+            png = env.controller.get_screenshot()
+            sense = g.sh("DISPLAY=:0 wmctrl -l 2>/dev/null | md5sum | cut -d' ' -f1; "
+                         "DISPLAY=:0 wmctrl -l 2>/dev/null | wc -l; "
+                         "pgrep -c soffice.bin; pgrep -c gimp; true").get("out", "")
+            now = time.time()
+            dt, last = max(now - last, 1e-3), now
+            if png is None:
+                raise RuntimeError("no guest screenshot")
+            lines = [x.strip() for x in sense.splitlines() if x.strip()]
+            whash = lines[0] if lines else ""
+            wcount = int(lines[1]) if len(lines) > 1 and lines[1].isdigit() else 0
+            pcount = sum(int(x) for x in lines[2:4] if x.isdigit())
+            p, settled = mon.tick(fz.step(png, whash, wcount, pcount), dt)
+            if p is None:
+                raise RuntimeError("settle monitor unavailable (fail-open)")
+            info["ticks"] += 1
+            if settled:
+                info["settled"] = True
+                break
+        info["s"] = round(time.time() - t0, 2)
+        log["settle_wait"] = info
+    except Exception as e:
+        info["mode"], info["error"] = "cfc_failopen", str(e)[:120]
+        info["s"] = round(time.time() - t0, 2)
+        log["settle_wait"] = info
+        remaining = floor_s - (time.time() - t0)
+        if remaining > 0:
+            time.sleep(remaining)                 # the deterministic floor stands
+    finally:
+        if mon is not None:
+            mon.close()
+
 # ── one run of a condition ───────────────────────────────────────────────────────
 def run_condition(env, task, cond, file_path, run_idx):
     """VM path: build the guest, bring up the daemon, then run the SHARED core scored by env.evaluate()."""
@@ -2582,7 +2643,7 @@ def run_core(g, task, cond, file_path, log, score_fn):
     if os.environ.get("LAGADO_VISIBLE"):          # watch-mode: hold the finished doc on screen before closing
         time.sleep(int(os.environ.get("LAGADO_VISIBLE_HOLD", "25")))
     g.client("close")
-    time.sleep(4)
+    settle_wait(g, log)   # was: time.sleep(4) — identical unless LAGADO_SETTLE_MONITOR=1
     if "declared_infeasible" in log:
         # Mirror the official env exactly (desktop_env.evaluate): an infeasible-func task with a FAIL
         # declaration scores 1; a declaration on a FEASIBLE task scores 0 — a wrong declaration can
