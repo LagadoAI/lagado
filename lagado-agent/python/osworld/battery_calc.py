@@ -559,7 +559,8 @@ def resample_divergence(g, instr, nameops, written, resolve_fails, fired, gaps, 
             continue                              # owned by the pre-apply withhold, not resample
         n = 1
         if gp.startswith(("chart_count:", "pivot_count:")):
-            n = max(int(gp.split(":")[1]) - int(gp.split(":")[2]), 1)
+            body = gp.partition("|")[0]           # tag may carry existing-item facts after '|'
+            n = max(int(body.split(":")[1]) - int(body.split(":")[2]), 1)
         faults.extend([("gap", gp)] * n)
     faults += [("fail", f) for f in resolve_fails if "entirely EMPTY" not in f.get("why", "")]
     faults += [("fired", f) for f in fired]
