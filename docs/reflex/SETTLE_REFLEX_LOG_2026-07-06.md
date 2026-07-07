@@ -134,3 +134,44 @@ settle_audit.py (committed this session) over the 30 records:
 This run doubles as the pre-ablation baseline. Next: brutal_settle.sh (committed) —
 A service-kill fail-open, B render-class N=3, C ambient-churn no-early-release, D forced
 2s cap seam probe. Then the per-grounding ablation.
+
+## 2026-07-06 — BRUTAL SUITE VERDICT: the churn test bit. The promoted CfC is TIME-DOMINANT
+## (shortcut learning), photographed and replay-proven. The GATE could not have caught it.
+
+Phases A/B/D passed clean (A: service killed every 1s -> cfc_failopen, floor stood, gold held;
+B: render-class x3 = 9/9 gold, releases 1.86-2.74s; D: forced LAGADO_SETTLE_MAX=2 release BEFORE
+honest settle -> 3/3 gold => the seam has slack on this VM; release timing not currently
+load-bearing). Phase C took 7 injector iterations to make the stressor land honestly
+(xterm absent; /execute vs podman-exec transport; `&;` dash syntax; occlusion by the reloaded
+fullscreen soffice; stroboscopic aliasing risk at 3Hz vs ~0.5s ticks) — final form: gnome-terminal
+20Hz scroller pinned always-on-top, window verified at the seam, LAGADO_SETTLE_DUMP photographing
+every tick the monitor evaluated.
+
+THE FINDING (tick PNGs + host replay through the production TickFeaturizer + promoted model):
+- The monitor settled at 1.99s WHILE the dump shows (a) the scroller visibly advancing between
+  consecutive ticks and (b) soffice's "Load document" progress bar STILL IN FLIGHT.
+- Replay: p(settled)=0.999 on an ALL-CHANGED synthetic first row; sustained churn -> p=0.743,
+  sustained quiet -> p=0.741 — NO input discrimination in production feature space.
+- Quiet-after-reset trace 0.93 -> 0.05 -> 0.58 -> 0.74: output is a function of TIME-SINCE-RESET
+  (CfC hidden-state relaxation), not pixels. The model learned the shortcut: every training
+  episode fired its stimulus at exactly t=2.0s and settled on schedule, so elapsed-time predicts
+  the hindsight label perfectly. A timer nails the corpus; the CfC became that timer.
+- WHY THE GATE PASSED IT: all 52 episodes share the fixed stimulus time and short churn, so a
+  constant ~2.5s timer scores FS=0 miss=0 latency ~2.0 — the gate structurally could not separate
+  timer from pixel-reader, and the pixel floor's 2 FS made the timer look BETTER.
+- Aggravating mismatch: production TickFeaturizer emits a synthetic all-1.0 pixel row on the
+  first tick (training recorder never emits a first-frame row) — OOD input, garbage-confident
+  response, poisoned hidden state.
+
+SAFETY POSTURE: unchanged, default-on stays. Current behavior == a slightly-faster fixed sleep
+with fail-open (never releases <1.5s; Phase D proved 2s slack; 43+ runs, 0 false-pass). The claim
+it "reads settle" in production is WITHDRAWN until retrained.
+
+THE FIX ARC (expert #1 v2):
+1. Re-record with RANDOMIZED stimulus times (2-12s), variable churn durations, long-churn
+   (8-15s) and ambient-churn-overlay episodes; drop the synthetic first row from TickFeaturizer.
+2. Gate upgrade — THE TIMER NULL: add a constant-latency timer as a mandatory baseline;
+   PROMOTE only if the CfC beats the best constant timer (which requires variance the timer
+   can't track). This generalizes to every future monitor: the null hypothesis is always
+   "a clock would do".
+3. LAGADO_SETTLE_DUMP tick-photography stays as the standing production debugging lever.

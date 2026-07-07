@@ -2413,6 +2413,11 @@ def settle_wait(g, log, floor_s=4.0):
             dt, last = max(now - last, 1e-3), now
             if png is None:
                 raise RuntimeError("no guest screenshot")
+            dump = os.environ.get("LAGADO_SETTLE_DUMP", "")
+            if dump:
+                os.makedirs(dump, exist_ok=True)
+                open(os.path.join(dump, "tick_%02d_%.2fs.png"
+                                  % (info["ticks"], now - t0)), "wb").write(png)
             lines = [x.strip() for x in sense.splitlines() if x.strip()]
             whash = lines[0] if lines else ""
             wcount = int(lines[1]) if len(lines) > 1 and lines[1].isdigit() else 0
