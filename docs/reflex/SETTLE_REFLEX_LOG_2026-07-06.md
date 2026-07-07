@@ -175,3 +175,58 @@ THE FIX ARC (expert #1 v2):
    can't track). This generalizes to every future monitor: the null hypothesis is always
    "a clock would do".
 3. LAGADO_SETTLE_DUMP tick-photography stays as the standing production debugging lever.
+
+## 2026-07-06 ADVERSARIAL REVIEW — two headline claims REFUTED by measurement; the record corrects itself
+
+Two independent skeptic passes (methodology + integrity) over today's findings. What they measured:
+
+**"The v1 CfC learned a clock" — REFUTED.** The decisive test the original diagnosis skipped:
+running the v1 promoted model over the v9 corpus (52 episodes, stims randomized 2.4-11.8s, never
+seen in training) gives FS=1 miss=0 with fire times TRACKING the true settles — fire-minus-truth
+stable at ~1.2s while fire-minus-stim varies 2.5-5.0s. A clock cannot track. The REAL mechanism
+of the photographed seam early-release, from dt-sweep replays: (a) SMALL-AREA CHURN BLINDNESS —
+seam churn is ~1% whole-frame; v1's busy scale was learned from ~90% reload repaints, so 1% maps
+to near-settled; (b) DT-BIAS — identical churn frames give p=0.62 at dt=0.1s but p=0.97 at
+dt>=1.0s; production's ~0.25s ticks inflate p past threshold. The OOD synthetic-first-row finding
+stands (fixed). The early release was real; the mechanism story was wrong.
+
+**"The v1 gate structurally couldn't catch a timer" — REFUTED.** Measured on the v1 corpus: the
+best CLEAN constant timer is c=7.25s, latency 5.43s — which FAILS the v1 gate's beats-floor
+latency bar (<2.233s) by 3.2s. The old gate would have rejected every clean clock. Corollary:
+v1's own FS=0 at 1.978s was impossible for any constant timer on that corpus — v1 was genuinely
+reading in-distribution inputs all along. The timer-null bar stays (cheap, principled), but the
+"structural hole" story is withdrawn.
+
+**Fold-0 "sampling-rate mismatch" — WEAKENED.** Rates vary per-EPISODE, not per-round. Two of the
+three fold-0 false-settles fit tick-vs-time patience (fixed by time-based patience); the third is
+a round-0 'quiet' episode whose labels say busy-until-8.8s — a LABEL anomaly needing audit.
+
+**v2 "genuinely reading" on folds 1-3 — SURVIVES, with the sharp caveat that the timer-killer
+episodes are weak:** captured churn ~1.1% whole-frame, and hindsight labels grant settle
+MID-CHURN on all four scroller episodes (truth should be None — corpus invariant violated).
+The exact seam failure mode — small-area churn — is therefore STILL UNVALIDATED in v2.
+
+**Integrity-side verdicts:** 347ef137's gold attribution REFUTED — its clean-run record shows
+attempts=1, NO feedback fired; the "fact-only feedback earned it" story is struck (real gold,
+unattributed, known variance-flipper; needs N>=3). 37608790 + 535364ea golds clean at N=1 (both
+prompt-brittleness-prone; need N>=3). 1de60575 prescription-dependence SURVIVES (same-task A/B:
+same falsifier fired both runs; prescriptive flipped cols, fact-only did not). "+3 golds" reads
+honestly as "+2 clean at N=1, +1 real-but-unattributed". The 23/30 projection is premature until
+a full heldout-30 rerun (three global knobs changed since 20/30). "Zero integrity cost" for the
+monitor was a CATEGORY ERROR (early release loses golds, never false-passes — 0 false-passes is
+not evidence of early-release safety).
+
+**Fixes landed this session from the review:** (1) settle_wait FLOOR CLAMP — until a v2 passes
+the timer-null gate, the monitor may only EXTEND the wait, never release below the proven 4s
+floor (early release is the one failure fail-open cannot catch); (2) falsify() scans FORMULA
+writes only — the set_cell ledger widening had false-fire vectors (literal "#1"/"Errors" text).
+
+**v2 fix list, reordered by the review:** 1. per-cell busy labeling + stronger churn episodes
+(bigger/faster-painting window) + corpus invariant truth=None-under-churn; 2. dt normalization at
+serve time; 3. time-based patience (seconds, not ticks); 4. round-0 quiet label audit. Then
+retrain, re-gate (timer-null + floor bars), and only then unclamp the seam.
+
+**Open policy question (user):** may manual/ops-doc text ever be authored from a GOLD FILE's
+shape (the one-field-each create_pivot sentence), or only from app/domain documentation? The
+>=2-task defense is weakened when both tasks' golds were read the same day. Pending: revert-
+sentence A/B on 535364ea.
