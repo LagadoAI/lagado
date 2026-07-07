@@ -774,17 +774,13 @@ def gap_feedback(gaps):
         if gp.startswith("chart_count:"):
             body, _, have = gp.partition("|")
             wantn, gotn = body.split(":")[1], body.split(":")[2]
-            lines.append("- the goal asks for %s charts; the document currently has %s%s. A repeat of an "
-                         "existing chart does not count — the missing chart must display the OTHER data "
-                         "the goal names (see the sheet's tables above)."
-                         % (wantn, gotn, (" (existing: %s)" % have) if have else ""))
+            lines.append("- the goal asks for %s charts; the document currently has %s DISTINCT "
+                         "one(s)%s." % (wantn, gotn, (" — existing: %s" % have) if have else ""))
         elif gp.startswith("pivot_count:"):
             body, _, have = gp.partition("|")
             wantn, gotn = body.split(":")[1], body.split(":")[2]
-            lines.append("- the goal asks for %s pivot tables; the emission has %s DISTINCT ones%s. "
-                         "A repeat of an existing pivot does not count — emit the MISSING pivot over "
-                         "the other field(s) the goal names."
-                         % (wantn, gotn, (" (existing: %s)" % have) if have else ""))
+            lines.append("- the goal asks for %s pivot tables; the emission has %s DISTINCT "
+                         "one(s)%s." % (wantn, gotn, (" — existing: %s" % have) if have else ""))
         elif gp.startswith("goal_literal:"):
             lines.append("- the goal asks for the text \"%s\" to be written, but no operation writes it. "
                          "Keep your other operations and ALSO emit set_cell(...) with that exact text at "
@@ -865,31 +861,20 @@ def compose_feedback(fails, fired):
             lines.append("- the column %s left %d cells empty — cover every data row." % (f["range"], f.get("empty")))
         elif f["falsifier"] == "named_target_empty":
             lines.append("- the goal names the column %s but it is still ENTIRELY EMPTY — keep your other "
-                         "operations and ALSO emit the operation that fills it (compute_column fills every "
-                         "data row of a named column; set_cell writes only ONE cell)." % f["range"])
+                         "operations and ALSO emit the operation that fills it." % f["range"])
         elif f["falsifier"] == "style_contract":
-            color, prop = f["range"].split(" ", 1)
-            lines.append("- the goal names the color %s for the property %s; no applied operation sets it. "
-                         "The color goes in the %s=\"%s\" slot of format_cells/format_cells_where — check "
-                         "you did not put it in a different slot." % (color, prop, prop, color))
+            lines.append("- the goal names the color %s for the property %s; no applied operation "
+                         "sets that property to that color." % tuple(f["range"].split(" ", 1)))
         elif f["falsifier"] == "column_fill_incomplete":
-            lines.append("- the goal names the column %s; most of its data rows are still empty. "
-                         "compute_column fills every data row of a named column; set_cell writes only "
-                         "ONE cell." % f["range"])
+            lines.append("- the goal names the column %s; most of its data rows are still empty." % f["range"])
         elif f["falsifier"] == "text_decimals":
-            lines.append("- the written text at %s embeds a number with %s. TEXT(cell, \"0.00\") "
-                         "renders a value with a fixed number of decimals inside a text formula "
-                         "(e.g. =\"...\" & TEXT(A2, \"0.00\") & \"...\")."
+            lines.append("- the written text at %s embeds a number with %s."
                          % (f["range"], f.get("sample")))
         elif f["falsifier"] == "pivot_orientation":
-            lines.append("- the goal says a field's values should be COLUMN headers (or row labels), but "
-                         "the created pivot has %s. In create_pivot, cols= puts a field's values ACROSS "
-                         "THE TOP as column headers; rows= puts them DOWN THE LEFT as row labels — "
-                         "re-emit the create_pivot with the field in the slot the goal names." % f["range"])
+            lines.append("- the goal says a field's values should be COLUMN headers (or row labels); "
+                         "the created pivot has %s." % f["range"])
         elif f["falsifier"] == "structural_target_holes":
-            lines.append("- the column %s has empty cells in rows where the other columns hold data. "
-                         "compute_column fills every data row of a named column; set_cell writes only "
-                         "ONE cell." % f["range"])
+            lines.append("- the column %s has empty cells in rows where the other columns hold data." % f["range"])
     for f in fired:
         if f.get("rows"):
             for i, row in enumerate(f["rows"]):
@@ -1794,19 +1779,9 @@ def apply_B(g, nameops, log, instr=""):
                     empty_part = p
                     break
             if empty_part:
-                # name the mechanism matching the empty range's SHAPE (interface-level, the
-                # same precedent as compute_column in the fill feedback — 0326d92d's Growth
-                # ROW got a mechanism-neutral nag twice and the model never found the verb)
-                mrow = re.match(r"([A-Za-z]+)(\d+):([A-Za-z]+)(\d+)$", empty_part.replace("$", ""))
-                shape_hint = ""
-                if mrow and mrow.group(2) == mrow.group(4):
-                    shape_hint = (" — compute_row(sheet, label, range=\"%s\", formula=\"<first "
-                                  "cell's formula>\") writes that row of formulas" % empty_part)
-                elif mrow and mrow.group(1) == mrow.group(3):
-                    shape_hint = " — compute_column fills a named column"
                 fails.append({"name": empty_part, "why": "chart range %s is entirely EMPTY — the data it "
                               "should display has not been written; emit the operations that produce those "
-                              "cells (keep the chart too)%s" % (empty_part, shape_hint)})
+                              "cells (keep the chart too)" % empty_part})
                 live = live_detect(g)
                 continue
             # deterministic chart name: per TITLE when present (retry with same title REPLACES
