@@ -1788,9 +1788,19 @@ def apply_B(g, nameops, log, instr=""):
                     empty_part = p
                     break
             if empty_part:
+                # name the mechanism matching the empty range's SHAPE (interface-level, the
+                # same precedent as compute_column in the fill feedback — 0326d92d's Growth
+                # ROW got a mechanism-neutral nag twice and the model never found the verb)
+                mrow = re.match(r"([A-Za-z]+)(\d+):([A-Za-z]+)(\d+)$", empty_part.replace("$", ""))
+                shape_hint = ""
+                if mrow and mrow.group(2) == mrow.group(4):
+                    shape_hint = (" — compute_row(sheet, label, range=\"%s\", formula=\"<first "
+                                  "cell's formula>\") writes that row of formulas" % empty_part)
+                elif mrow and mrow.group(1) == mrow.group(3):
+                    shape_hint = " — compute_column fills a named column"
                 fails.append({"name": empty_part, "why": "chart range %s is entirely EMPTY — the data it "
                               "should display has not been written; emit the operations that produce those "
-                              "cells (keep the chart too)" % empty_part})
+                              "cells (keep the chart too)%s" % (empty_part, shape_hint)})
                 live = live_detect(g)
                 continue
             # deterministic chart name: per TITLE when present (retry with same title REPLACES
