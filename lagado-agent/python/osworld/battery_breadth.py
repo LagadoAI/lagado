@@ -9,7 +9,7 @@ Usage (OSWorld dir, its venv, podman sock):
   DOCKER_HOST=unix:///run/podman/podman.sock PYTHONPATH=/home/alucard/projects/OSWorld \
   .venv/bin/python battery_breadth.py <id1> <id2> ...     # task-id prefixes; default = the 16-task sample
 """
-import json, os, sys, glob, time, traceback, signal
+import json, os, sys, glob, time, traceback, signal, subprocess
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from battery_calc import run_condition
 from run_session_task import task_input_path, memory_ok
@@ -67,6 +67,10 @@ def main():
         for tf in files:
             task = json.load(open(tf)); tid = task["id"][:8]
             print("\n── [%s] %s" % (tid, task.get("instruction", "")[:78]), flush=True)
+            # each finished task leaks its ~3.6GB podman volume; on a 15GB host two leaks
+            # breach the 4500MB boot floor mid-sweep (aborted the 2026-07-06 verify runs
+            # twice) — reclaim BEFORE the floor check, every task
+            subprocess.run("podman volume prune -f", shell=True, capture_output=True, timeout=60)
             if not memory_ok():               # FAIL FAST before each boot — never thrash toward OOM
                 print("   stopping sweep early — memory floor breached (see message above).", flush=True)
                 break
