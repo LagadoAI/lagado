@@ -666,7 +666,9 @@ def emit_gaps(reasoning, nameops, instr=""):
         wantn = {"two": 2, "three": 3, "four": 4, "2": 2, "3": 3, "4": 4}[mpc.group(1)]
         gotn = len({_op_key(n) for n in nameops if n.get("kind") == "create_pivot"})
         if gotn < wantn:
-            gaps.append("pivot_count:%d:%d" % (wantn, gotn))
+            have = "; ".join(sorted({"rows=%s cols=%s data=%s" % (n.get("rows"), n.get("cols") or "(none)",
+                                     n.get("data")) for n in nameops if n.get("kind") == "create_pivot"}))
+            gaps.append("pivot_count:%d:%d|%s" % (wantn, gotn, have))
     if "pivot" in r and not any(n.get("kind") == "create_pivot" for n in nameops):
         gaps.append("pivot")
     # TOTAL-ROW completeness: the model's reasoning commits to a labeled total/sum ROW but no total_row op was
@@ -777,8 +779,12 @@ def gap_feedback(gaps):
                          "the goal names (see the sheet's tables above)."
                          % (wantn, gotn, (" (existing: %s)" % have) if have else ""))
         elif gp.startswith("pivot_count:"):
-            wantn, gotn = gp.split(":")[1], gp.split(":")[2]
-            lines.append("- the goal asks for %s pivot tables; the emission has %s." % (wantn, gotn))
+            body, _, have = gp.partition("|")
+            wantn, gotn = body.split(":")[1], body.split(":")[2]
+            lines.append("- the goal asks for %s pivot tables; the emission has %s DISTINCT ones%s. "
+                         "A repeat of an existing pivot does not count — emit the MISSING pivot over "
+                         "the other field(s) the goal names."
+                         % (wantn, gotn, (" (existing: %s)" % have) if have else ""))
         elif gp.startswith("goal_literal:"):
             lines.append("- the goal asks for the text \"%s\" to be written, but no operation writes it. "
                          "Keep your other operations and ALSO emit set_cell(...) with that exact text at "
