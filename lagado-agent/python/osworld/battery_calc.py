@@ -297,6 +297,8 @@ GRAMMAR_B = (
     ' | "export_pdf(sheet=" str ", name=" str ", fit_pages=" str ")"'
     ' | "set_zoom(sheet=" str ", percent=" str ")"'
     ' | "dedup_column(sheet=" str ", source=" str ", target=" str ")"'
+    ' | "compute_row(sheet=" str ", label=" str ", range=" str ", formula=" str ")"'
+    ' | "split_column(sheet=" str ", source=" str ", delimiter=" str ", targets=" str ")"'
     ' | "infeasible(reason=" str ")"\n'
     'str ::= "\\"" [^"\\\\\\n\\r]* "\\""\n'
 )
@@ -369,7 +371,7 @@ EMIT_PROMPT = (
     " left; cols=field whose values become COLUMN headers across the top (use cols, not rows, when the goal says"
     " the values should be the column headers; cols=\"\" if none); data=field to aggregate; func=sum|count (to COUNT"
     " occurrences of a field, put it in BOTH rows and data with func=\"count\"). Emit a SEPARATE create_pivot for"
-    " EACH pivot table the goal asks for (e.g. 'two pivot tables, one per X and one per Y' = two create_pivot calls)\n"
+    " EACH pivot table the goal asks for (e.g. 'two pivot tables, one per X and one per Y' = two create_pivot calls, each grouping by JUST that one field: rows=\"{{X}}\", cols=\"\" then rows=\"{{Y}}\", cols=\"\")\n"
     "  freeze_panes(sheet=\"S\", range=\"A1:B1\", rows=\"\", cols=\"\")  freeze panes so cells stay visible when scrolling: give range EXACTLY as the goal names the cells to keep visible, OR give rows/cols counts (leave the unused fields \"\")\n"
     "  export_csv(sheet=\"S\", name=\"\")                    export the sheet as a CSV file next to the document (name=\"\" keeps the document's own file name)\n"
     "  transpose_range(sheet=\"S\", source=\"B2:F5\", dest=\"B8\")  paste the source range TRANSPOSED with its top-left cell at dest\n"
@@ -380,6 +382,8 @@ EMIT_PROMPT = (
     "  export_pdf(sheet=\"S\", name=\"\", fit_pages=\"1\")      export as a PDF next to the document, scaled to fit N pages (name=\"\" keeps the document's file name)\n"
     "  set_zoom(sheet=\"S\", percent=\"100\")               set the sheet's view zoom percentage\n"
     "  dedup_column(sheet=\"S\", source=\"{{Header1}}\", target=\"{{Header2}}\")  copy the source column's UNIQUE values into the target column, keeping first-occurrence order\n"
+    "  compute_row(sheet=\"S\", label=\"Growth\", range=\"C13:G13\", formula=\"=C12/B12-1\")  write a ROW of formulas: give the formula for the FIRST cell of the range; it is filled ACROSS with column-shifted references; the label lands in column A of that row (label=\"\" for none)\n"
+    "  split_column(sheet=\"S\", source=\"{{Header}}\", delimiter=\" \", targets=\"{{H1}},{{H2}},{{H3}}\")  split each cell of the source column at the delimiter and fill the named target columns with the parts (as many parts as targets; the last target takes the remainder)\n"
     "  infeasible(reason=\"...\")                          ONLY if the request cannot be done in this application at all — emit it ALONE (no other operations) and state why\n\n"
     "Refer to columns by {{Header}} name where a name is asked; use A1 cell refs for ranges. "
     "Emit ONLY the operations the goal needs, as a list of calls:")
@@ -618,7 +622,7 @@ def resample_divergence(g, instr, nameops, written, resolve_fails, fired, gaps, 
     written += w3
     # RE-VERIFY: the observation decides the exit, not the resample's say-so.
     fired = falsify(g, written) + falsify_empty_named_targets(g, instr, nameops) + \
-        falsify_style_contract(instr, nameops)
+        falsify_style_contract(instr, nameops) + falsify_pivot_orientation(instr, nameops)
     gaps = emit_gaps(log.get("reasoning", ""), nameops, instr)
     if "conditional_format" in gaps:
         gaps.remove("conditional_format")
@@ -651,7 +655,9 @@ def emit_gaps(reasoning, nameops, instr=""):
         wantn = {"two": 2, "three": 3, "four": 4, "2": 2, "3": 3, "4": 4}[mcount.group(1)]
         gotn = len({(n.get("title"), n.get("ranges")) for n in nameops if n.get("kind") == "create_chart"})
         if gotn < wantn:
-            gaps.append("chart_count:%d:%d" % (wantn, gotn))
+            have = "; ".join("%r over ranges %s" % (n.get("title") or "(untitled)", n.get("ranges"))
+                             for n in nameops if n.get("kind") == "create_chart")
+            gaps.append("chart_count:%d:%d|%s" % (wantn, gotn, have))
     # PIVOT-COUNT completeness (Pile 2, 2026-07-05 — the chart_count machinery on its second
     # ≥2-task class: 535364ea "two pivot tables" → one emitted; 30e3e107 "three pivot tables" →
     # one emitted). Goal-stated numeral vs distinct create_pivot ops; fact-only feedback.
@@ -687,6 +693,7 @@ def emit_gaps(reasoning, nameops, instr=""):
     # (8b1ce5f2) and the additive retry injected a self-referential set_cell that corrupted B2
     # (the same abed40dc failure mode this comment already warns about).
     write_kinds = ("compute_column", "set_cell", "total_row", "dedup_column", "transpose_range",
+                   "compute_row", "split_column",
                    "reorder_columns", "sort_range", "set_decimal_separator", "format_cells_where")
     if nameops and re.search(r"enter the formula|=sum\(|=average\(|type the formula|input the formula"
                              r"|calculate .{0,40}(new column|column)|new column", r) and \
@@ -763,8 +770,12 @@ def gap_feedback(gaps):
                      "individual formula cells use set_cell(sheet=\"S\", cell=\"A1\", value=\"=FORMULA\").")
     for gp in gaps:
         if gp.startswith("chart_count:"):
-            wantn, gotn = gp.split(":")[1], gp.split(":")[2]
-            lines.append("- the goal asks for %s charts; the document currently has %s." % (wantn, gotn))
+            body, _, have = gp.partition("|")
+            wantn, gotn = body.split(":")[1], body.split(":")[2]
+            lines.append("- the goal asks for %s charts; the document currently has %s%s. A repeat of an "
+                         "existing chart does not count — the missing chart must display the OTHER data "
+                         "the goal names (see the sheet's tables above)."
+                         % (wantn, gotn, (" (existing: %s)" % have) if have else ""))
         elif gp.startswith("pivot_count:"):
             wantn, gotn = gp.split(":")[1], gp.split(":")[2]
             lines.append("- the goal asks for %s pivot tables; the emission has %s." % (wantn, gotn))
@@ -844,14 +855,26 @@ def compose_feedback(fails, fired):
             lines.append("- the column %s left %d cells empty — cover every data row." % (f["range"], f.get("empty")))
         elif f["falsifier"] == "named_target_empty":
             lines.append("- the goal names the column %s but it is still ENTIRELY EMPTY — keep your other "
-                         "operations and ALSO emit the operation that fills it." % f["range"])
+                         "operations and ALSO emit the operation that fills it (compute_column fills every "
+                         "data row of a named column; set_cell writes only ONE cell)." % f["range"])
         elif f["falsifier"] == "style_contract":
-            lines.append("- the goal names the color %s for the property %s; no applied operation "
-                         "sets it." % tuple(f["range"].split(" ", 1)))
+            color, prop = f["range"].split(" ", 1)
+            lines.append("- the goal names the color %s for the property %s; no applied operation sets it. "
+                         "The color goes in the %s=\"%s\" slot of format_cells/format_cells_where — check "
+                         "you did not put it in a different slot." % (color, prop, prop, color))
         elif f["falsifier"] == "column_fill_incomplete":
-            lines.append("- the goal names the column %s; most of its data rows are still empty." % f["range"])
+            lines.append("- the goal names the column %s; most of its data rows are still empty. "
+                         "compute_column fills every data row of a named column; set_cell writes only "
+                         "ONE cell." % f["range"])
+        elif f["falsifier"] == "pivot_orientation":
+            lines.append("- the goal says a field's values should be COLUMN headers (or row labels), but "
+                         "the created pivot has %s. In create_pivot, cols= puts a field's values ACROSS "
+                         "THE TOP as column headers; rows= puts them DOWN THE LEFT as row labels — "
+                         "re-emit the create_pivot with the field in the slot the goal names." % f["range"])
         elif f["falsifier"] == "structural_target_holes":
-            lines.append("- the column %s has empty cells in rows where the other columns hold data." % f["range"])
+            lines.append("- the column %s has empty cells in rows where the other columns hold data. "
+                         "compute_column fills every data row of a named column; set_cell writes only "
+                         "ONE cell." % f["range"])
     for f in fired:
         if f.get("rows"):
             for i, row in enumerate(f["rows"]):
@@ -1023,6 +1046,12 @@ def _nameop_from_kw(verb, kw):
         return {"kind": "set_zoom", "sheet": kw.get("sheet"), "percent": kw.get("percent", "100")}
     if verb == "infeasible":
         return {"kind": "infeasible", "reason": kw.get("reason", "")}
+    if verb == "compute_row":
+        return {"kind": "compute_row", "sheet": kw.get("sheet"), "label": kw.get("label", ""),
+                "range": kw.get("range", ""), "formula": kw.get("formula", "")}
+    if verb == "split_column":
+        return {"kind": "split_column", "sheet": kw.get("sheet"), "source": kw.get("source", ""),
+                "delimiter": kw.get("delimiter", " "), "targets": kw.get("targets", "")}
     if verb == "dedup_column":
         return {"kind": "dedup_column", "sheet": kw.get("sheet"),
                 "source": kw.get("source", ""), "target": kw.get("target", "")}
@@ -1036,7 +1065,7 @@ def parse_B_nameops(text):
              "format_cells", "merge_cells", "sort_range", "set_number_format", "create_chart", "create_pivot",
              "freeze_panes", "export_csv", "transpose_range", "reorder_columns", "hide_rows_where",
              "format_cells_where", "set_decimal_separator", "export_pdf", "infeasible", "dedup_column",
-             "set_zoom")
+             "set_zoom", "compute_row", "split_column")
     for verb, body in scan_calls(text, verbs):
         op = _nameop_from_kw(verb, parse_kv(body))
         if op is not None:
@@ -1486,6 +1515,84 @@ def apply_B(g, nameops, log, instr=""):
                 rr = g.client("apply", {"op": {"op": "set", "sheet": sheet, "cell": cell, "formula": f}})
                 if rr.get("ok"):
                     written.append((sheet, cell, f))
+            live = live_detect(g)
+        elif k == "compute_row":
+            # HARNESS-LEVEL row-of-formulas verb (2026-07-06, 0326d92d class: month-on-month growth
+            # ROW — compute_column covers columns, nothing covered rows). The model gives the FIRST
+            # cell's formula; the harness fills the rest of the range with column-shifted copies
+            # (deterministic host-side re-referencing, never fillAuto). Label lands in column A.
+            sheet = nop.get("sheet")
+            rng = (nop.get("range") or "").strip().replace("$", "")
+            m = re.match(r"([A-Za-z]+)(\d+):([A-Za-z]+)(\d+)$", rng)
+            base = (nop.get("formula") or "").strip()
+            if not m or not base or m.group(2) != m.group(4):
+                fails.append({"name": rng or "(range)", "why": "compute_row needs a single-row A1 "
+                              "range like C13:G13 and the first cell's formula"})
+            else:
+                c0, row_n, c1 = m.group(1).upper(), int(m.group(2)), m.group(3).upper()
+                def _cn(cs):
+                    n = 0
+                    for ch in cs:
+                        n = n * 26 + (ord(ch) - 64)
+                    return n
+                n0, n1 = _cn(c0), _cn(c1)
+                if not base.startswith("="):
+                    base = "=" + base
+                label = (nop.get("label") or "").strip()
+                if label:
+                    g.client("apply", {"op": {"op": "set", "sheet": sheet,
+                                              "cell": "A%d" % row_n, "value": label}})
+                for off in range(0, n1 - n0 + 1):
+                    f = _shift_a1_cols(base, off)
+                    nn, out = n0 + off, ""
+                    k2 = nn
+                    while k2:
+                        k2, r2 = divmod(k2 - 1, 26)
+                        out = chr(65 + r2) + out
+                    cell = "%s%d" % (out, row_n)
+                    rr = g.client("apply", {"op": {"op": "set", "sheet": sheet, "cell": cell, "formula": f}})
+                    if rr.get("ok"):
+                        written.append((sheet, cell, f))
+                    else:
+                        fails.append({"name": cell, "why": "apply error: %s" % rr.get("error", "")[:80]})
+            live = live_detect(g)
+        elif k == "split_column":
+            # HARNESS-LEVEL text-split verb (2026-07-06, 37608790 class: 'information mixed in one
+            # field'). Read the source column, split each cell at the delimiter into as many parts
+            # as there are named targets (last target keeps the remainder), write each part under
+            # its target header. Deterministic host-side; targets resolve like any named column.
+            sheet = nop.get("sheet")
+            info = live.get(sheet, {})
+            ds = info.get("data_start", 2)
+            delim = nop.get("delimiter") or " "
+            src_tok = (nop.get("source") or "").strip().strip("{}").strip()
+            src = resolve_col(sheet, src_tok, live, fails)
+            tg_toks = [t.strip().strip("{}").strip() for t in (nop.get("targets") or "").split(",") if t.strip()]
+            tgs = [resolve_col(sheet, t, live, fails) for t in tg_toks]
+            if src and all(tgs) and tg_toks:
+                sletter, sreg = src
+                trg = _region_of_col(info, sletter, region_hint=sreg)
+                row0 = trg["data_start"] if trg else ds
+                row1 = trg["row1"] if trg else ds + max(info.get("rows", 1), 1) - 1
+                rb = g.client("read", {"sheet": sheet, "range": "%s%d:%s%d" % (sletter, row0, sletter, row1)})
+                vals = [row[0] if row else None for row in rb.get("cells", [])] if rb.get("ok") else []
+                nparts = len(tgs)
+                for i, v in enumerate(vals):
+                    if v is None or str(v).strip() == "":
+                        continue
+                    parts = str(v).split(delim, nparts - 1)
+                    for (tl, _tr), part in zip(tgs, parts):
+                        cell = "%s%d" % (tl, row0 + i)
+                        val = part.strip()
+                        num = re.match(r"^-?\d+(\.\d+)?$", val)
+                        op2 = {"op": "set", "sheet": sheet, "cell": cell}
+                        if num:
+                            op2["formula"] = "=" + val
+                        else:
+                            op2["value"] = val
+                        rr = g.client("apply", {"op": op2})
+                        if rr.get("ok"):
+                            written.append((sheet, cell, val))
             live = live_detect(g)
         elif k in ("format_cells", "merge_cells", "set_number_format", "freeze_panes", "export_csv",
                    "transpose_range", "reorder_columns", "hide_rows_where", "format_cells_where",
@@ -2035,6 +2142,7 @@ EXISTING_SHEET_FIELDS = {
     "format_cells_where": ["sheet"], "set_decimal_separator": ["sheet"], "export_pdf": ["sheet"],
     "set_zoom": ["sheet"],
     "dedup_column": ["sheet"],
+    "compute_row": ["sheet"], "split_column": ["sheet"],
 }
 
 def ground_chart_ranges(ranges, sheet, live):
@@ -2147,6 +2255,53 @@ def falsify_style_contract(instr, nameops):
                  (n.get(prop) or "").strip().lower() == hexv for n in nameops)
         if not ok:
             fired.append({"falsifier": "style_contract", "range": "%s %s" % (hexv, prop)})
+    return fired
+
+
+def _shift_a1_cols(formula, offset):
+    """Shift every RELATIVE A1 column reference in a formula right by `offset` columns —
+    the deterministic host-side row-fill (the fillAuto only-last-ref-adjusts bug class is
+    avoided by never using fillAuto). Absolute columns ($A1) stay; function names with
+    digits (LOG10) are excluded by the boundary guards."""
+    def rep(m):
+        dollar, col, row = m.group(1), m.group(2), m.group(3)
+        if dollar:
+            return m.group(0)
+        n = 0
+        for ch in col:
+            n = n * 26 + (ord(ch) - 64)
+        n += offset
+        if n < 1:
+            return m.group(0)
+        out = ""
+        while n:
+            n, r = divmod(n - 1, 26)
+            out = chr(65 + r) + out
+        return out + row
+    return re.sub(r"(?<![A-Za-z0-9_$])(\$?)([A-Z]{1,3})(\d+)(?![A-Za-z0-9_(])", rep, formula)
+
+def falsify_pivot_orientation(instr, nameops):
+    """PIVOT-ORIENTATION CONTRACT (2026-07-06 — 1de60575 sweep miss: goal said 'the promotion
+    names as the column headers', the pivot was built with the field in rows and cols empty;
+    the official evaluator compares the pivot object's col_fields → 0). Goal-verbatim phrase →
+    slot contract, op-log-grounded like the style contract: if the goal states that values
+    become COLUMN headers and an applied create_pivot has an empty cols slot (or the row-labels
+    mirror image), the named deliverable is absent. Detects absence only; never confirms."""
+    fired = []
+    low = (instr or "").lower()
+    pivots = [n for n in nameops if n.get("kind") == "create_pivot"]
+    if not pivots:
+        return fired
+    if re.search(r"as (the )?column (headers?|labels?)", low):
+        for n in pivots:
+            if not (n.get("cols") or "").strip():
+                fired.append({"falsifier": "pivot_orientation",
+                              "range": "rows=%s cols=(empty)" % (n.get("rows") or "(empty)")})
+    if re.search(r"as (the )?row (headers?|labels?)", low):
+        for n in pivots:
+            if not (n.get("rows") or "").strip():
+                fired.append({"falsifier": "pivot_orientation",
+                              "range": "cols=%s rows=(empty)" % (n.get("cols") or "(empty)")})
     return fired
 
 # ── READ-BACK + SOUND FALSIFIERS (falsify only; pass ≠ correct) ──────────────────
@@ -2516,7 +2671,7 @@ def run_core(g, task, cond, file_path, log, score_fn):
             log["nameops"] = nameops
             written, resolve_fails = apply_B(g, nameops, log, instr)
             fired = falsify(g, written) + falsify_empty_named_targets(g, instr, nameops) + \
-                falsify_style_contract(instr, nameops)
+                falsify_style_contract(instr, nameops) + falsify_pivot_orientation(instr, nameops)
             log["n_ops"] = len(nameops)
             if nameops and not resolve_fails and not fired and not gaps:
                 break                            # emitted ops, no detected fault — stop (NOT a correctness
@@ -2602,7 +2757,7 @@ def run_core(g, task, cond, file_path, log, score_fn):
                 # OBSERVE: recompute the detected faults on the live document — the loop's exit is
                 # the OBSERVATION going clean, not the model's say-so.
                 fired = falsify(g, written) + falsify_empty_named_targets(g, instr, nameops) + \
-                    falsify_style_contract(instr, [o for o, _n in applied])
+                    falsify_style_contract(instr, [o for o, _n in applied]) + falsify_pivot_orientation(instr, [o for o, _n in applied])
                 gaps = emit_gaps(log.get("reasoning", ""), [o for o, _n in applied], instr)
                 problems = (compose_feedback(resolve_fails, fired) + "\n" + gap_feedback(gaps)).strip()
                 if not problems:
@@ -2619,7 +2774,7 @@ def run_core(g, task, cond, file_path, log, score_fn):
                 w3, _refails = apply_B(g, merge_nameops([], nameops), log, instr)
                 written += w3
             fired = falsify(g, written) + falsify_empty_named_targets(g, instr, nameops) + \
-                falsify_style_contract(instr, nameops)
+                falsify_style_contract(instr, nameops) + falsify_pivot_orientation(instr, nameops)
 
     log["falsifiers_fired"] = fired
     no_fault = (len(written) > 0 and len(fired) == 0 and len(resolve_fails) == 0)
