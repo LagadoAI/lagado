@@ -2434,6 +2434,12 @@ def falsify(g, written_regions):
     All falsifiers are SOUND (they can only detect wrongness, never confirm correctness)."""
     fired = []
     for sheet, rng, formula in written_regions:
+        # LITERAL single-cell writes (plain set_cell text, in the ledger since the 2026-07-06
+        # visibility fix) are NOT formula results: F1 would fire on legit text like "#1" or
+        # "Errors", F3 on deliberate value="" clears. The formula falsifiers scan only what a
+        # FORMULA produced; literal writes are covered by the contract falsifiers (text_decimals).
+        if not str(formula).startswith("="):
+            continue
         r = g.client("read", {"sheet": sheet, "range": rng})
         if not r.get("ok"):
             fired.append({"falsifier": "read_failed", "range": rng}); continue
@@ -2621,6 +2627,15 @@ def settle_wait(g, log, floor_s=4.0):
             if settled:
                 info["settled"] = True
                 break
+        # FLOOR CLAMP (2026-07-06 adversarial review): the promoted v1 model is input-underweighted
+        # (replay: churn p=0.743 vs quiet p=0.741) — its release is a clock, and early release is
+        # the one failure fail-open cannot catch (a confident wrong answer, not an error). Until a
+        # v2 passes the timer-null gate, the monitor may only EXTEND the wait (adaptive ceiling
+        # kept), never shorten it below the proven fixed floor. Telemetry unchanged.
+        remaining = floor_s - (time.time() - t0)
+        if remaining > 0:
+            info["floor_clamped"] = True
+            time.sleep(remaining)
         info["s"] = round(time.time() - t0, 2)
         log["settle_wait"] = info
     except Exception as e:
