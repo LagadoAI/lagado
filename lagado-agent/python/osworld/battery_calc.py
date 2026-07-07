@@ -1357,8 +1357,13 @@ def apply_B(g, nameops, log, instr=""):
                             written.append((nop["sheet"], span, v))
                             filled = True
             if not filled:
-                g.client("apply", {"op": {"op": "set", "sheet": nop["sheet"], "cell": nop["cell"],
-                                          "value": v}})
+                rr = g.client("apply", {"op": {"op": "set", "sheet": nop["sheet"], "cell": nop["cell"],
+                                               "value": v}})
+                # plain single-cell writes were INVISIBLE to the read-back net (falsify/corroborate
+                # scan `written`; only the fill-shape expansions appended) — measured on 4f07fbe9:
+                # the goal-named decimal contract could not fire on a write it never saw
+                if rr.get("ok"):
+                    written.append((nop["sheet"], nop["cell"], v))
             log.setdefault("applied_set_keys", []).append(list(_op_key(nop)))
             live = live_detect(g)  # a set_cell may have written a header → re-perceive
         elif k == "compute_column":
