@@ -622,7 +622,7 @@ def resample_divergence(g, instr, nameops, written, resolve_fails, fired, gaps, 
     written += w3
     # RE-VERIFY: the observation decides the exit, not the resample's say-so.
     fired = falsify(g, written) + falsify_empty_named_targets(g, instr, nameops) + \
-        falsify_style_contract(instr, nameops) + falsify_pivot_orientation(instr, nameops)
+        falsify_style_contract(instr, nameops) + falsify_pivot_orientation(instr, nameops) + falsify_text_decimals(g, instr, written)
     gaps = emit_gaps(log.get("reasoning", ""), nameops, instr)
     if "conditional_format" in gaps:
         gaps.remove("conditional_format")
@@ -846,8 +846,12 @@ def compose_feedback(fails, fired):
                          "as {Sheet1.Header}; check the exact header spelling." % (f.get("name"), why))
     for f in fired:
         if f["falsifier"] == "error_values":
+            hint = ""
+            if "#NAME?" in str(f.get("sample", "")):
+                hint = (" #NAME? means a function name in the formula is NOT recognized by this "
+                        "application — that function does not exist here.")
             lines.append("- the column %s contains error values %s — fix the formula (text literals use "
-                         "double quotes; check function names)." % (f["range"], f.get("sample")))
+                         "double quotes; check function names).%s" % (f["range"], f.get("sample"), hint))
         elif f["falsifier"] == "text_formula_numeric":
             lines.append("- the column %s used a text concatenation but produced NUMBERS %s — the text "
                          "literal is wrong; use DOUBLE quotes (\"_\") for the separator." % (f["range"], f.get("sample")))
@@ -866,6 +870,11 @@ def compose_feedback(fails, fired):
             lines.append("- the goal names the column %s; most of its data rows are still empty. "
                          "compute_column fills every data row of a named column; set_cell writes only "
                          "ONE cell." % f["range"])
+        elif f["falsifier"] == "text_decimals":
+            lines.append("- the written text at %s embeds a number with %s. TEXT(cell, \"0.00\") "
+                         "renders a value with a fixed number of decimals inside a text formula "
+                         "(e.g. =\"...\" & TEXT(A2, \"0.00\") & \"...\")."
+                         % (f["range"], f.get("sample")))
         elif f["falsifier"] == "pivot_orientation":
             lines.append("- the goal says a field's values should be COLUMN headers (or row labels), but "
                          "the created pivot has %s. In create_pivot, cols= puts a field's values ACROSS "
@@ -2280,6 +2289,35 @@ def _shift_a1_cols(formula, offset):
         return out + row
     return re.sub(r"(?<![A-Za-z0-9_$])(\$?)([A-Z]{1,3})(\d+)(?![A-Za-z0-9_(])", rep, formula)
 
+def falsify_text_decimals(g, instr, written):
+    """DECIMAL-RENDER CONTRACT (2026-07-06 — 4f07fbe9 sweep miss: goal states 'decimal digits
+    to 2' for a number shown inside a text; the written text embedded the number with ONE
+    decimal; value-compare scored 0 silently). When the GOAL states a decimal-digit count and
+    a written cell holds TEXT with an embedded decimal number of a DIFFERENT digit count, the
+    named rendering requirement is unmet. Read-back grounded; detects mismatch only."""
+    low = (instr or "").lower()
+    m = re.search(r"decimal (?:digits?|places?)[^0-9]{0,10}(\d)", low) or         re.search(r"(\d)\s+decimal (?:digits?|places?)", low)
+    if not m:
+        return []
+    want = int(m.group(1))
+    fired = []
+    for sheet, where, _what in written:
+        cell = where if re.match(r"^[A-Za-z]+\d+$", str(where)) else None
+        if not cell:
+            continue
+        rb = g.client("read", {"sheet": sheet, "range": "%s:%s" % (cell, cell)})
+        if not rb.get("ok") or not rb.get("cells"):
+            continue
+        v = rb["cells"][0][0] if rb["cells"][0] else None
+        if not isinstance(v, str):
+            continue
+        for num in re.findall(r"\d+\.(\d+)", v):
+            if len(num) != want:
+                fired.append({"falsifier": "text_decimals",
+                              "range": "%s!%s shows %r" % (sheet, cell, v[:60]),
+                              "sample": "%d decimal digit(s), goal states %d" % (len(num), want)})
+    return fired
+
 def falsify_pivot_orientation(instr, nameops):
     """PIVOT-ORIENTATION CONTRACT (2026-07-06 — 1de60575 sweep miss: goal said 'the promotion
     names as the column headers', the pivot was built with the field in rows and cols empty;
@@ -2671,7 +2709,7 @@ def run_core(g, task, cond, file_path, log, score_fn):
             log["nameops"] = nameops
             written, resolve_fails = apply_B(g, nameops, log, instr)
             fired = falsify(g, written) + falsify_empty_named_targets(g, instr, nameops) + \
-                falsify_style_contract(instr, nameops) + falsify_pivot_orientation(instr, nameops)
+                falsify_style_contract(instr, nameops) + falsify_pivot_orientation(instr, nameops) + falsify_text_decimals(g, instr, written)
             log["n_ops"] = len(nameops)
             if nameops and not resolve_fails and not fired and not gaps:
                 break                            # emitted ops, no detected fault — stop (NOT a correctness
@@ -2774,7 +2812,7 @@ def run_core(g, task, cond, file_path, log, score_fn):
                 w3, _refails = apply_B(g, merge_nameops([], nameops), log, instr)
                 written += w3
             fired = falsify(g, written) + falsify_empty_named_targets(g, instr, nameops) + \
-                falsify_style_contract(instr, nameops) + falsify_pivot_orientation(instr, nameops)
+                falsify_style_contract(instr, nameops) + falsify_pivot_orientation(instr, nameops) + falsify_text_decimals(g, instr, written)
 
     log["falsifiers_fired"] = fired
     no_fault = (len(written) > 0 and len(fired) == 0 and len(resolve_fails) == 0)
