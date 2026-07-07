@@ -222,7 +222,7 @@ GRAMMAR_A = (
     ' | "set_cell(sheet=" str ", cell=" str ", value=" str ")"'
     ' | "add_sheet(name=" str ")"'
     ' | "rename_sheet(old=" str ", new=" str ")"\n'
-    'str ::= "\\"" [^"\\\\]* "\\""\n'
+    'str ::= "\\"" [^"\\\\\\n\\r]* "\\""\n'
 )
 PROMPT_A = (
     "You operate a spreadsheet by issuing operations. Available operations:\n"
@@ -298,7 +298,7 @@ GRAMMAR_B = (
     ' | "set_zoom(sheet=" str ", percent=" str ")"'
     ' | "dedup_column(sheet=" str ", source=" str ", target=" str ")"'
     ' | "infeasible(reason=" str ")"\n'
-    'str ::= "\\"" [^"\\\\]* "\\""\n'
+    'str ::= "\\"" [^"\\\\\\n\\r]* "\\""\n'
 )
 
 def candidate_cards(detected):
