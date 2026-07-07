@@ -14,7 +14,8 @@ resident session daemon's client (uno_client.py, local socket) in a background
 thread; the call's synchronous return time is recorded as t_stim_done = the
 app-truth completion timestamp (the teaching oracle for label generation).
 
-Usage: python3 guest_rec.py <name> <duration_s> <stim> [dump_dir]
+Usage: python3 guest_rec.py <name> <duration_s> <stim> [dump_dir] [stim_at_s]
+(v9: stim_at_s randomizes WHEN the stimulus fires — fixed 2.0s taught the v1 model a clock.)
 """
 import hashlib
 import json
@@ -140,6 +141,7 @@ def main():
     global EVAL_OK
     name, duration, spec = sys.argv[1], float(sys.argv[2]), sys.argv[3]
     dump_dir = sys.argv[4] if len(sys.argv) > 4 else ""
+    stim_at = float(sys.argv[5]) if len(sys.argv) > 5 else 2.0
     if dump_dir:
         os.makedirs(dump_dir, exist_ok=True)
     os.makedirs(OUT_DIR, exist_ok=True)
@@ -154,7 +156,7 @@ def main():
     n = 0
     t0 = time.time()
     while time.time() - t0 < duration:
-        if stim and stim.t_fired < 0 and (time.time() - t0) >= 2.0:
+        if stim and stim.t_fired < 0 and (time.time() - t0) >= stim_at:
             stim.fire(t0)
         arr = grab_pixels(n)
         wh, wc = window_sense()

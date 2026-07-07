@@ -150,7 +150,14 @@ class TickFeaturizer:
         img = Image.open(io.BytesIO(png_bytes)).convert("RGB").resize((self.W, self.H))
         arr = np.asarray(img, dtype=np.int16)
         if self.prev_px is None:
-            px = [1.0] * self.N_PIX            # no previous frame = maximally busy
+            # TRAIN/PROD PARITY (2026-07-06 brutal-suite finding): the training recorder emits NO
+            # feature row for the first frame; the old synthetic all-1.0 row here was out-of-
+            # distribution — the model answered it garbage-confidently (p=0.999 settled on a
+            # maximally-busy input) and the poisoned hidden state rode forward. First frame now
+            # primes prev state and returns None; callers skip the tick.
+            self.prev_px = arr
+            self.prev_wh = win_hash
+            return None
         else:
             changed = (np.abs(arr - self.prev_px).max(axis=2) > self.PIXEL_EPS)
             h, w = changed.shape

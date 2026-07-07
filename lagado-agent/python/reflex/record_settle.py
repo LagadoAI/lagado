@@ -54,9 +54,9 @@ def push_file(env, src, dst):
     gpy(env, "import base64;open(%r,'wb').write(base64.b64decode(%r))" % (dst, b64))
 
 
-def start_episode(env, name, duration, stim):
+def start_episode(env, name, duration, stim, stim_at=2.0):
     gpy(env, "import subprocess;subprocess.Popen(['python3','/home/user/guest_rec.py',"
-             "%r,%r,%r])" % (name, str(duration), stim))
+             "%r,%r,%r,'',%r])" % (name, str(duration), stim, str(stim_at)))
 
 
 def pull_episode(env, name, duration):
@@ -87,8 +87,17 @@ def episodes_for_round(rnd):
     exercise in-window churn; SHELL gimp is the no-back-door class; quiet/blink are
     negatives. close_visible's bracket pattern cannot match guest_rec's own argv,
     and it kills only the isolated-profile GUI instance, never the daemon's."""
+    # v9 (2026-07-06, post-brutal-suite): stim times RANDOMIZED per episode — the v1 corpus
+    # fired every stimulus at exactly t=2.0s, so elapsed-time predicted the hindsight label
+    # perfectly and the CfC learned a clock (caught by the churn test + replay). Tail time
+    # (duration after stim) keeps each episode's original budget. Seeded per round.
+    import random
+    rng = random.Random(1000 + rnd)
     guest_x = "/home/user/reflex_%d.xlsx" % rnd
-    return [
+    SCROLLER = ('SHELL:DISPLAY=:0 nohup gnome-terminal --geometry=60x20+700+300 '
+                '--title=CHURNWIN -- bash -c "while true; do date +%s.%N; sleep 0.05; '
+                'done" >/dev/null 2>&1 &')
+    base = [
         ("quiet", 14.0, ""),
         ("uno_open", 40.0, 'UNO:open:{"file": "%s"}' % guest_x),
         ("uno_reload", 50.0, 'UNO:reconcile:{"gui": true}'),
@@ -101,7 +110,18 @@ def episodes_for_round(rnd):
         ("uno_close", 14.0, 'UNO:close:{}'),
         ("launch_gimp", 120.0, "SHELL:gimp"),
         ("close_gimp", 14.0, "SHELL:pkill gimp"),
+        # TIMER-KILLER (v9): sustained scroller churn — the correct behavior is to NEVER
+        # declare settle inside the window; every constant timer false-settles here.
+        ("scroller_churn", 30.0, SCROLLER),
+        # settle only AFTER the churn source dies (bracket pattern: cannot match this
+        # recorder's own argv, only the scroller's bash -c command line).
+        ("scroller_stop", 20.0, "SHELL:pkill -f 'date [+]%s.%N'"),
     ]
+    out = []
+    for (name, tail, stim) in base:
+        at = round(rng.uniform(2.0, 12.0), 1)
+        out.append((name, round(at + tail, 1), stim, at))
+    return out
 
 
 def main():
@@ -135,9 +155,9 @@ def main():
             deploy_daemon(g, unopy)
             push_file(env, XLSX_POOL[rnd % len(XLSX_POOL)],
                       "/home/user/reflex_%d.xlsx" % rnd)
-            for name, dur, stim in episodes_for_round(rnd):
+            for name, dur, stim, stim_at in episodes_for_round(rnd):
                 ep_id = "ep%03d_%s" % (n, name)
-                start_episode(env, ep_id, dur, stim)
+                start_episode(env, ep_id, dur, stim, stim_at)
                 time.sleep(dur + 2)
                 data = pull_episode(env, ep_id, 0)
                 if not data or len(data.get("t", [])) < 8:

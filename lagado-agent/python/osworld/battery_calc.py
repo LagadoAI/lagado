@@ -2615,7 +2615,10 @@ def settle_wait(g, log, floor_s=4.0):
             whash = lines[0] if lines else ""
             wcount = int(lines[1]) if len(lines) > 1 and lines[1].isdigit() else 0
             pcount = sum(int(x) for x in lines[2:4] if x.isdigit())
-            p, settled = mon.tick(fz.step(png, whash, wcount, pcount), dt)
+            feats = fz.step(png, whash, wcount, pcount)
+            if feats is None:
+                continue                       # first frame primes the featurizer (train parity)
+            p, settled = mon.tick(feats, dt)
             if p is None:
                 raise RuntimeError("settle monitor unavailable (fail-open)")
             info["ticks"] += 1

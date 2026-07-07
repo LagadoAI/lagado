@@ -114,6 +114,35 @@ def run_baseline(ep, eps):
     return None
 
 
+def run_timer(ep, c):
+    """The TIMER NULL: fire at stimulus + a constant. This is the shortcut the 2026-07-06
+    brutal suite caught the promoted v1 CfC having learned (all episodes fired their stimulus
+    at the same time and settled on schedule, so elapsed-time predicted the hindsight label
+    perfectly and the gate could not tell a clock from a pixel-reader). Any candidate must
+    now BEAT the best constant timer — a monitor that cannot has learned nothing but time."""
+    return eval_start(ep) + c
+
+
+def pick_timer(train_eps, eps):
+    """Train-side selection of the best constant: zero-FS configs first, then fewest
+    misses, then lowest latency — the same lexicographic rule the CfC gets."""
+    best = None
+    for c in np.arange(0.25, 10.01, 0.25):
+        fs = miss = 0
+        lats = []
+        for ep in train_eps:
+            f, lat, m = score_fire(ep, eps, run_timer(ep, float(c)))
+            fs += f
+            miss += m
+            if lat is not None:
+                lats.append(lat)
+        cand = (fs, miss, float(np.mean(lats)) if lats else 99.0, float(c))
+        if best is None or cand < best:
+            best = cand
+    print("  timer-null selected: c=%.2fs (train FS=%d miss=%d)" % (best[3], best[0], best[1]))
+    return best[3]
+
+
 def episode_truth(ep, eps):
     """First oracle settle time at/after eval start (None if never settles)."""
     settled, valid = label_episode(ep, eps)
@@ -251,6 +280,8 @@ def run_fold(eps_all, data_dir, heldout_rnd):
     print("params=%d  fail-closed threshold=%.2f" % (n_params, thresh), flush=True)
 
     base = evaluate("BASELINE", lambda ep: run_baseline(ep, eps), test_eps, eps)
+    tc = pick_timer(train_eps, eps)
+    timer = evaluate("TIMER", lambda ep: run_timer(ep, tc), test_eps, eps)
     cfc = evaluate("CFC", lambda ep: cfc_fire_time(model, ep, thresh), test_eps, eps)
 
     # per-tick CPU cost (stateful single-step, the production shape)
@@ -266,8 +297,8 @@ def run_fold(eps_all, data_dir, heldout_rnd):
     torch.save(model.state_dict(),
                os.path.join(data_dir, "settle_cfc_r%d.pt" % heldout_rnd))
     return {"eps": eps, "params": n_params, "threshold": thresh,
-            "us_per_tick": round(us, 1), "baseline": base, "cfc": cfc,
-            "heldout_round": heldout_rnd}
+            "us_per_tick": round(us, 1), "baseline": base, "timer": timer,
+            "timer_c": tc, "cfc": cfc, "heldout_round": heldout_rnd}
 
 
 def main():
@@ -294,19 +325,28 @@ def main():
     agg = {"folds": len(reports), "episodes": n_ep,
            "baseline": {"false_settle": tot("false_settle", "baseline"),
                         "miss": tot("miss", "baseline"), "mean_latency_s": lat("baseline")},
+           "timer": {"false_settle": tot("false_settle", "timer"),
+                     "miss": tot("miss", "timer"), "mean_latency_s": lat("timer")},
            "cfc": {"false_settle": tot("false_settle", "cfc"),
                    "miss": tot("miss", "cfc"), "mean_latency_s": lat("cfc")},
            "params": reports[0]["params"],
            "us_per_tick": reports[0]["us_per_tick"], "reports": reports}
-    b, c = agg["baseline"], agg["cfc"]
-    promote = (c["false_settle"] <= b["false_settle"] and c["miss"] <= b["miss"]
-               and c["mean_latency_s"] is not None and b["mean_latency_s"] is not None
-               and c["mean_latency_s"] < b["mean_latency_s"])
-    agg["verdict"] = "PROMOTE" if promote else "HOLD"
+    b, c, tm = agg["baseline"], agg["cfc"], agg["timer"]
+    beats_floor = (c["false_settle"] <= b["false_settle"] and c["miss"] <= b["miss"]
+                   and c["mean_latency_s"] is not None and b["mean_latency_s"] is not None
+                   and c["mean_latency_s"] < b["mean_latency_s"])
+    # TIMER NULL (mandatory since the 2026-07-06 shortcut finding): a monitor that cannot
+    # beat the best constant clock IS that clock — it has read nothing from its senses.
+    beats_timer = (c["false_settle"] <= tm["false_settle"] and c["miss"] <= tm["miss"]
+                   and c["mean_latency_s"] is not None and tm["mean_latency_s"] is not None
+                   and c["mean_latency_s"] < tm["mean_latency_s"])
+    agg["verdict"] = "PROMOTE" if (beats_floor and beats_timer) else \
+        ("HOLD(timer-null)" if beats_floor else "HOLD")
     out = os.path.join(data_dir, "gate_report.json")
     json.dump(agg, open(out, "w"), indent=1)
     print("\n===== AGGREGATE (%d folds, %d episodes) =====" % (agg["folds"], n_ep))
     print("BASELINE  FS=%d miss=%d latency=%s" % (b["false_settle"], b["miss"], b["mean_latency_s"]))
+    print("TIMER     FS=%d miss=%d latency=%s" % (tm["false_settle"], tm["miss"], tm["mean_latency_s"]))
     print("CFC       FS=%d miss=%d latency=%s" % (c["false_settle"], c["miss"], c["mean_latency_s"]))
     print("VERDICT: %s  -> %s" % (agg["verdict"], out), flush=True)
 
