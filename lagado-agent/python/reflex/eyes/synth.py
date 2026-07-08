@@ -134,7 +134,9 @@ def make_window(kind, bases, rng):
                 o = offs[t] if sign > 0 else page.shape[0] - rh - offs[t]
                 frames[t] = base.copy()
                 frames[t, y0:y1, x0:x1] = page[o:o + rh, :]
-            label["dir"] = "down" if sign > 0 else "up"
+            # CONVENTION (fixture-pinned, test_events.py): direction = CONTENT-frame
+            # motion. Viewport sliding down the page = content moving UP on screen.
+            label["dir"] = "up" if sign > 0 else "down"
             label["mag"] = total / rh
         label["bbox"] = _bbox_norm(x0, y0, x1, y1)
 
