@@ -1,0 +1,43 @@
+{
+  "date": "2026-07-08 01:23",
+  "quick": false,
+  "params": 219352,
+  "train_windows": 3000,
+  "eval_windows": 600,
+  "eval_bases": "real VM frames unseen in training",
+  "baseline": {
+    "kind_acc": 0.9283,
+    "per_kind": {
+      "none": 1.0,
+      "scroll": 0.69,
+      "popup": 0.97,
+      "text_edit": 1.0,
+      "repaint": 0.92,
+      "animation": 0.99
+    },
+    "bbox_iou": 0.8867,
+    "dir_acc": 0.57,
+    "mag_mae": 0.03
+  },
+  "model": {
+    "kind_acc": 0.8533,
+    "per_kind": {
+      "none": 1.0,
+      "scroll": 0.6,
+      "popup": 1.0,
+      "text_edit": 0.66,
+      "repaint": 0.92,
+      "animation": 0.94
+    },
+    "bbox_iou": 0.3525,
+    "dir_acc": 0.32,
+    "mag_mae": 0.066
+  },
+  "beats": {
+    "kind_acc": false,
+    "bbox_iou": false,
+    "dir_acc": false,
+    "mag_mae": false
+  },
+  "verdict": "HOLD(baseline-null)"
+}

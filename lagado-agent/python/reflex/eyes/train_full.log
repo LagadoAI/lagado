@@ -1,0 +1,15 @@
+bases: 40 synthetic, 17 real-train, 18 real-eval
+dataset: 3000 train / 600 eval windows in 2.6s
+BASELINE (0.3s): {"kind_acc": 0.9283, "per_kind": {"none": 1.0, "scroll": 0.69, "popup": 0.97, "text_edit": 1.0, "repaint": 0.92, "animation": 0.99}, "bbox_iou": 0.8867, "dir_acc": 0.57, "mag_mae": 0.03}
+epoch 1/8: loss 2.621  eval kind_acc 0.7517  iou 0.2331
+epoch 2/8: loss 1.175  eval kind_acc 0.7867  iou 0.2597
+epoch 3/8: loss 1.043  eval kind_acc 0.7483  iou 0.2532
+epoch 4/8: loss 1.005  eval kind_acc 0.7717  iou 0.2696
+epoch 5/8: loss 0.861  eval kind_acc 0.8317  iou 0.3055
+epoch 6/8: loss 0.788  eval kind_acc 0.7917  iou 0.2839
+epoch 7/8: loss 0.714  eval kind_acc 0.7967  iou 0.3021
+epoch 8/8: loss 0.652  eval kind_acc 0.8533  iou 0.3525
+
+MODEL: {"kind_acc": 0.8533, "per_kind": {"none": 1.0, "scroll": 0.6, "popup": 1.0, "text_edit": 0.66, "repaint": 0.92, "animation": 0.94}, "bbox_iou": 0.3525, "dir_acc": 0.32, "mag_mae": 0.066}
+VERDICT: HOLD(baseline-null)  (params 219,352)
+report -> /home/alucard/projects/lagado/lagado-agent/python/reflex/eyes/eyes_report.json
