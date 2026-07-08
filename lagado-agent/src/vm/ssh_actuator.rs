@@ -410,6 +410,37 @@ mod pointer_tests {
 }
 
 #[cfg(test)]
+mod pointer_demo {
+    use super::*;
+    use crate::perception::MouseButton;
+
+    // Print the exact guest command every pointer verb emits (both backends).
+    // Run: cargo test pointer_demo -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn show_motor_emissions() {
+        let cache = |sel: &str| match sel {
+            "el_3" => Some((512, 300)),
+            "el_9" => Some((900, 650)),
+            _ => None,
+        };
+        let actions = [
+            PointerAction::ClickAt { x: 640, y: 400, button: MouseButton::Right, count: 1 },
+            PointerAction::ClickOn { selector: "el_3".into(), button: MouseButton::Left, count: 2 },
+            PointerAction::Hover { selector: "el_3".into() },
+            PointerAction::Scroll { dx: 0, dy: 5 },
+            PointerAction::Scroll { dx: -3, dy: 0 },
+            PointerAction::DragTo { from: "el_3".into(), to: "el_9".into(), button: MouseButton::Left },
+        ];
+        for a in &actions {
+            println!("\n▸ {}", a.describe());
+            println!("  ssh/xdotool : DISPLAY=:0 xdotool {}", xdotool_pointer_args(a, &cache).unwrap());
+            println!("  osworld/pyautogui: {}", crate::vm::osworld::pyautogui_pointer_stmt(a, &cache).unwrap());
+        }
+    }
+}
+
+#[cfg(test)]
 mod live_tests {
     use super::*;
     use crate::perception::Actuator;
