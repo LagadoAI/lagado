@@ -32,7 +32,7 @@
 //! the Ssh pair uses then populate the shared cache, so the cache matches what the
 //! rest of the harness parses byte-for-byte.
 
-use crate::perception::{Actuator, Perceptor, PerceptionCache, parse_ref_bboxes, parse_ref_coords};
+use crate::perception::{Actuator, Perceptor, PerceptionCache, PointerAction, parse_ref_bboxes, parse_ref_coords};
 use std::collections::HashMap;
 use std::io::Read;
 use std::sync::{Arc, Mutex};
@@ -226,6 +226,58 @@ fn format_execute(json: &serde_json::Value) -> String {
     s
 }
 
+/// Build the pyautogui statement(s) for a pointer action. PURE — selector resolution is
+/// injected — so the motor surface is unit-testable with no guest HTTP. Returns the
+/// statement body the caller wraps with the FAILSAFE prefix.
+///
+/// Sign mapping: our +dy = scroll DOWN, but `pyautogui.scroll` positive = up → negate;
+/// our +dx = scroll RIGHT = `pyautogui.hscroll` positive (X11). Drags use `dragTo` with a
+/// duration — pyautogui synthesizes the intermediate motion events toolkits require.
+pub(crate) fn pyautogui_pointer_stmt(
+    action: &PointerAction,
+    resolve: &dyn Fn(&str) -> Option<(i32, i32)>,
+) -> Result<String, String> {
+    let need = |sel: &str| resolve(sel)
+        .ok_or_else(|| format!("pointer failed: {sel} not in screen cache — call read_screen first"));
+    match action {
+        PointerAction::ClickAt { x, y, button, count } => {
+            let (b, c) = (button.pyautogui(), (*count).max(1));
+            Ok(format!("pyautogui.click({x}, {y}, clicks={c}, interval=0.12, button='{b}')"))
+        }
+        PointerAction::ClickOn { selector, button, count } => {
+            let (x, y) = need(selector)?;
+            let (b, c) = (button.pyautogui(), (*count).max(1));
+            Ok(format!("pyautogui.click({x}, {y}, clicks={c}, interval=0.12, button='{b}')"))
+        }
+        PointerAction::MoveTo { x, y } => Ok(format!("pyautogui.moveTo({x}, {y})")),
+        PointerAction::Hover { selector } => {
+            let (x, y) = need(selector)?;
+            Ok(format!("pyautogui.moveTo({x}, {y})"))
+        }
+        PointerAction::Scroll { dx, dy } => {
+            if *dx == 0 && *dy == 0 {
+                return Err("pointer failed: scroll with zero delta".to_string());
+            }
+            let mut parts: Vec<String> = Vec::new();
+            if *dy != 0 { parts.push(format!("pyautogui.scroll({})", -dy)); }
+            if *dx != 0 { parts.push(format!("pyautogui.hscroll({dx})")); }
+            Ok(parts.join("; "))
+        }
+        PointerAction::Drag { x1, y1, x2, y2, button } => {
+            let b = button.pyautogui();
+            Ok(format!(
+                "pyautogui.moveTo({x1}, {y1}); pyautogui.dragTo({x2}, {y2}, duration=0.5, button='{b}')"
+            ))
+        }
+        PointerAction::DragTo { from, to, button } => {
+            let (x1, y1) = need(from)?;
+            let (x2, y2) = need(to)?;
+            pyautogui_pointer_stmt(
+                &PointerAction::Drag { x1, y1, x2, y2, button: *button }, resolve)
+        }
+    }
+}
+
 // ── Perceptor ───────────────────────────────────────────────────────────────────
 
 pub struct OsworldPerceptor {
@@ -350,6 +402,17 @@ impl Actuator for OsworldActuator {
         match self.pyautogui(&format!("pyautogui.press({lit})")) {
             Ok(_) => format!("Pressed {key}"),
             Err(e) => format!("key failed: {e}"),
+        }
+    }
+
+    fn pointer(&self, action: &PointerAction) -> String {
+        let resolve = |sel: &str| self.cache.lock().ok().and_then(|c| c.coords.get(sel).copied());
+        match pyautogui_pointer_stmt(action, &resolve) {
+            Ok(stmt) => match self.pyautogui(&stmt) {
+                Ok(_) => action.describe(),
+                Err(e) => format!("pointer failed: {e}"),
+            },
+            Err(e) => e,
         }
     }
 
@@ -486,6 +549,47 @@ mod tests {
         t.insert("el_0".to_string(), (5, 6));
         a.set_targets(t);
         assert_eq!(p.cache.lock().unwrap().coords.get("el_0"), Some(&(5, 6)));
+    }
+
+    // ── pyautogui_pointer_stmt: the completed motor surface (pure) ─────────────
+
+    fn cached(sel: &str) -> Option<(i32, i32)> {
+        if sel == "el_2" { Some((30, 40)) } else { None }
+    }
+
+    #[test]
+    fn pointer_right_and_double_click() {
+        let r = pyautogui_pointer_stmt(
+            &PointerAction::ClickAt { x: 1, y: 2, button: crate::perception::MouseButton::Right, count: 1 },
+            &cached).unwrap();
+        assert_eq!(r, "pyautogui.click(1, 2, clicks=1, interval=0.12, button='right')");
+        let d = pyautogui_pointer_stmt(
+            &PointerAction::ClickOn { selector: "el_2".into(), button: crate::perception::MouseButton::Left, count: 2 },
+            &cached).unwrap();
+        assert_eq!(d, "pyautogui.click(30, 40, clicks=2, interval=0.12, button='left')");
+    }
+
+    #[test]
+    fn pointer_scroll_signs_negate_for_pyautogui() {
+        // our +dy = down; pyautogui.scroll positive = up → scroll(-dy).
+        let s = pyautogui_pointer_stmt(&PointerAction::Scroll { dx: 2, dy: 3 }, &cached).unwrap();
+        assert_eq!(s, "pyautogui.scroll(-3); pyautogui.hscroll(2)");
+        let up = pyautogui_pointer_stmt(&PointerAction::Scroll { dx: 0, dy: -4 }, &cached).unwrap();
+        assert_eq!(up, "pyautogui.scroll(4)");
+    }
+
+    #[test]
+    fn pointer_drag_uses_dragto_with_duration() {
+        let d = pyautogui_pointer_stmt(
+            &PointerAction::Drag { x1: 0, y1: 0, x2: 9, y2: 9, button: crate::perception::MouseButton::Left },
+            &cached).unwrap();
+        assert!(d.starts_with("pyautogui.moveTo(0, 0); pyautogui.dragTo(9, 9, duration=0.5"), "got: {d}");
+    }
+
+    #[test]
+    fn pointer_selector_miss_fails_closed() {
+        let e = pyautogui_pointer_stmt(&PointerAction::Hover { selector: "el_9".into() }, &cached).unwrap_err();
+        assert!(e.contains("el_9") && e.contains("read_screen"), "got: {e}");
     }
 
     #[test]

@@ -1,12 +1,16 @@
 //! executor.rs — Dispatches input actions to the OS via platform impl.
 
 /// A discrete input action the agent can send to the OS.
+/// `count` on MouseClick = clicks (1 single, 2 double). Scroll is in wheel clicks,
+/// +dy = down / +dx = right (same convention as `perception::PointerAction`).
 #[derive(Debug, Clone)]
 pub enum InputAction {
-    MouseClick { x: i32, y: i32, button: u8 },
-    TypeText   { text: String },
-    KeyPress   { key: String },
-    MouseMove  { x: i32, y: i32 },
+    MouseClick  { x: i32, y: i32, button: u8, count: u8 },
+    TypeText    { text: String },
+    KeyPress    { key: String },
+    MouseMove   { x: i32, y: i32 },
+    MouseScroll { dx: i32, dy: i32 },
+    MouseDrag   { x1: i32, y1: i32, x2: i32, y2: i32, button: u8 },
 }
 
 /// Result of executing an action.

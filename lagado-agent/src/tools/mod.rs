@@ -284,7 +284,8 @@ fn builtin_entries() -> Vec<ToolEntry> {
         ("vm_type",       "Type text at the current cursor position in the VM.",               Write, Tap),
         ("vm_click",      "Click a UI element by ref_id inside the VM.",                       Write, Tap),
 
-        // ── Memory (4) ──────────────────────────────────────────────────────────
+        // ── Memory (5) ──────────────────────────────────────────────────────────
+        ("recall",        "Recall the agent's own timeline (audit log + episodic events) as a calendar: current date/time, days with activity, events on a day or in a range, substring search.", Read, Auto),
         ("memory_store",  "Persist a key-value pair in the agent's long-term memory.",         Write, Tap),
         ("memory_get",    "Retrieve a value from long-term memory by key.",                    Read,  Auto),
         ("memory_list",   "List all keys in long-term memory.",                                Read,  Auto),
@@ -312,9 +313,16 @@ mod tests {
     fn reg() -> ToolRegistry { ToolRegistry::load() }
 
     #[test]
-    fn catalog_has_44_tools() {
-        // Verify the full expected tool count ships
-        assert_eq!(builtin_entries().len(), 44);
+    fn catalog_has_45_tools() {
+        // Verify the full expected tool count ships (44 + recall)
+        assert_eq!(builtin_entries().len(), 45);
+    }
+
+    #[test]
+    fn recall_is_read_auto() {
+        let r = reg();
+        assert_eq!(r.risk_for("recall"), RiskTier::Read);
+        assert_eq!(r.trust_for("recall"), TrustLevel::Auto);
     }
 
     #[test]

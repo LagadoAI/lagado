@@ -64,6 +64,9 @@ pub async fn dispatch(name: &str, args: &Map<String, Value>) -> Option<String> {
         "read_clipboard"  => clipboard_read(),
         "write_clipboard" => clipboard_write(&s("text")),
 
+        // ── Timeline (chronos calendar — pull-based episodic/audit recall) ─────
+        "recall" => crate::chronos::recall(&s("day"), &s("from"), &s("to"), &s("query"), u("limit", 20) as usize),
+
         // VM, memory, and screenshot are handled by caller (need subsystem refs)
         _ => return None,
     };

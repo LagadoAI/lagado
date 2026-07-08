@@ -27,11 +27,72 @@ pub trait Perceptor: Send + Sync {
     fn set_document_pruning(&self, _on: bool) {}
 }
 
+/// Mouse button for pointer actions. Maps to xdotool button numbers (1/2/3) and
+/// pyautogui button names ("left"/"middle"/"right") in the backends.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MouseButton { Left, Middle, Right }
+
+impl MouseButton {
+    pub fn xdotool(self) -> u8 {
+        match self { MouseButton::Left => 1, MouseButton::Middle => 2, MouseButton::Right => 3 }
+    }
+    pub fn pyautogui(self) -> &'static str {
+        match self { MouseButton::Left => "left", MouseButton::Middle => "middle", MouseButton::Right => "right" }
+    }
+}
+
+/// A raw pointer-level motor action — the full mouse vocabulary beneath the selector
+/// `click()`. Coordinate variants are the substrate a trained motor tier drives directly;
+/// selector variants resolve through the same perception cache `click()` uses, so both
+/// address modes share one contract. `count` = clicks (1 single, 2 double).
+///
+/// Direction convention: `Scroll { dx, dy }` is in WHEEL CLICKS; +dy scrolls DOWN
+/// (content moves up), +dx scrolls RIGHT — the wheel's own frame, identical across
+/// backends (xdotool buttons 4/5/6/7, pyautogui scroll/hscroll signs are mapped).
+#[derive(Debug, Clone, PartialEq)]
+pub enum PointerAction {
+    ClickAt { x: i32, y: i32, button: MouseButton, count: u8 },
+    ClickOn { selector: String, button: MouseButton, count: u8 },
+    MoveTo  { x: i32, y: i32 },
+    Hover   { selector: String },
+    Scroll  { dx: i32, dy: i32 },
+    Drag    { x1: i32, y1: i32, x2: i32, y2: i32, button: MouseButton },
+    DragTo  { from: String, to: String, button: MouseButton },
+}
+
+impl PointerAction {
+    /// Human-readable confirmation for silent-on-success backends (xdotool prints
+    /// nothing) — the same feedback-signal discipline as `Actuator::click`.
+    pub fn describe(&self) -> String {
+        match self {
+            PointerAction::ClickAt { x, y, button, count } =>
+                format!("Clicked ({x},{y}) {:?} x{count}", button),
+            PointerAction::ClickOn { selector, button, count } =>
+                format!("Clicked {selector} {:?} x{count}", button),
+            PointerAction::MoveTo { x, y } => format!("Moved pointer to ({x},{y})"),
+            PointerAction::Hover { selector } => format!("Hovering {selector}"),
+            PointerAction::Scroll { dx, dy } => format!("Scrolled dx={dx} dy={dy}"),
+            PointerAction::Drag { x1, y1, x2, y2, button } =>
+                format!("Dragged ({x1},{y1})→({x2},{y2}) {:?}", button),
+            PointerAction::DragTo { from, to, button } =>
+                format!("Dragged {from}→{to} {:?}", button),
+        }
+    }
+}
+
 /// Performs user-input actions on the desktop.
 pub trait Actuator: Send + Sync {
     fn click(&self, selector: &str) -> String;
     fn type_text(&self, selector: &str, text: &str) -> String;
     fn key(&self, key: &str) -> String;
+
+    /// The completed motor surface: right/double/middle click, hover, wheel scroll,
+    /// drag — by coordinate OR selector. Default: unavailable (mock/pre-platform
+    /// backends), same fail-open contract as `run_command`. VM-backed actuators
+    /// implement it over their native input channel (xdotool / pyautogui).
+    fn pointer(&self, _action: &PointerAction) -> String {
+        "[pointer channel unavailable]".to_string()
+    }
 
     /// Run a shell command on the target and return its output (stdout/stderr plus an
     /// `[exit N]` marker). Default: unavailable — only a VM-backed actuator implements a
@@ -78,6 +139,9 @@ impl Actuator for MockActuator {
     }
     fn key(&self, key: &str) -> String {
         format!("Pressed {key}")
+    }
+    fn pointer(&self, action: &PointerAction) -> String {
+        action.describe()
     }
 }
 

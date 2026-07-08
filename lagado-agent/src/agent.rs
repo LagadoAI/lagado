@@ -2539,33 +2539,29 @@ pub async fn agent_loop(
         // Phase 1b — live CV sense. Read the QMP screendump, decode, propose boxes over
         // the full frame. FAIL-OPEN to a11y-only on any frame error: a dead sense must
         // degrade to the remaining senses, never crash the loop (cross-cutting invariant).
-        // CV PASS — gated OFF by default (TWO-WAY door: `LAGADO_CV_ENABLE=1` flips it back on for the
-        // Phase-2 sampled-caption collector). Today CV has NO consumer — its output was DISCARDED — so
-        // off = zero per-step cost (no Canny/CC, no extra capture, no PNG decode). Even when ENABLED,
-        // raw CV boxes do NOT feed selection: captions (Phase 2), not label-less boxes, enter the
-        // candidate set. This block is the sampled-collection hook; cv_proposer/arbiter stay as the
-        // Phase-2 foundation. SEAM IS LIVE-BUT-IDLE BY DESIGN until captions are generated.
-        // CV runs when configured OR when the supervisor has escalated the sense (sense_level ≥ 1)
-        // because a11y came up blind — the GOVERNED, after-a11y-failed escalation the ax-blind probe
-        // mandated (NOT a CV pre-scan). Today CV is still inert in selection (label-less); when Phase-2
-        // captioning lands, these boxes get captioned here and become selectable.
+        // FUSION IS FED (2026-07-08 sensorimotor redesign): CV boxes flow into `fuse()` —
+        // they upgrade matching a11y elements to Sense::Both and surface VisionOnly boxes
+        // a11y is blind to as `el_N` targets (coordinate-clickable via the index space).
+        // Selection SAFETY is unchanged by mechanism: label-less boxes can never win
+        // `goal_matches_any`/`best_match_token` (pinned by `label_less_boxes_do_not_
+        // change_selection`) and `LATE_BAND_CAP` sheds inert label-less boxes first —
+        // the Phase-1 gate measured a11y+CV == a11y-only, zero selection regression.
+        // CV runs when configured (default ON; `LAGADO_CV_DISABLE=1` kill-switch) OR when
+        // the supervisor escalated the sense (sense_level ≥ 1) because a11y came up blind.
+        // Patch embeddings stay UNWIRED here on purpose: `FusedElement::patch_embd` has no
+        // consumer yet — encoding per step would be pure cost. They wire when the eyes tier
+        // (change characterizer / visual world model) becomes their consumer.
+        let mut cv_boxes: Vec<crate::perception::cv_proposer::ScreenBox> = Vec::new();
         if crate::config::cv_enabled() || sense_level >= 1 {
             capture_frame_bg(&perceptor).await;
             if let Ok(png) = std::fs::read(crate::config::FRAME_PATH) {
                 if let Ok(img) = image::load_from_memory(&png) {
                     let rgb = img.to_rgb8();
-                    let _cv_boxes = crate::perception::cv_proposer::propose_frame(rgb.as_raw(), rgb.width(), rgb.height());
-                    // TODO(Phase 2): caption `_cv_boxes` → persist for the caption pipeline → captioned
-                    // (LABELED) boxes then enter selection via `fuse`'s caption argument.
+                    cv_boxes = crate::perception::cv_proposer::propose_frame(rgb.as_raw(), rgb.width(), rgb.height());
                 }
             }
         }
-        // SELECTION IS a11y-ONLY. Raw CV boxes are label-less → `goal_matches_any`/`best_match_token`
-        // can never match them. Confidence, stated honestly: removing them is PROVEN-equivalent on the
-        // Phase-1 covered screens, expected-equivalent elsewhere BY MECHANISM (inert boxes can't win),
-        // and UNVERIFIED on sparse / custom-rendered screens where a11y is thin and CV boxes are a larger
-        // fraction — an accepted, known gap, pinned by `label_less_boxes_do_not_change_selection`.
-        let fused = crate::perception::arbiter::fuse(&bboxes, &labels, &[], &[]);
+        let fused = crate::perception::arbiter::fuse(&bboxes, &labels, &cv_boxes, &[]);
         let candidates = crate::perception::selection::build_candidates(&fused);
         chronos::log(&format!("perceive: {} a11y → {} fused", bboxes.len(), fused.len()));
         // AUDIT: log the exact labels the agent perceives this step (not just the count) so we can

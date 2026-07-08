@@ -1,4 +1,4 @@
-use crate::perception::{Actuator, PerceptionCache};
+use crate::perception::{Actuator, PerceptionCache, PointerAction};
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, Command, Stdio};
@@ -88,6 +88,68 @@ impl Drop for ShellSession {
     fn drop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
+    }
+}
+
+/// Build the xdotool argument chain for a pointer action. PURE — selector resolution is
+/// injected — so the complete motor surface is unit-testable with no live guest. Returns
+/// everything after `xdotool` (the caller prepends `DISPLAY=:0 xdotool `).
+///
+/// Wheel mapping: xdotool buttons 4=up 5=down 6=left 7=right; our convention is
+/// +dy=down, +dx=right (see `PointerAction`). Drags interleave `sleep` steps and a
+/// midpoint move — GTK/Qt drag-and-drop needs motion events between press and release,
+/// a press+teleport+release chain is dropped by most toolkits.
+pub(crate) fn xdotool_pointer_args(
+    action: &PointerAction,
+    resolve: &dyn Fn(&str) -> Option<(i32, i32)>,
+) -> Result<String, String> {
+    let need = |sel: &str| resolve(sel)
+        .ok_or_else(|| format!("pointer failed: {sel} not in screen cache — call read_screen first"));
+    match action {
+        PointerAction::ClickAt { x, y, button, count } => {
+            let (b, c) = (button.xdotool(), (*count).max(1));
+            Ok(format!("mousemove --sync {x} {y} click --repeat {c} --delay 120 {b}"))
+        }
+        PointerAction::ClickOn { selector, button, count } => {
+            let (x, y) = need(selector)?;
+            let (b, c) = (button.xdotool(), (*count).max(1));
+            Ok(format!("mousemove --sync {x} {y} click --repeat {c} --delay 120 {b}"))
+        }
+        PointerAction::MoveTo { x, y } => Ok(format!("mousemove --sync {x} {y}")),
+        PointerAction::Hover { selector } => {
+            let (x, y) = need(selector)?;
+            Ok(format!("mousemove --sync {x} {y}"))
+        }
+        PointerAction::Scroll { dx, dy } => {
+            if *dx == 0 && *dy == 0 {
+                return Err("pointer failed: scroll with zero delta".to_string());
+            }
+            let mut parts: Vec<String> = Vec::new();
+            if *dy != 0 {
+                let btn = if *dy > 0 { 5 } else { 4 };
+                parts.push(format!("click --repeat {} --delay 60 {btn}", dy.abs()));
+            }
+            if *dx != 0 {
+                let btn = if *dx > 0 { 7 } else { 6 };
+                parts.push(format!("click --repeat {} --delay 60 {btn}", dx.abs()));
+            }
+            Ok(parts.join(" "))
+        }
+        PointerAction::Drag { x1, y1, x2, y2, button } => {
+            let b = button.xdotool();
+            let (mx, my) = ((x1 + x2) / 2, (y1 + y2) / 2);
+            Ok(format!(
+                "mousemove --sync {x1} {y1} mousedown {b} sleep 0.2 \
+                 mousemove --sync {mx} {my} sleep 0.1 \
+                 mousemove --sync {x2} {y2} sleep 0.2 mouseup {b}"
+            ))
+        }
+        PointerAction::DragTo { from, to, button } => {
+            let (x1, y1) = need(from)?;
+            let (x2, y2) = need(to)?;
+            xdotool_pointer_args(
+                &PointerAction::Drag { x1, y1, x2, y2, button: *button }, resolve)
+        }
     }
 }
 
@@ -208,6 +270,17 @@ impl Actuator for SshActuator {
         }
     }
 
+    fn pointer(&self, action: &PointerAction) -> String {
+        let resolve = |sel: &str| self.cache.lock().ok().and_then(|c| c.coords.get(sel).copied());
+        match xdotool_pointer_args(action, &resolve) {
+            Ok(args) => {
+                let out = self.ssh_run(&format!("DISPLAY=:0 xdotool {args}"));
+                if out.is_empty() { action.describe() } else { out }
+            }
+            Err(e) => e,
+        }
+    }
+
     /// The command channel: run `cmd` on the guest over SSH and return its FULL result —
     /// stdout, stderr, and the exit code. Unlike `ssh_run` (the GUI path, which trims to
     /// stdout) this preserves the exit status so the caller can verify success
@@ -255,6 +328,84 @@ impl Actuator for SshActuator {
                 c.coords.insert(token, center);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod pointer_tests {
+    use super::*;
+    use crate::perception::MouseButton;
+
+    fn no_cache(_: &str) -> Option<(i32, i32)> { None }
+    fn cached(sel: &str) -> Option<(i32, i32)> {
+        match sel {
+            "el_3" => Some((100, 200)),
+            "el_7" => Some((400, 600)),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn coordinate_click_needs_no_cache() {
+        let args = xdotool_pointer_args(
+            &PointerAction::ClickAt { x: 10, y: 20, button: MouseButton::Left, count: 1 },
+            &no_cache).unwrap();
+        assert_eq!(args, "mousemove --sync 10 20 click --repeat 1 --delay 120 1");
+    }
+
+    #[test]
+    fn double_and_right_click_map_to_repeat_and_button() {
+        let dbl = xdotool_pointer_args(
+            &PointerAction::ClickAt { x: 5, y: 6, button: MouseButton::Left, count: 2 },
+            &no_cache).unwrap();
+        assert!(dbl.contains("click --repeat 2"), "got: {dbl}");
+        let right = xdotool_pointer_args(
+            &PointerAction::ClickOn { selector: "el_3".into(), button: MouseButton::Right, count: 1 },
+            &cached).unwrap();
+        assert_eq!(right, "mousemove --sync 100 200 click --repeat 1 --delay 120 3");
+    }
+
+    #[test]
+    fn selector_miss_fails_closed_with_read_screen_hint() {
+        let err = xdotool_pointer_args(
+            &PointerAction::Hover { selector: "el_99".into() }, &cached).unwrap_err();
+        assert!(err.contains("el_99") && err.contains("read_screen"), "got: {err}");
+    }
+
+    #[test]
+    fn scroll_maps_signs_to_wheel_buttons() {
+        // +dy = down = button 5; -dy = up = button 4; +dx = right = button 7; -dx = left = 6.
+        let down = xdotool_pointer_args(&PointerAction::Scroll { dx: 0, dy: 3 }, &no_cache).unwrap();
+        assert_eq!(down, "click --repeat 3 --delay 60 5");
+        let up = xdotool_pointer_args(&PointerAction::Scroll { dx: 0, dy: -2 }, &no_cache).unwrap();
+        assert_eq!(up, "click --repeat 2 --delay 60 4");
+        let both = xdotool_pointer_args(&PointerAction::Scroll { dx: -1, dy: 4 }, &no_cache).unwrap();
+        assert_eq!(both, "click --repeat 4 --delay 60 5 click --repeat 1 --delay 60 6");
+        assert!(xdotool_pointer_args(&PointerAction::Scroll { dx: 0, dy: 0 }, &no_cache).is_err());
+    }
+
+    #[test]
+    fn drag_presses_moves_through_midpoint_and_releases() {
+        let d = xdotool_pointer_args(
+            &PointerAction::Drag { x1: 0, y1: 0, x2: 100, y2: 50, button: MouseButton::Left },
+            &no_cache).unwrap();
+        let down = d.find("mousedown 1").unwrap();
+        let mid = d.find("mousemove --sync 50 25").unwrap();
+        let end = d.find("mousemove --sync 100 50").unwrap();
+        let up = d.find("mouseup 1").unwrap();
+        assert!(down < mid && mid < end && end < up, "order wrong: {d}");
+        assert!(d.contains("sleep"), "toolkits drop motionless drags: {d}");
+    }
+
+    #[test]
+    fn drag_by_selectors_resolves_both_ends() {
+        let d = xdotool_pointer_args(
+            &PointerAction::DragTo { from: "el_3".into(), to: "el_7".into(), button: MouseButton::Left },
+            &cached).unwrap();
+        assert!(d.contains("mousemove --sync 100 200") && d.contains("mousemove --sync 400 600"), "got: {d}");
+        assert!(xdotool_pointer_args(
+            &PointerAction::DragTo { from: "el_3".into(), to: "nope".into(), button: MouseButton::Left },
+            &cached).is_err());
     }
 }
 
