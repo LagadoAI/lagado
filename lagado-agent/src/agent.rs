@@ -124,6 +124,22 @@ async fn dispatch_invoke(
     }
 }
 
+/// Deterministic scroll-to-reveal ladder for the fail-closed path. When no on-screen
+/// candidate matches the sub-goal, the target is often OFF-SCREEN, not absent: nudge
+/// the viewport before each re-perceive. Wheel-click deltas (+dy = scroll down):
+/// below the fold first (UIs grow downward), deeper, then back up PAST the start so
+/// the ladder also covers targets above. Exhausts at SUBGOAL_STUCK_LIMIT, where the
+/// existing PerceptionBlind escalation takes over — bounded by construction.
+fn reveal_scroll(stuck: usize) -> Option<(i32, i32)> {
+    const DY: i32 = 5;
+    match stuck {
+        1 => Some((0, DY)),
+        2 => Some((0, DY)),
+        3 => Some((0, -3 * DY)),
+        _ => None,
+    }
+}
+
 // ── Permission request + await human approval ─────────────────────
 async fn request_and_await_approval(
     confirm_type: &str, // "tap" | "typed"
@@ -2613,6 +2629,25 @@ pub async fn agent_loop(
                 }
             }
             chronos::log(&format!("fail_closed: no candidate matches sub-goal → re-perceive ({subgoal_stuck}/{SUBGOAL_STUCK_LIMIT})"));
+            // SCROLL-TO-REVEAL (the motor surface's first driver, 2026-07-08): "no
+            // candidate matches" is often just "the target is OFF-SCREEN". Before a bare
+            // re-perceive, nudge the viewport on a bounded deterministic ladder (down,
+            // deeper, then back up past the start) so the re-perceive reads a REVEALED
+            // surface. Wheel only — view state, never data; a non-scrollable surface
+            // no-ops harmlessly (measured live: scrolling the wallpaper repaints nothing).
+            // Pointer goes to the candidates' centroid first so the wheel lands on the app.
+            if let Some((dx, dy)) = reveal_scroll(subgoal_stuck) {
+                let coords = crate::perception::selection::candidate_coords(&candidates);
+                let n = coords.len().max(1) as i32;
+                let (sx, sy) = coords.values().fold((0i32, 0i32), |a, c| (a.0 + c.0, a.1 + c.1));
+                let (cx, cy) = (sx / n, sy / n);
+                let a = actuator.clone();
+                let out = tokio::task::spawn_blocking(move || {
+                    let _ = a.pointer(&crate::perception::PointerAction::MoveTo { x: cx, y: cy });
+                    a.pointer(&crate::perception::PointerAction::Scroll { dx, dy })
+                }).await.unwrap_or_default();
+                chronos::log(&format!("reveal_scroll({subgoal_stuck}): {out}"));
+            }
             let _ = confirm_tx.send(envelope::make("action_log", envelope::ActionLogPayload {
                 text: "No on-screen element matches the current step; re-perceiving.".to_string(),
             })).await;
@@ -3067,6 +3102,23 @@ fn parse_skill_json(text: &str, fallback_goal: &str) -> Option<Skill> {
 }
 
 // ── Observation + cutoff tests ────────────────────────────────────
+
+#[cfg(test)]
+mod reveal_scroll_tests {
+    use super::reveal_scroll;
+
+    #[test]
+    fn ladder_covers_below_then_net_above_then_exhausts() {
+        // down, deeper, then far enough up to end ABOVE the start…
+        let steps: Vec<_> = (1..=3).map(|s| reveal_scroll(s).unwrap()).collect();
+        assert!(steps[0].1 > 0 && steps[1].1 > 0, "first two probe below the fold");
+        let net: i32 = steps.iter().map(|(_, dy)| dy).sum();
+        assert!(net < 0, "ladder must end net-ABOVE the start (covers targets above), net={net}");
+        // …and exhausts where PerceptionBlind takes over (bounded by construction).
+        assert_eq!(reveal_scroll(4), None);
+        assert_eq!(reveal_scroll(0), None);
+    }
+}
 
 #[cfg(test)]
 mod observation_tests {
