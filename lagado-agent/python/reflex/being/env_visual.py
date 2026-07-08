@@ -74,6 +74,16 @@ class VisualReachEnv:
         dt0 = torch.full((self.B,), 0.02)
         return self._obs(dt0)
 
+    def _soft_rect(self, cy, cx, hh, ww):
+        """ANTI-ALIASED rectangle coverage in [0,1]. Hard binary masks quantize
+        position to the pixel grid (1/56 = 0.018 screen — COARSER than the 0.012
+        click radius), destroying the sub-pixel signal terminal precision needs;
+        real screens are anti-aliased. Edge ramp = one pixel."""
+        ey, ex = 1.0 / VIS_H, 1.0 / VIS_W
+        cov_y = ((hh - (self.yy - cy).abs()) / ey + 0.5).clamp(0, 1)
+        cov_x = ((ww - (self.xx - cx).abs()) / ex + 0.5).clamp(0, 1)
+        return cov_y * cov_x
+
     def _render(self):
         """[B,1,H,W]; pure data (no grad) — the scene, not the gradient path."""
         with torch.no_grad():
@@ -81,16 +91,15 @@ class VisualReachEnv:
             img = torch.full((self.B, VIS_H, VIS_W), 0.15)
             img += torch.tensor(rng.normal(0, 0.02, size=img.shape), dtype=torch.float32)
             for k in range(self.c.n_distract):
-                dy = self.d_pos[:, k, 1].view(-1, 1, 1)
-                dx = self.d_pos[:, k, 0].view(-1, 1, 1)
-                hh = self.d_size[:, k, 1].view(-1, 1, 1)
-                ww = self.d_size[:, k, 0].view(-1, 1, 1)
-                m = ((self.yy - dy).abs() < hh) & ((self.xx - dx).abs() < ww)
-                img = torch.where(m, self.d_val[:, k].view(-1, 1, 1).expand_as(img), img)
-            ty = self.g[:, 1].view(-1, 1, 1)
-            tx = self.g[:, 0].view(-1, 1, 1)
-            tm = ((self.yy - ty).abs() < 0.035) & ((self.xx - tx).abs() < 0.025)
-            img = torch.where(tm, torch.ones_like(img), img)
+                cov = self._soft_rect(self.d_pos[:, k, 1].view(-1, 1, 1),
+                                      self.d_pos[:, k, 0].view(-1, 1, 1),
+                                      self.d_size[:, k, 1].view(-1, 1, 1),
+                                      self.d_size[:, k, 0].view(-1, 1, 1))
+                val = self.d_val[:, k].view(-1, 1, 1)
+                img = img * (1 - cov) + val * cov
+            cov = self._soft_rect(self.g[:, 1].view(-1, 1, 1), self.g[:, 0].view(-1, 1, 1),
+                                  torch.tensor(0.035), torch.tensor(0.025))
+            img = img * (1 - cov) + 1.0 * cov
             return img.clamp(0, 1).unsqueeze(1)
 
     def _obs(self, dt):

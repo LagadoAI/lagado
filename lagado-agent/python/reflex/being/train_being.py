@@ -159,7 +159,8 @@ def main():
     hands.load_state_dict(torch.load(os.path.join(OUT_DIR, "..", "hands", "hands_v0.pt")))
     hands.eval()
     opt = torch.optim.Adam(model.parameters(), lr=2e-3)
-    iters = 700 if not quick else 25
+    iters = 1800 if not quick else 25
+    sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=iters, eta_min=2e-4)
     batch = 96 if not quick else 48
     ramp = torch.linspace(0.2, 1.0, T_STEPS).unsqueeze(1)
 
@@ -173,6 +174,7 @@ def main():
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         opt.step()
+        sched.step()
         if it % 50 == 0 or it == iters - 1:
             with torch.no_grad():
                 ok, _ = episode_success(dists)

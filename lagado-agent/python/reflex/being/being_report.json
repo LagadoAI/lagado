@@ -1,8 +1,8 @@
 {
-  "date": "2026-07-08 16:04",
+  "date": "2026-07-08 17:22",
   "quick": false,
   "params": 90804,
-  "iters": 700,
+  "iters": 1800,
   "t_steps": 120,
   "vis": [
     40,
@@ -13,90 +13,90 @@
     {
       "regime": "clean",
       "pipeline_pd": {
-        "kp": 12,
-        "kd": 0.5,
-        "success": 1.0,
-        "median_steps": 12
+        "kp": 3,
+        "kd": 0.0,
+        "success": 0.992,
+        "median_steps": 20
       },
       "pipeline_hands": {
-        "success": 0.99,
-        "median_steps": 14
+        "success": 0.875,
+        "median_steps": 17
       },
       "being": {
-        "success": 0.323,
-        "median_steps": 120
+        "success": 0.836,
+        "median_steps": 23
       }
     },
     {
       "regime": "lag (in-range)",
       "pipeline_pd": {
-        "kp": 12,
-        "kd": 1.0,
-        "success": 1.0,
-        "median_steps": 13
+        "kp": 5,
+        "kd": 0.5,
+        "success": 0.992,
+        "median_steps": 19
       },
       "pipeline_hands": {
-        "success": 0.982,
-        "median_steps": 15
+        "success": 0.872,
+        "median_steps": 18
       },
       "being": {
-        "success": 0.341,
-        "median_steps": 120
+        "success": 0.805,
+        "median_steps": 26
       }
     },
     {
       "regime": "lag (extrap)",
       "pipeline_pd": {
-        "kp": 18,
+        "kp": 5,
         "kd": 1.0,
-        "success": 1.0,
-        "median_steps": 14
+        "success": 0.99,
+        "median_steps": 26
       },
       "pipeline_hands": {
-        "success": 0.979,
-        "median_steps": 14
+        "success": 0.878,
+        "median_steps": 17
       },
       "being": {
-        "success": 0.326,
-        "median_steps": 120
+        "success": 0.859,
+        "median_steps": 22
       }
     },
     {
       "regime": "moving target",
       "pipeline_pd": {
-        "kp": 18,
+        "kp": 12,
         "kd": 0.0,
-        "success": 0.555,
-        "median_steps": 98
+        "success": 0.391,
+        "median_steps": 120
       },
       "pipeline_hands": {
-        "success": 0.651,
-        "median_steps": 73
+        "success": 0.539,
+        "median_steps": 106
       },
       "being": {
-        "success": 0.32,
-        "median_steps": 120
+        "success": 0.922,
+        "median_steps": 43
       }
     },
     {
       "regime": "messy (combined)",
       "pipeline_pd": {
-        "kp": 18,
+        "kp": 12,
         "kd": 0.0,
-        "success": 0.247,
+        "success": 0.198,
         "median_steps": 120
       },
       "pipeline_hands": {
-        "success": 0.276,
+        "success": 0.234,
         "median_steps": 120
       },
       "being": {
-        "success": 0.164,
-        "median_steps": 120
+        "success": 0.667,
+        "median_steps": 78
       }
     }
   ],
-  "messy_wins": "0/4",
+  "messy_wins": "2/4",
   "clean_held": false,
   "verdict": "HOLD(pipeline-null)"
 }

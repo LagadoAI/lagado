@@ -1,0 +1,47 @@
+iter    0  loss 0.3935  aux 0.2041  train-success 0.01  (2s)
+iter   50  loss 0.2492  aux 0.2052  train-success 0.02  (93s)
+iter  100  loss 0.1509  aux 0.1735  train-success 0.02  (184s)
+iter  150  loss 0.1009  aux 0.0786  train-success 0.10  (271s)
+iter  200  loss 0.0789  aux 0.0500  train-success 0.12  (359s)
+iter  250  loss 0.0781  aux 0.0485  train-success 0.10  (446s)
+iter  300  loss 0.0688  aux 0.0416  train-success 0.20  (533s)
+iter  350  loss 0.0610  aux 0.0365  train-success 0.26  (620s)
+iter  400  loss 0.0645  aux 0.0389  train-success 0.25  (707s)
+iter  450  loss 0.0609  aux 0.0352  train-success 0.30  (793s)
+iter  500  loss 0.0595  aux 0.0361  train-success 0.20  (880s)
+iter  550  loss 0.0577  aux 0.0338  train-success 0.36  (966s)
+iter  600  loss 0.0540  aux 0.0314  train-success 0.47  (1053s)
+iter  650  loss 0.0526  aux 0.0306  train-success 0.42  (1139s)
+iter  700  loss 0.0601  aux 0.0324  train-success 0.39  (1226s)
+iter  750  loss 0.0471  aux 0.0280  train-success 0.41  (1320s)
+iter  800  loss 0.0456  aux 0.0259  train-success 0.51  (1411s)
+iter  850  loss 0.0472  aux 0.0284  train-success 0.54  (1501s)
+iter  900  loss 0.0490  aux 0.0270  train-success 0.44  (1590s)
+iter  950  loss 0.0548  aux 0.0302  train-success 0.53  (1677s)
+iter 1000  loss 0.0496  aux 0.0296  train-success 0.47  (1766s)
+iter 1050  loss 0.0476  aux 0.0277  train-success 0.55  (1857s)
+iter 1100  loss 0.0470  aux 0.0268  train-success 0.66  (1946s)
+iter 1150  loss 0.0452  aux 0.0255  train-success 0.69  (2036s)
+iter 1200  loss 0.0483  aux 0.0280  train-success 0.61  (2126s)
+iter 1250  loss 0.0402  aux 0.0238  train-success 0.68  (2215s)
+iter 1300  loss 0.0500  aux 0.0280  train-success 0.69  (2302s)
+iter 1350  loss 0.0433  aux 0.0236  train-success 0.77  (2391s)
+iter 1400  loss 0.0433  aux 0.0229  train-success 0.81  (2477s)
+iter 1450  loss 0.0429  aux 0.0253  train-success 0.78  (2564s)
+iter 1500  loss 0.0443  aux 0.0249  train-success 0.81  (2651s)
+iter 1550  loss 0.0426  aux 0.0248  train-success 0.78  (2739s)
+iter 1600  loss 0.0438  aux 0.0228  train-success 0.85  (2826s)
+iter 1650  loss 0.0379  aux 0.0219  train-success 0.83  (2914s)
+iter 1700  loss 0.0495  aux 0.0288  train-success 0.73  (3001s)
+iter 1750  loss 0.0466  aux 0.0243  train-success 0.85  (3087s)
+iter 1799  loss 0.0392  aux 0.0219  train-success 0.88  (3173s)
+
+── GATE: shared-latent being vs the two-stage pipeline (symbolic handoff) ──
+  clean              eyes→PD(kp=   3,kd=0.0): 0.992@ 20   eyes→handsCfC: 0.875@ 17   BEING: 0.836@ 23
+  lag (in-range)     eyes→PD(kp=   5,kd=0.5): 0.992@ 19   eyes→handsCfC: 0.872@ 18   BEING: 0.805@ 26
+  lag (extrap)       eyes→PD(kp=   5,kd=1.0): 0.990@ 26   eyes→handsCfC: 0.878@ 17   BEING: 0.859@ 22
+  moving target      eyes→PD(kp=  12,kd=0.0): 0.391@120   eyes→handsCfC: 0.539@106   BEING: 0.922@ 43
+  messy (combined)   eyes→PD(kp=  12,kd=0.0): 0.198@120   eyes→handsCfC: 0.234@120   BEING: 0.667@ 78
+
+VERDICT: HOLD(pipeline-null)  (params 90,804; messy wins 2/4; clean held: False)
+report -> /home/alucard/projects/lagado/lagado-agent/python/reflex/being/being_report.json
