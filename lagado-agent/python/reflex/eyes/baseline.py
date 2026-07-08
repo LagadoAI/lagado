@@ -117,48 +117,87 @@ MERGE_PAD = 3          # dilation radius before segmentation (joins fragmented d
 MIN_REGION_PX = 12     # ignore change specks below this many pixels
 
 
-def _dilate(mask, r):
-    out = mask.copy()
-    for dy in range(-r, r + 1):
-        for dx in range(-r, r + 1):
-            if dy == 0 and dx == 0:
+def segment_regions(mask, pad=None, min_px=None):
+    """Connected components (with a merge distance `pad`) of the change mask →
+    list of (x0,y0,x1,y1). RUN-BASED union-find: operates on horizontal runs, not
+    pixels, so it holds NATIVE resolution (1920×1080 in single-digit ms for UI-shaped
+    masks — the design runs at full fidelity, never a downsampled compromise)."""
+    H, W = mask.shape
+    # resolution-scaled merge distance: ~1% of the short edge (3px at model res,
+    # ~10px at native 1080p — text lines in one pane merge, distinct UI islands don't)
+    pad = max(MERGE_PAD, min(H, W) // 100) if pad is None else pad
+    min_px = MIN_REGION_PX if min_px is None else min_px
+
+    # extract row runs (vectorized per row)
+    runs = []  # (y, x0, x1) with x1 exclusive
+    active_rows = np.nonzero(mask.any(axis=1))[0]
+    for y in active_rows:
+        row = mask[y]
+        d = np.diff(row.astype(np.int8))
+        starts = np.nonzero(d == 1)[0] + 1
+        ends = np.nonzero(d == -1)[0] + 1
+        if row[0]:
+            starts = np.concatenate(([0], starts))
+        if row[-1]:
+            ends = np.concatenate((ends, [W]))
+        for s, e in zip(starts, ends):
+            runs.append((int(y), int(s), int(e)))
+    if not runs:
+        return []
+
+    # union-find over runs: two runs join if their rows are within pad+1 and their
+    # pad-expanded x-intervals overlap
+    parent = list(range(len(runs)))
+
+    def find(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    def union(i, j):
+        ri, rj = find(i), find(j)
+        if ri != rj:
+            parent[rj] = ri
+
+    by_row = {}
+    for idx, (y, s, e) in enumerate(runs):
+        by_row.setdefault(y, []).append(idx)   # in x order (rows scan left→right)
+    for y, idxs in by_row.items():
+        # same-row: consecutive runs chain when the gap is within 2*pad
+        for a, b in zip(idxs, idxs[1:]):
+            if runs[b][1] - runs[a][2] <= 2 * pad:
+                union(a, b)
+        # cross-row: two-pointer sweep over x-sorted runs (a run overlapping several
+        # runs in the other row unions each in turn before advancing)
+        for dy in range(1, pad + 2):
+            other = by_row.get(y + dy)
+            if not other:
                 continue
-            shifted = np.zeros_like(mask)
-            ys0, ys1 = max(0, dy), mask.shape[0] + min(0, dy)
-            xs0, xs1 = max(0, dx), mask.shape[1] + min(0, dx)
-            shifted[ys0:ys1, xs0:xs1] = mask[max(0, -dy):mask.shape[0] - max(0, dy),
-                                             max(0, -dx):mask.shape[1] - max(0, dx)]
-            out |= shifted
-    return out
+            i = j = 0
+            while i < len(idxs) and j < len(other):
+                _, s1, e1 = runs[idxs[i]]
+                _, s2, e2 = runs[other[j]]
+                if s1 - pad < e2 + pad and s2 - pad < e1 + pad:
+                    union(idxs[i], other[j])
+                if e1 < e2:
+                    i += 1
+                else:
+                    j += 1
 
-
-def segment_regions(mask):
-    """Connected components of the (dilated) change mask → list of (x0,y0,x1,y1).
-    Pure numpy/BFS — fine at model resolution."""
-    grown = _dilate(mask, MERGE_PAD)
-    Hm, Wm = grown.shape
-    seen = np.zeros_like(grown, dtype=bool)
+    groups = {}
+    for idx in range(len(runs)):
+        groups.setdefault(find(idx), []).append(idx)
     boxes = []
-    ys, xs = np.nonzero(grown)
-    for sy, sx in zip(ys, xs):
-        if seen[sy, sx]:
+    for members in groups.values():
+        npx = sum(runs[i][2] - runs[i][1] for i in members)
+        if npx < min_px:
             continue
-        stack = [(sy, sx)]
-        seen[sy, sx] = True
-        x0, y0, x1, y1 = sx, sy, sx + 1, sy + 1
-        npx = 0
-        while stack:
-            cy, cx = stack.pop()
-            npx += 1
-            x0, y0 = min(x0, cx), min(y0, cy)
-            x1, y1 = max(x1, cx + 1), max(y1, cy + 1)
-            for ny in (cy - 1, cy, cy + 1):
-                for nx in (cx - 1, cx, cx + 1):
-                    if 0 <= ny < Hm and 0 <= nx < Wm and grown[ny, nx] and not seen[ny, nx]:
-                        seen[ny, nx] = True
-                        stack.append((ny, nx))
-        if mask[y0:y1, x0:x1].sum() >= MIN_REGION_PX:
-            boxes.append((int(x0), int(y0), int(x1), int(y1)))
+        x0 = min(runs[i][1] for i in members)
+        x1 = max(runs[i][2] for i in members)
+        y0 = min(runs[i][0] for i in members)
+        y1 = max(runs[i][0] for i in members) + 1
+        boxes.append((int(x0), int(y0), int(x1), int(y1)))
     boxes.sort(key=lambda b: (b[1], b[0]))
     return boxes
 
