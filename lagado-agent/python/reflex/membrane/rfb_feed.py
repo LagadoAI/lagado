@@ -122,10 +122,19 @@ class RfbFeed:
         return out
 
     def updates(self, duration=10.0):
-        """Yield RectEvents for `duration` seconds; keeps the incremental request loop open."""
+        """Yield RectEvents for `duration` seconds; keeps the incremental request loop
+        open. A QUIET screen produces no updates — socket timeouts are 'the world is
+        still', not errors (the whole point of the feed: cadence set by the world)."""
         t_end = time.time() + duration
-        while time.time() < t_end:
-            evs = self._read_update()
+        while True:
+            remaining = t_end - time.time()
+            if remaining <= 0:
+                return
+            self.sock.settimeout(min(remaining, 1.0))
+            try:
+                evs = self._read_update()
+            except (socket.timeout, TimeoutError):
+                continue
             self._request(incremental=1)
             for e in evs:
                 self.events.append(e)

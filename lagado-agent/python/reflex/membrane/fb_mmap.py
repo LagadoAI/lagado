@@ -44,30 +44,39 @@ def candidate_rows(ref):
     return y, pats
 
 
-def locate(ram_path, png_path):
+def locate(ram_path, png_path, max_hits=6):
+    """Return ALL candidate (offset, stride, fmt) hits. virtio-gpu DOUBLE-BUFFERS:
+    the reference row exists in every buffer generation; only ONE offset tracks the
+    live scanout — the caller verifies against a fresh change and picks it."""
     ref = load_png(png_path)
     H, W, _ = ref.shape
     y, pats = candidate_rows(ref)
+    hits = []
     with open(ram_path, "rb") as f:
         mm = mmap.mmap(f.fileno(), 0, prot=mmap.PROT_READ)
         for name, pat in pats.items():
-            # search on a coarse probe first (first 64 bytes) then confirm full row
             probe = pat[:64]
             pos = mm.find(probe)
-            while pos >= 0:
+            while pos >= 0 and len(hits) < max_hits:
                 if mm[pos:pos + len(pat)] == pat:
                     stride = W * 4
                     off = pos - y * stride
                     if off >= 0:
-                        print(f"LOCATED format={name} fb_offset={off} stride={stride} "
-                              f"(row {y} at {pos})")
-                        mm.close()
-                        return off, stride, name
+                        hits.append((off, stride, name))
+                        print(f"CANDIDATE format={name} fb_offset={off} stride={stride}")
                 pos = mm.find(probe, pos + 1)
         mm.close()
-    print("NOT-FOUND: framebuffer rows not present in shared RAM "
-          "(VRAM-backed display? use virtio-vga, or blob=off)")
-    return None
+    if not hits:
+        print("NOT-FOUND: framebuffer rows not present in shared RAM")
+    return hits
+
+
+def read_raw(ram_path, off, W, H, stride):
+    with open(ram_path, "rb") as f:
+        mm = mmap.mmap(f.fileno(), 0, prot=mmap.PROT_READ)
+        raw = np.frombuffer(mm[off:off + H * stride], dtype=np.uint8).copy()
+        mm.close()
+    return raw.reshape(H, stride // 4, 4)[:, :W]
 
 
 def read(ram_path, off, W, H, stride, out_png, fmt="BGRX"):
