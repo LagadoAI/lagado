@@ -1,0 +1,102 @@
+{
+  "date": "2026-07-08 16:04",
+  "quick": false,
+  "params": 90804,
+  "iters": 700,
+  "t_steps": 120,
+  "vis": [
+    40,
+    56
+  ],
+  "note": "null = deterministic blob-eyes handing (x,y) to hands_v0 CfC / per-regime-tuned PD, same delayed frames",
+  "rows": [
+    {
+      "regime": "clean",
+      "pipeline_pd": {
+        "kp": 12,
+        "kd": 0.5,
+        "success": 1.0,
+        "median_steps": 12
+      },
+      "pipeline_hands": {
+        "success": 0.99,
+        "median_steps": 14
+      },
+      "being": {
+        "success": 0.323,
+        "median_steps": 120
+      }
+    },
+    {
+      "regime": "lag (in-range)",
+      "pipeline_pd": {
+        "kp": 12,
+        "kd": 1.0,
+        "success": 1.0,
+        "median_steps": 13
+      },
+      "pipeline_hands": {
+        "success": 0.982,
+        "median_steps": 15
+      },
+      "being": {
+        "success": 0.341,
+        "median_steps": 120
+      }
+    },
+    {
+      "regime": "lag (extrap)",
+      "pipeline_pd": {
+        "kp": 18,
+        "kd": 1.0,
+        "success": 1.0,
+        "median_steps": 14
+      },
+      "pipeline_hands": {
+        "success": 0.979,
+        "median_steps": 14
+      },
+      "being": {
+        "success": 0.326,
+        "median_steps": 120
+      }
+    },
+    {
+      "regime": "moving target",
+      "pipeline_pd": {
+        "kp": 18,
+        "kd": 0.0,
+        "success": 0.555,
+        "median_steps": 98
+      },
+      "pipeline_hands": {
+        "success": 0.651,
+        "median_steps": 73
+      },
+      "being": {
+        "success": 0.32,
+        "median_steps": 120
+      }
+    },
+    {
+      "regime": "messy (combined)",
+      "pipeline_pd": {
+        "kp": 18,
+        "kd": 0.0,
+        "success": 0.247,
+        "median_steps": 120
+      },
+      "pipeline_hands": {
+        "success": 0.276,
+        "median_steps": 120
+      },
+      "being": {
+        "success": 0.164,
+        "median_steps": 120
+      }
+    }
+  ],
+  "messy_wins": "0/4",
+  "clean_held": false,
+  "verdict": "HOLD(pipeline-null)"
+}

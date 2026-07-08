@@ -1,0 +1,25 @@
+iter    0  loss 0.3934  aux 0.2041  train-success 0.01  (2s)
+iter   50  loss 0.2422  aux 0.2050  train-success 0.01  (87s)
+iter  100  loss 0.1178  aux 0.1462  train-success 0.08  (174s)
+iter  150  loss 0.0850  aux 0.0569  train-success 0.09  (261s)
+iter  200  loss 0.0759  aux 0.0455  train-success 0.18  (348s)
+iter  250  loss 0.0779  aux 0.0471  train-success 0.10  (435s)
+iter  300  loss 0.0671  aux 0.0417  train-success 0.21  (524s)
+iter  350  loss 0.0606  aux 0.0378  train-success 0.30  (613s)
+iter  400  loss 0.0615  aux 0.0386  train-success 0.33  (702s)
+iter  450  loss 0.0603  aux 0.0365  train-success 0.31  (792s)
+iter  500  loss 0.0595  aux 0.0369  train-success 0.29  (880s)
+iter  550  loss 0.0580  aux 0.0360  train-success 0.26  (968s)
+iter  600  loss 0.0566  aux 0.0349  train-success 0.41  (1056s)
+iter  650  loss 0.0560  aux 0.0332  train-success 0.27  (1143s)
+iter  699  loss 0.0569  aux 0.0353  train-success 0.26  (1229s)
+
+── GATE: shared-latent being vs the two-stage pipeline (symbolic handoff) ──
+  clean              eyes→PD(kp=  12,kd=0.5): 1.000@ 12   eyes→handsCfC: 0.990@ 14   BEING: 0.323@120
+  lag (in-range)     eyes→PD(kp=  12,kd=1.0): 1.000@ 13   eyes→handsCfC: 0.982@ 15   BEING: 0.341@120
+  lag (extrap)       eyes→PD(kp=  18,kd=1.0): 1.000@ 14   eyes→handsCfC: 0.979@ 14   BEING: 0.326@120
+  moving target      eyes→PD(kp=  18,kd=0.0): 0.555@ 98   eyes→handsCfC: 0.651@ 73   BEING: 0.320@120
+  messy (combined)   eyes→PD(kp=  18,kd=0.0): 0.247@120   eyes→handsCfC: 0.276@120   BEING: 0.164@120
+
+VERDICT: HOLD(pipeline-null)  (params 90,804; messy wins 0/4; clean held: False)
+report -> /home/alucard/projects/lagado/lagado-agent/python/reflex/being/being_report.json
