@@ -1,0 +1,92 @@
+{
+  "date": "2026-07-08 15:07",
+  "quick": false,
+  "params": 45826,
+  "iters": 1500,
+  "t_steps": 140,
+  "click_radius": 0.012,
+  "note": "classical opponents are grid-tuned PER REGIME on separate seeds; CfC is ONE weight-set",
+  "rows": [
+    {
+      "regime": "clean",
+      "classical": {
+        "kp": 8,
+        "kd": 0.5,
+        "success": 1.0,
+        "median_steps": 14
+      },
+      "cfc": {
+        "success": 1.0,
+        "median_steps": 13
+      }
+    },
+    {
+      "regime": "inertia (extrap)",
+      "classical": {
+        "kp": 12,
+        "kd": 4.0,
+        "success": 1.0,
+        "median_steps": 27
+      },
+      "cfc": {
+        "success": 0.992,
+        "median_steps": 72
+      }
+    },
+    {
+      "regime": "lag (in-range)",
+      "classical": {
+        "kp": 1.5,
+        "kd": 0.5,
+        "success": 1.0,
+        "median_steps": 39
+      },
+      "cfc": {
+        "success": 1.0,
+        "median_steps": 34
+      }
+    },
+    {
+      "regime": "lag (extrap)",
+      "classical": {
+        "kp": 1.5,
+        "kd": 0.5,
+        "success": 0.725,
+        "median_steps": 104
+      },
+      "cfc": {
+        "success": 0.906,
+        "median_steps": 67
+      }
+    },
+    {
+      "regime": "moving target",
+      "classical": {
+        "kp": 5,
+        "kd": 0.0,
+        "success": 0.545,
+        "median_steps": 123
+      },
+      "cfc": {
+        "success": 0.994,
+        "median_steps": 32
+      }
+    },
+    {
+      "regime": "messy (combined)",
+      "classical": {
+        "kp": 1.5,
+        "kd": 0.0,
+        "success": 0.107,
+        "median_steps": 140
+      },
+      "cfc": {
+        "success": 0.896,
+        "median_steps": 57
+      }
+    }
+  ],
+  "messy_wins": "3/5",
+  "clean_held": true,
+  "verdict": "PARTIAL"
+}
