@@ -413,3 +413,118 @@ mod tests {
         assert_eq!(gov.next("create a folder /tmp/x", &f), None);
     }
 }
+
+// ── SENSE-MARKET DISPATCH (2026-07-08 doctrine: ladder → market) ─────────────────
+//
+// The ladder above switches planes on FAILURE. The dispatch table below picks the
+// ACTOR per sub-goal from MEASURED fitness facts BEFORE failure — deterministic
+// rules, never a learned router (cortex/subcortex doctrine). v1 is wired
+// MEASURE-FIRST: the agent loop logs the table's verdict beside the world-model
+// fact at every perceive; control flips to the table only after the logged
+// verdicts prove it against the existing routing.
+
+/// Measured inputs to the dispatch decision. Every field is a FACT with a source,
+/// never a guess: world model (staleness/coverage), selection (label_match),
+/// sequencer (command_surface), plane registry (scriptable_app), eyes (target_moving).
+#[derive(Debug, Clone, Copy)]
+pub struct DispatchFacts {
+    /// goal expressible as commands with a checkable postcondition (sequencer class)
+    pub command_surface: bool,
+    /// an in-app API plane owns this app's semantics (e.g. UNO for spreadsheets)
+    pub scriptable_app: bool,
+    /// world model: last a11y read damaged since (valid-until-damaged)
+    pub a11y_stale: bool,
+    /// world model: a11y elements / CV boxes on the same frame
+    pub coverage: f32,
+    /// selection: some candidate label shares a content token with the goal
+    pub label_match: bool,
+    /// eyes: ongoing translation/change in the target region (future; false today)
+    pub target_moving: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Actor {
+    /// the brain drives commands directly (Qwen's proven ground: 11/11 stress)
+    CliDirect,
+    /// in-app semantic ops through the app's API (native session / UNO)
+    ApiPlane,
+    /// the a11y selection loop (labels match, surface is rich enough)
+    A11ySelection,
+    /// the visual path: eyes locate, hands drive (a11y thin/stale or target moving)
+    EyesHands,
+    /// no actor fits yet — refresh perception first
+    Reperceive,
+}
+
+/// The table. Rules in priority order; returns the actor AND the rule name so every
+/// dispatch is a chronos-auditable fact ("which rule fired, on what measurements").
+pub fn dispatch_actor(f: &DispatchFacts) -> (Actor, &'static str) {
+    if f.scriptable_app {
+        return (Actor::ApiPlane, "api-plane: scriptable app owns in-app semantics");
+    }
+    if f.command_surface {
+        return (Actor::CliDirect, "cli-first: command surface + checkable postcondition");
+    }
+    if f.target_moving {
+        return (Actor::EyesHands, "visual: target moving (measured hands regime)");
+    }
+    if f.label_match && !f.a11y_stale {
+        return (Actor::A11ySelection, "a11y: fresh read + label match");
+    }
+    if f.label_match {
+        return (Actor::A11ySelection, "a11y: label match (stale read — re-read first)");
+    }
+    if f.coverage < 0.5 {
+        return (Actor::EyesHands, "visual: a11y thin vs CV (coverage < 0.5)");
+    }
+    (Actor::Reperceive, "no actor fits — refresh perception")
+}
+
+#[cfg(test)]
+mod dispatch_tests {
+    use super::*;
+
+    fn base() -> DispatchFacts {
+        DispatchFacts {
+            command_surface: false,
+            scriptable_app: false,
+            a11y_stale: false,
+            coverage: 1.0,
+            label_match: false,
+            target_moving: false,
+        }
+    }
+
+    #[test]
+    fn priority_order_is_api_cli_moving_a11y_visual() {
+        let mut f = base();
+        f.scriptable_app = true;
+        f.command_surface = true;
+        assert_eq!(dispatch_actor(&f).0, Actor::ApiPlane, "api outranks cli");
+        f.scriptable_app = false;
+        assert_eq!(dispatch_actor(&f).0, Actor::CliDirect, "cli outranks gui paths");
+        f.command_surface = false;
+        f.target_moving = true;
+        f.label_match = true;
+        assert_eq!(dispatch_actor(&f).0, Actor::EyesHands, "moving target outranks a11y");
+    }
+
+    #[test]
+    fn a11y_when_labels_match_visual_when_thin() {
+        let mut f = base();
+        f.label_match = true;
+        assert_eq!(dispatch_actor(&f).0, Actor::A11ySelection);
+        f.label_match = false;
+        f.coverage = 0.2;
+        assert_eq!(dispatch_actor(&f).0, Actor::EyesHands, "CV sees what a11y doesn't");
+        f.coverage = 1.5;
+        assert_eq!(dispatch_actor(&f).0, Actor::Reperceive, "rich surface, no match → re-look");
+    }
+
+    #[test]
+    fn every_rule_names_itself() {
+        // the audit contract: no dispatch without a stated rule
+        let (_, r) = dispatch_actor(&base());
+        assert!(!r.is_empty());
+    }
+}

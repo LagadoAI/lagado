@@ -2611,6 +2611,20 @@ pub async fn agent_loop(
             world.note_a11y_read(bboxes.len(), cv_boxes.len(), win);
             world.ingest_damage();
             chronos::log(&world.fact());
+            // dispatch-table VERDICT (measure-first: logged for audit against the
+            // existing routing; control does NOT flip until the logged verdicts prove
+            // the table). CLI/API facts are plan-level and false at this GUI site.
+            let facts = crate::plane::DispatchFacts {
+                command_surface: false,
+                scriptable_app: false,
+                a11y_stale: world.a11y_stale(),
+                coverage: world.coverage(),
+                label_match: !candidates.is_empty()
+                    && crate::perception::selection::goal_matches_any(active_goal, &candidates),
+                target_moving: false,
+            };
+            let (actor, rule) = crate::plane::dispatch_actor(&facts);
+            chronos::log(&format!("dispatch_verdict: {actor:?} — {rule}"));
         }
         // AUDIT: log the exact labels the agent perceives this step (not just the count) so we can
         // see what the selector/fail-closed actually had to match against.
