@@ -20,8 +20,12 @@ import time
 import numpy as np
 
 CANVAS = os.environ.get("LAGADO_CANVAS", "/dev/shm/lagado_canvas")
+EVENTS = os.environ.get("LAGADO_EVENTS", "/dev/shm/lagado_events")
 MAGIC = b"LGCV"
+EV_MAGIC = b"LGEV"
 HDR = 24
+EV_REC = 16          # f64 t | u16 x | u16 y | u16 w | u16 h
+EV_MAX = 4096        # ring wraps (bounded; readers track their own offset)
 
 
 class ShmCanvas:
@@ -35,11 +39,25 @@ class ShmCanvas:
         self.seq = 0
         self.mm[:HDR] = MAGIC + struct.pack("<IIIQ", w, h, self.stride, 0)
         self.px = np.frombuffer(self.mm, dtype=np.uint8, offset=HDR).reshape(h, self.stride // 4, 4)
+        # damage-event ring alongside the canvas: header = EV_MAGIC | u64 count,
+        # then EV_MAX fixed records, slot = (count-1) % EV_MAX. Readers diff `count`
+        # against their own cursor — rect-level invalidation for the world model.
+        ef = open(EVENTS, "w+b")
+        ef.truncate(12 + EV_MAX * EV_REC)
+        self.ev = mmap.mmap(ef.fileno(), 12 + EV_MAX * EV_REC)
+        ef.close()
+        self.ev[:12] = EV_MAGIC + struct.pack("<Q", 0)
+        self.ev_count = 0
 
     def patch(self, canvas_src, x, y, w, h):
         self.px[y:y + h, x:x + w] = canvas_src[y:y + h, x:x + w]
         self.seq += 1
         self.mm[16:24] = struct.pack("<Q", self.seq)   # seq LAST (readers see coherent-enough state)
+        slot = self.ev_count % EV_MAX
+        self.ev[12 + slot * EV_REC: 12 + (slot + 1) * EV_REC] = struct.pack(
+            "<dHHHH", time.time(), x, y, w, h)
+        self.ev_count += 1
+        self.ev[4:12] = struct.pack("<Q", self.ev_count)
 
 
 def open_view(path=CANVAS):

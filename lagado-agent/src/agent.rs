@@ -1855,6 +1855,11 @@ pub async fn agent_loop(
     // threshold. This also SAFELY subsumes "already-satisfied" — rather than risk a wrong auto-skip,
     // we hand back and let the human say "that's done, skip it."
     let mut subgoal_stuck: usize = 0;
+    // WORLD-MODEL RENDEZVOUS (sense-market doctrine): all senses note their reads here;
+    // staleness = valid-until-damaged (membrane event ring), coverage = a11y-vs-CV on the
+    // same frame. v1 MEASURES ONLY (facts to chronos at every perceive) — the reuse/skip
+    // optimization and the dispatch table flip on after the logged data proves them.
+    let mut world = crate::perception::world::WorldModel::new();
     const SUBGOAL_STUCK_LIMIT: usize = 4;
     // Perception sense level, bumped by the supervisor on a Sense-tier escalation (a11y → richer
     // sense). 0 = a11y-only (the floor). ≥1 turns on the CV pass below — the seam where Phase-2
@@ -2589,6 +2594,24 @@ pub async fn agent_loop(
         let fused = crate::perception::arbiter::fuse(&bboxes, &labels, &cv_boxes, &[]);
         let candidates = crate::perception::selection::build_candidates(&fused);
         chronos::log(&format!("perceive: {} a11y → {} fused", bboxes.len(), fused.len()));
+        // world-model note: this a11y read + its CV coverage, window = union of element
+        // bboxes. Then log the measured staleness/coverage fact — the dispatcher's future
+        // input, today's audit trail.
+        {
+            let win = bboxes.values().fold(None, |acc: Option<(i32, i32, i32, i32)>, &(x, y, w, h)| {
+                Some(match acc {
+                    None => (x, y, w, h),
+                    Some((ax, ay, aw, ah)) => {
+                        let (x1, y1) = ((ax + aw).max(x + w), (ay + ah).max(y + h));
+                        let (x0, y0) = (ax.min(x), ay.min(y));
+                        (x0, y0, x1 - x0, y1 - y0)
+                    }
+                })
+            });
+            world.note_a11y_read(bboxes.len(), cv_boxes.len(), win);
+            world.ingest_damage();
+            chronos::log(&world.fact());
+        }
         // AUDIT: log the exact labels the agent perceives this step (not just the count) so we can
         // see what the selector/fail-closed actually had to match against.
         chronos::log(&format!("candidates[{}] for \"{active_goal}\": {}", candidates.len(),

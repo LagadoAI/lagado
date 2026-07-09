@@ -83,7 +83,11 @@ mod tests {
     }
 
     #[test]
-    fn canvas_roundtrip_bgrx_to_rgb() {
+    fn canvas_roundtrip_and_fail_open() {
+        // ONE test: LAGADO_CANVAS is process-global; parallel tests race it.
+        std::env::set_var("LAGADO_CANVAS", "/nonexistent/lagado_zzz");
+        assert!(read_rgb().is_none());
+        assert!(canvas_seq().is_none());
         let path = std::env::temp_dir().join("lagado_canvas_test");
         let path = path.to_str().unwrap().to_string();
         write_canvas(&path, 2, 2, 7);
@@ -96,14 +100,6 @@ mod tests {
         assert_eq!(&rgb[3..6], &[0, 255, 0]);      // green
         assert_eq!(&rgb[6..9], &[255, 0, 0]);      // red
         assert_eq!(&rgb[9..12], &[255, 255, 255]); // white
-        std::env::remove_var("LAGADO_CANVAS");
-    }
-
-    #[test]
-    fn missing_or_garbage_fails_open() {
-        std::env::set_var("LAGADO_CANVAS", "/nonexistent/lagado_zzz");
-        assert!(read_rgb().is_none());
-        assert!(canvas_seq().is_none());
         std::env::remove_var("LAGADO_CANVAS");
     }
 }

@@ -245,6 +245,7 @@ pub mod delta;
 pub mod frame;
 pub mod selection;
 pub mod vlm_adapter;
+pub mod world;
 
 /// Wraps any Perceptor with a VLM layer that appends visual context to AT-SPI2 output.
 /// Reads the latest QMP frame from FRAME_PATH. Falls through to text-only when
