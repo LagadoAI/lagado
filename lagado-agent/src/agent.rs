@@ -2569,11 +2569,20 @@ pub async fn agent_loop(
         // (change characterizer / visual world model) becomes their consumer.
         let mut cv_boxes: Vec<crate::perception::cv_proposer::ScreenBox> = Vec::new();
         if crate::config::cv_enabled() || sense_level >= 1 {
-            capture_frame_bg(&perceptor).await;
-            if let Ok(png) = std::fs::read(crate::config::FRAME_PATH) {
-                if let Ok(img) = image::load_from_memory(&png) {
-                    let rgb = img.to_rgb8();
-                    cv_boxes = crate::perception::cv_proposer::propose_frame(rgb.as_raw(), rgb.width(), rgb.height());
+            // THE CAPTURE PATH (2026-07-08 canvas contract): the membrane feed keeps a
+            // raw shared-memory LIVE CANVAS current at repaint cadence — read it with
+            // zero codecs (one BGRX→RGB swizzle). No screendump request, no PNG round
+            // trip. Fail-open to the legacy FRAME_PATH PNG path when no feed is running
+            // (the canvas is additive, never a new single point of failure).
+            if let Some((rgb, w, h)) = crate::perception::canvas::read_rgb() {
+                cv_boxes = crate::perception::cv_proposer::propose_frame(&rgb, w, h);
+            } else {
+                capture_frame_bg(&perceptor).await;
+                if let Ok(png) = std::fs::read(crate::config::FRAME_PATH) {
+                    if let Ok(img) = image::load_from_memory(&png) {
+                        let rgb = img.to_rgb8();
+                        cv_boxes = crate::perception::cv_proposer::propose_frame(rgb.as_raw(), rgb.width(), rgb.height());
+                    }
                 }
             }
         }

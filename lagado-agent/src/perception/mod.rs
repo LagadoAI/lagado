@@ -238,6 +238,7 @@ pub mod linux;
 pub use linux::{LinuxPerceptor, LinuxActuator, linux_pair};
 
 pub mod arbiter;
+pub mod canvas;
 pub mod capture;
 pub mod cv_proposer;
 pub mod delta;
