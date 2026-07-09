@@ -43,9 +43,16 @@ def _drag(q, x1, y1, x2, y2, steps=8):
 
 
 def _type(q, text, ret=True):
-    m = {" ": "spc", "1": "1", "2": "2", "0": "0", "4": "4"}
+    m = {" ": "spc", "-": "minus", "/": "slash", ".": "dot", "_": "shift-minus",
+         "|": "shift-backslash", ":": "shift-semicolon", "~": "shift-grave_accent"}
     for ch in text:
-        q.key(m.get(ch, ch)); time.sleep(0.08)
+        code = m.get(ch, ch)
+        if code.startswith("shift-"):
+            q.cmd("send-key", keys=[{"type": "qcode", "data": "shift"},
+                                    {"type": "qcode", "data": code[6:]}])
+        else:
+            q.key(code)
+        time.sleep(0.08)
     if ret:
         q.key("ret")
 
