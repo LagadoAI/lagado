@@ -1,0 +1,1128 @@
+INFO:desktopenv.providers.aws.ProxyPool:Loaded 1 proxies from evaluation_examples/settings/proxy/dataimpulse.json
+=== WHOLE Lagado HARNESS × OSWorld | 20 tasks ===
+INFO:desktopenv.providers.docker.DockerProvider:KVM device found, using hardware acceleration
+INFO:desktopenv.providers.docker.DockerProvider:Started container with ports - VNC: 8006, Server: 5000, Chrome: 9222, VLC: 8081
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+
+══════ [chrome/bb5e4c0d] Can you make Bing the main search engine when I look stuff up on the internet?
+Google ['Microsoft Bing', 'Bing']
+   agent: 
+   ⟹ score=0.0
+
+══════ [chrome/7b6c7e24] Can you help me clean up my computer by getting rid of all the tracking things that Amazon
+INFO:desktopenv.providers.docker.DockerProvider:Stopping VM...
+INFO:desktopenv.providers.docker.DockerProvider:KVM device found, using hardware acceleration
+INFO:desktopenv.providers.docker.DockerProvider:Started container with ports - VNC: 8008, Server: 5000, Chrome: 9222, VLC: 8081
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+ERROR:desktopenv.setup:Attempt 1: Failed to connect, retrying. Error: BrowserType.connect_over_cdp: socket hang up
+Call log:
+  - <ws preparing> retrieving websocket url from http://localhost:9222
+
+   agent: 
+   ⟹ score=1.0
+
+══════ [chrome/35253b65] Hey, I need a quick way back to this site. Could you whip up a shortcut on my desktop for 
+INFO:desktopenv.providers.docker.DockerProvider:Stopping VM...
+INFO:desktopenv.providers.docker.DockerProvider:KVM device found, using hardware acceleration
+INFO:desktopenv.providers.docker.DockerProvider:Started container with ports - VNC: 8008, Server: 5000, Chrome: 9224, VLC: 8081
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+ERROR:desktopenv.setup:Attempt 1: Failed to connect, retrying. Error: BrowserType.connect_over_cdp: socket hang up
+Call log:
+  - <ws preparing> retrieving websocket url from http://localhost:9224
+
+WARNING:desktopenv.metrics.chrome:[SHORTCUT_CHECK] ✗ No shortcut found with name: Play Puzzle Game 2048
+   agent: 
+   ⟹ score=0.0
+
+══════ [chrome/a96b564e] Navigate to the "Community" category in the FlightAware discussions forum and open the top
+INFO:desktopenv.providers.docker.DockerProvider:Stopping VM...
+INFO:desktopenv.providers.docker.DockerProvider:KVM device found, using hardware acceleration
+INFO:desktopenv.providers.docker.DockerProvider:Started container with ports - VNC: 8006, Server: 5000, Chrome: 9225, VLC: 8081
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+ERROR:desktopenv.setup:Attempt 1: Failed to connect, retrying. Error: BrowserType.connect_over_cdp: socket hang up
+Call log:
+  - <ws preparing> retrieving websocket url from http://localhost:9225
+
+VM architecture: x86_64 (arm=False)
+Active tab url now: https://flightaware.com
+   agent: {"kind":"status","payload":{"detail":"The screen doesn't match what this step needs (\"Click the Applications menu\") — handing back to you. It may already be done, or the screen went somewhere I didn
+   ⟹ score=0.0
+
+══════ [gimp/7a4deb26] Could you tone down the brightness of my photo?
+INFO:desktopenv.providers.docker.DockerProvider:Stopping VM...
+INFO:desktopenv.providers.docker.DockerProvider:KVM device found, using hardware acceleration
+INFO:desktopenv.providers.docker.DockerProvider:Started container with ports - VNC: 8008, Server: 5000, Chrome: 9223, VLC: 8081
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+   agent: 
+   ⟹ score=0.0
+
+══════ [gimp/554785e9] Could you assist me in enhancing the color vibrancy of my photo?
+INFO:desktopenv.providers.docker.DockerProvider:Stopping VM...
+INFO:desktopenv.providers.docker.DockerProvider:KVM device found, using hardware acceleration
+INFO:desktopenv.providers.docker.DockerProvider:Started container with ports - VNC: 8008, Server: 5000, Chrome: 9223, VLC: 8081
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+   agent: 
+   ⟹ score=0.0
+
+══════ [libreoffice_calc/357ef137] I have calculated the total work hours from the everday hours. And I have an hourly rate. 
+INFO:desktopenv.providers.docker.DockerProvider:Stopping VM...
+INFO:desktopenv.providers.docker.DockerProvider:KVM device found, using hardware acceleration
+INFO:desktopenv.providers.docker.DockerProvider:Started container with ports - VNC: 8006, Server: 5000, Chrome: 9223, VLC: 8081
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+   agent: {"kind":"status","payload":{"detail":"I operated the app's tools but couldn't verify the goal — handing back.","state":"goal_done"},"v":1}
+   ⟹ score=0.0
+
+══════ [libreoffice_calc/42e0a640] Compute the sum of "Revenue" and "Total Expenses" and put the results under two columns na
+INFO:desktopenv.providers.docker.DockerProvider:Stopping VM...
+INFO:desktopenv.providers.docker.DockerProvider:KVM device found, using hardware acceleration
+INFO:desktopenv.providers.docker.DockerProvider:Started container with ports - VNC: 8008, Server: 5000, Chrome: 9223, VLC: 8081
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+   agent: {"kind":"status","payload":{"detail":"I operated the app's tools but couldn't verify the goal — handing back.","state":"goal_done"},"v":1}
+   ⟹ score=0.0
+
+══════ [libreoffice_calc/abed40dc] Check the names in column "Names with duplicates" and put the unique ones in column "Uniqu
+INFO:desktopenv.providers.docker.DockerProvider:Stopping VM...
+INFO:desktopenv.providers.docker.DockerProvider:KVM device found, using hardware acceleration
+INFO:desktopenv.providers.docker.DockerProvider:Started container with ports - VNC: 8008, Server: 5000, Chrome: 9223, VLC: 8081
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+   agent: {"kind":"status","payload":{"detail":"I operated the app's tools but couldn't verify the goal — handing back.","state":"goal_done"},"v":1}
+   ⟹ score=0.0
+
+══════ [libreoffice_impress/5d901039] I want to turn the rectangular image of Columbus on the first page into a cover page. Coul
+INFO:desktopenv.providers.docker.DockerProvider:Stopping VM...
+INFO:desktopenv.providers.docker.DockerProvider:KVM device found, using hardware acceleration
+INFO:desktopenv.providers.docker.DockerProvider:Started container with ports - VNC: 8008, Server: 5000, Chrome: 9223, VLC: 8081
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+   agent: 
+   ⟹ score=0.0
+
+══════ [libreoffice_impress/550ce7e7] I am checking our soccer club's to-do list for the last semester and adding strike-through
+INFO:desktopenv.providers.docker.DockerProvider:Stopping VM...
+INFO:desktopenv.providers.docker.DockerProvider:KVM device found, using hardware acceleration
+INFO:desktopenv.providers.docker.DockerProvider:Started container with ports - VNC: 8007, Server: 5000, Chrome: 9223, VLC: 8081
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+2026-07-08 21:30:37,478 - desktopenv.metric.slides.debug - DEBUG - === COMPARING PPTX FILES ===
+DEBUG:desktopenv.metric.slides.debug:=== COMPARING PPTX FILES ===
+2026-07-08 21:30:37,478 - desktopenv.metric.slides.debug - DEBUG - File 1: cache/550ce7e7-747b-495f-b122-acdc4d0b8e54/New_Club_Spring_2018_Training.pptx
+DEBUG:desktopenv.metric.slides.debug:File 1: cache/550ce7e7-747b-495f-b122-acdc4d0b8e54/New_Club_Spring_2018_Training.pptx
+2026-07-08 21:30:37,478 - desktopenv.metric.slides.debug - DEBUG - File 2: cache/550ce7e7-747b-495f-b122-acdc4d0b8e54/New_Club_Spring_2018_Training_Gold.pptx
+DEBUG:desktopenv.metric.slides.debug:File 2: cache/550ce7e7-747b-495f-b122-acdc4d0b8e54/New_Club_Spring_2018_Training_Gold.pptx
+2026-07-08 21:30:37,478 - desktopenv.metric.slides.debug - DEBUG - File 1 slides: 7
+DEBUG:desktopenv.metric.slides.debug:File 1 slides: 7
+2026-07-08 21:30:37,478 - desktopenv.metric.slides.debug - DEBUG - File 2 slides: 7
+DEBUG:desktopenv.metric.slides.debug:File 2 slides: 7
+2026-07-08 21:30:37,478 - desktopenv.metric.slides.debug - DEBUG - --- Comparing Slide 1 ---
+DEBUG:desktopenv.metric.slides.debug:--- Comparing Slide 1 ---
+2026-07-08 21:30:37,478 - desktopenv.metric.slides.debug - DEBUG - Slide 1 - Shapes count: File1=3, File2=3
+DEBUG:desktopenv.metric.slides.debug:Slide 1 - Shapes count: File1=3, File2=3
+2026-07-08 21:30:37,481 - desktopenv.metric.slides.debug - DEBUG - Slide 1 - Text shapes found: File1=2, File2=2
+DEBUG:desktopenv.metric.slides.debug:Slide 1 - Text shapes found: File1=2, File2=2
+2026-07-08 21:30:37,481 - desktopenv.metric.slides.debug - DEBUG -   Shape 1 - Type: PLACEHOLDER (14) vs PLACEHOLDER (14)
+DEBUG:desktopenv.metric.slides.debug:  Shape 1 - Type: PLACEHOLDER (14) vs PLACEHOLDER (14)
+2026-07-08 21:30:37,481 - desktopenv.metric.slides.debug - DEBUG -   Shape 1 - Text: 'New Club and Organization Training' vs 'New Club and Organization Training'
+DEBUG:desktopenv.metric.slides.debug:  Shape 1 - Text: 'New Club and Organization Training' vs 'New Club and Organization Training'
+2026-07-08 21:30:37,481 - desktopenv.metric.slides.debug - DEBUG -   Shape 1 - Position: (2340000, 1816920) vs (2340000, 1816920)
+DEBUG:desktopenv.metric.slides.debug:  Shape 1 - Position: (2340000, 1816920) vs (2340000, 1816920)
+2026-07-08 21:30:37,481 - desktopenv.metric.slides.debug - DEBUG -   Shape 1 - Size: (7491600, 3042720) vs (7491600, 3042720)
+DEBUG:desktopenv.metric.slides.debug:  Shape 1 - Size: (7491600, 3042720) vs (7491600, 3042720)
+2026-07-08 21:30:37,482 - desktopenv.metric.slides.debug - DEBUG -     Slide 1, Shape 1, Para 1 - Alignment: 'CENTER' vs 'CENTER'
+DEBUG:desktopenv.metric.slides.debug:    Slide 1, Shape 1, Para 1 - Alignment: 'CENTER' vs 'CENTER'
+2026-07-08 21:30:37,482 - desktopenv.metric.slides.debug - DEBUG -     Slide 1, Shape 1, Para 1 - Text: 'New Club and Organization Training' vs 'New Club and Organization Training'
+DEBUG:desktopenv.metric.slides.debug:    Slide 1, Shape 1, Para 1 - Text: 'New Club and Organization Training' vs 'New Club and Organization Training'
+2026-07-08 21:30:37,484 - desktopenv.metric.slides.debug - DEBUG -   Shape 2 - Type: PLACEHOLDER (14) vs PLACEHOLDER (14)
+DEBUG:desktopenv.metric.slides.debug:  Shape 2 - Type: PLACEHOLDER (14) vs PLACEHOLDER (14)
+2026-07-08 21:30:37,484 - desktopenv.metric.slides.debug - DEBUG -   Shape 2 - Text: 'SPRING 2018' vs 'SPRING 2018'
+DEBUG:desktopenv.metric.slides.debug:  Shape 2 - Text: 'SPRING 2018' vs 'SPRING 2018'
+2026-07-08 21:30:37,484 - desktopenv.metric.slides.debug - DEBUG -   Shape 2 - Position: (1334520, 5559840) vs (1334520, 5559840)
+DEBUG:desktopenv.metric.slides.debug:  Shape 2 - Position: (1334520, 5559840) vs (1334520, 5559840)
+2026-07-08 21:30:37,484 - desktopenv.metric.slides.debug - DEBUG -   Shape 2 - Size: (9127800, 1141560) vs (9127800, 1141560)
+DEBUG:desktopenv.metric.slides.debug:  Shape 2 - Size: (9127800, 1141560) vs (9127800, 1141560)
+2026-07-08 21:30:37,485 - desktopenv.metric.slides.debug - DEBUG -     Slide 1, Shape 2, Para 1 - Alignment: 'None' vs 'None'
+DEBUG:desktopenv.metric.slides.debug:    Slide 1, Shape 2, Para 1 - Alignment: 'None' vs 'None'
+2026-07-08 21:30:37,485 - desktopenv.metric.slides.debug - DEBUG -     Slide 1, Shape 2, Para 1 - Text: 'SPRING 2018 ' vs 'SPRING 2018 '
+DEBUG:desktopenv.metric.slides.debug:    Slide 1, Shape 2, Para 1 - Text: 'SPRING 2018 ' vs 'SPRING 2018 '
+2026-07-08 21:30:37,486 - desktopenv.metric.slides.debug - DEBUG -   Shape 3 - Type: PICTURE (13) vs PICTURE (13)
+DEBUG:desktopenv.metric.slides.debug:  Shape 3 - Type: PICTURE (13) vs PICTURE (13)
+2026-07-08 21:30:37,486 - desktopenv.metric.slides.debug - DEBUG -   Additional text shape check 1: 'New Club and Organization Tra' vs 'New Club and Organization Tra'
+DEBUG:desktopenv.metric.slides.debug:  Additional text shape check 1: 'New Club and Organization Tra' vs 'New Club and Organization Tra'
+2026-07-08 21:30:37,486 - desktopenv.metric.slides.debug - DEBUG -     Para 1: Alignment 'CENTER' vs 'CENTER'
+DEBUG:desktopenv.metric.slides.debug:    Para 1: Alignment 'CENTER' vs 'CENTER'
+2026-07-08 21:30:37,487 - desktopenv.metric.slides.debug - DEBUG -   Additional text shape check 2: 'SPRING 2018' vs 'SPRING 2018'
+DEBUG:desktopenv.metric.slides.debug:  Additional text shape check 2: 'SPRING 2018' vs 'SPRING 2018'
+2026-07-08 21:30:37,487 - desktopenv.metric.slides.debug - DEBUG -     Para 1: Alignment 'None' vs 'None'
+DEBUG:desktopenv.metric.slides.debug:    Para 1: Alignment 'None' vs 'None'
+2026-07-08 21:30:37,487 - desktopenv.metric.slides.debug - DEBUG - --- Comparing Slide 2 ---
+DEBUG:desktopenv.metric.slides.debug:--- Comparing Slide 2 ---
+2026-07-08 21:30:37,487 - desktopenv.metric.slides.debug - DEBUG - Slide 2 - Shapes count: File1=2, File2=2
+DEBUG:desktopenv.metric.slides.debug:Slide 2 - Shapes count: File1=2, File2=2
+2026-07-08 21:30:37,488 - desktopenv.metric.slides.debug - DEBUG - Slide 2 - Text shapes found: File1=2, File2=2
+DEBUG:desktopenv.metric.slides.debug:Slide 2 - Text shapes found: File1=2, File2=2
+2026-07-08 21:30:37,488 - desktopenv.metric.slides.debug - DEBUG -   Shape 1 - Type: PLACEHOLDER (14) vs PLACEHOLDER (14)
+DEBUG:desktopenv.metric.slides.debug:  Shape 1 - Type: PLACEHOLDER (14) vs PLACEHOLDER (14)
+2026-07-08 21:30:37,488 - desktopenv.metric.slides.debug - DEBUG -   Shape 1 - Text: 'Overview' vs 'Overview'
+DEBUG:desktopenv.metric.slides.debug:  Shape 1 - Text: 'Overview' vs 'Overview'
+2026-07-08 21:30:37,488 - desktopenv.metric.slides.debug - DEBUG -   Shape 1 - Position: (1260000, 0) vs (1260000, 0)
+DEBUG:desktopenv.metric.slides.debug:  Shape 1 - Position: (1260000, 0) vs (1260000, 0)
+2026-07-08 21:30:37,488 - desktopenv.metric.slides.debug - DEBUG -   Shape 1 - Size: (10056960, 1449360) vs (10056960, 1449360)
+DEBUG:desktopenv.metric.slides.debug:  Shape 1 - Size: (10056960, 1449360) vs (10056960, 1449360)
+2026-07-08 21:30:37,488 - desktopenv.metric.slides.debug - DEBUG -     Slide 2, Shape 1, Para 1 - Alignment: 'CENTER' vs 'CENTER'
+DEBUG:desktopenv.metric.slides.debug:    Slide 2, Shape 1, Para 1 - Alignment: 'CENTER' vs 'CENTER'
+2026-07-08 21:30:37,488 - desktopenv.metric.slides.debug - DEBUG -     Slide 2, Shape 1, Para 1 - Text: 'Overview' vs 'Overview'
+DEBUG:desktopenv.metric.slides.debug:    Slide 2, Shape 1, Para 1 - Text: 'Overview' vs 'Overview'
+2026-07-08 21:30:37,489 - desktopenv.metric.slides.debug - DEBUG -   Shape 2 - Type: PLACEHOLDER (14) vs PLACEHOLDER (14)
+DEBUG:desktopenv.metric.slides.debug:  Shape 2 - Type: PLACEHOLDER (14) vs PLACEHOLDER (14)
+2026-07-08 21:30:37,490 - desktopenv.metric.slides.debug - DEBUG -   Shape 2 - Text: 'Introductions
+Club Rights, Responsibilities & Resources
+Policies and Procedures
+FIT Link - Program and Activity Form
+FIT Link - Event Form 
+Important Dates
+Important Resources & Links' vs 'Introductions
+Club Rights, Responsibilities & Resources
+Policies and Procedures
+FIT Link - Program and Activity Form
+FIT Link - Event Form 
+Important Dates
+Important Resources & Links'
+DEBUG:desktopenv.metric.slides.debug:  Shape 2 - Text: 'Introductions
+Club Rights, Responsibilities & Resources
+Policies and Procedures
+FIT Link - Program and Activity Form
+FIT Link - Event Form 
+Important Dates
+Important Resources & Links' vs 'Introductions
+Club Rights, Responsibilities & Resources
+Policies and Procedures
+FIT Link - Program and Activity Form
+FIT Link - Event Form 
+Important Dates
+Important Resources & Links'
+2026-07-08 21:30:37,490 - desktopenv.metric.slides.debug - DEBUG -   Shape 2 - Position: (1803600, 1736280) vs (1803600, 1736280)
+DEBUG:desktopenv.metric.slides.debug:  Shape 2 - Position: (1803600, 1736280) vs (1803600, 1736280)
+2026-07-08 21:30:37,490 - desktopenv.metric.slides.debug - DEBUG -   Shape 2 - Size: (8456040, 3941280) vs (8456040, 3941280)
+DEBUG:desktopenv.metric.slides.debug:  Shape 2 - Size: (8456040, 3941280) vs (8456040, 3941280)
+2026-07-08 21:30:37,490 - desktopenv.metric.slides.debug - DEBUG -     Slide 2, Shape 2, Para 1 - Alignment: 'None' vs 'None'
+DEBUG:desktopenv.metric.slides.debug:    Slide 2, Shape 2, Para 1 - Alignment: 'None' vs 'None'
+2026-07-08 21:30:37,490 - desktopenv.metric.slides.debug - DEBUG -     Slide 2, Shape 2, Para 1 - Text: 'Introductions' vs 'Introductions'
+DEBUG:desktopenv.metric.slides.debug:    Slide 2, Shape 2, Para 1 - Text: 'Introductions' vs 'Introductions'
+2026-07-08 21:30:37,491 - desktopenv.metric.slides.debug - DEBUG -     Slide 2, Shape 2, Para 2 - Alignment: 'None' vs 'None'
+DEBUG:desktopenv.metric.slides.debug:    Slide 2, Shape 2, Para 2 - Alignment: 'None' vs 'None'
+2026-07-08 21:30:37,491 - desktopenv.metric.slides.debug - DEBUG -     Slide 2, Shape 2, Para 2 - Text: 'Club Rights, Responsibilities & Resources' vs 'Club Rights, Responsibilities & Resources'
+DEBUG:desktopenv.metric.slides.debug:    Slide 2, Shape 2, Para 2 - Text: 'Club Rights, Responsibilities & Resources' vs 'Club Rights, Responsibilities & Resources'
+2026-07-08 21:30:37,492 - desktopenv.metric.slides.debug - DEBUG -     Slide 2, Shape 2, Para 3 - Alignment: 'None' vs 'None'
+DEBUG:desktopenv.metric.slides.debug:    Slide 2, Shape 2, Para 3 - Alignment: 'None' vs 'None'
+2026-07-08 21:30:37,492 - desktopenv.metric.slides.debug - DEBUG -     Slide 2, Shape 2, Para 3 - Text: 'Policies and Procedures' vs 'Policies and Procedures'
+DEBUG:desktopenv.metric.slides.debug:    Slide 2, Shape 2, Para 3 - Text: 'Policies and Procedures' vs 'Policies and Procedures'
+2026-07-08 21:30:37,493 - desktopenv.metric.slides.debug - DEBUG -     Slide 2, Shape 2, Para 4 - Alignment: 'None' vs 'None'
+DEBUG:desktopenv.metric.slides.debug:    Slide 2, Shape 2, Para 4 - Alignment: 'None' vs 'None'
+2026-07-08 21:30:37,493 - desktopenv.metric.slides.debug - DEBUG -     Slide 2, Shape 2, Para 4 - Text: 'FIT Link - Program and Activity Form' vs 'FIT Link - Program and Activity Form'
+DEBUG:desktopenv.metric.slides.debug:    Slide 2, Shape 2, Para 4 - Text: 'FIT Link - Program and Activity Form' vs 'FIT Link - Program and Activity Form'
+2026-07-08 21:30:37,494 - desktopenv.metric.slides.debug - DEBUG -     Slide 2, Shape 2, Para 5 - Alignment: 'None' vs 'None'
+DEBUG:desktopenv.metric.slides.debug:    Slide 2, Shape 2, Para 5 - Alignment: 'None' vs 'None'
+2026-07-08 21:30:37,494 - desktopenv.metric.slides.debug - DEBUG -     Slide 2, Shape 2, Para 5 - Text: 'FIT Link - Event Form ' vs 'FIT Link - Event Form '
+DEBUG:desktopenv.metric.slides.debug:    Slide 2, Shape 2, Para 5 - Text: 'FIT Link - Event Form ' vs 'FIT Link - Event Form '
+2026-07-08 21:30:37,495 - desktopenv.metric.slides.debug - DEBUG -     Slide 2, Shape 2, Para 6 - Alignment: 'None' vs 'None'
+DEBUG:desktopenv.metric.slides.debug:    Slide 2, Shape 2, Para 6 - Alignment: 'None' vs 'None'
+2026-07-08 21:30:37,495 - desktopenv.metric.slides.debug - DEBUG -     Slide 2, Shape 2, Para 6 - Text: 'Important Dates' vs 'Important Dates'
+DEBUG:desktopenv.metric.slides.debug:    Slide 2, Shape 2, Para 6 - Text: 'Important Dates' vs 'Important Dates'
+2026-07-08 21:30:37,495 - desktopenv.metric.slides.debug - DEBUG -     Slide 2, Shape 2, Para 7 - Alignment: 'None' vs 'None'
+DEBUG:desktopenv.metric.slides.debug:    Slide 2, Shape 2, Para 7 - Alignment: 'None' vs 'None'
+2026-07-08 21:30:37,495 - desktopenv.metric.slides.debug - DEBUG -     Slide 2, Shape 2, Para 7 - Text: 'Important Resources & Links' vs 'Important Resources & Links'
+DEBUG:desktopenv.metric.slides.debug:    Slide 2, Shape 2, Para 7 - Text: 'Important Resources & Links' vs 'Important Resources & Links'
+2026-07-08 21:30:37,496 - desktopenv.metric.slides.debug - DEBUG -   Additional text shape check 1: 'Overview' vs 'Overview'
+DEBUG:desktopenv.metric.slides.debug:  Additional text shape check 1: 'Overview' vs 'Overview'
+2026-07-08 21:30:37,496 - desktopenv.metric.slides.debug - DEBUG -     Para 1: Alignment 'CENTER' vs 'CENTER'
+DEBUG:desktopenv.metric.slides.debug:    Para 1: Alignment 'CENTER' vs 'CENTER'
+2026-07-08 21:30:37,496 - desktopenv.metric.slides.debug - DEBUG -   Additional text shape check 2: 'Introductions
+Club Rights, Res' vs 'Introductions
+Club Rights, Res'
+DEBUG:desktopenv.metric.slides.debug:  Additional text shape check 2: 'Introductions
+Club Rights, Res' vs 'Introductions
+Club Rights, Res'
+2026-07-08 21:30:37,497 - desktopenv.metric.slides.debug - DEBUG -     Para 1: Alignment 'None' vs 'None'
+DEBUG:desktopenv.metric.slides.debug:    Para 1: Alignment 'None' vs 'None'
+2026-07-08 21:30:37,497 - desktopenv.metric.slides.debug - DEBUG -     Para 2: Alignment 'None' vs 'None'
+DEBUG:desktopenv.metric.slides.debug:    Para 2: Alignment 'None' vs 'None'
+2026-07-08 21:30:37,497 - desktopenv.metric.slides.debug - DEBUG -     Para 3: Alignment 'None' vs 'None'
+DEBUG:desktopenv.metric.slides.debug:    Para 3: Alignment 'None' vs 'None'
+2026-07-08 21:30:37,497 - desktopenv.metric.slides.debug - DEBUG -     Para 4: Alignment 'None' vs 'None'
+DEBUG:desktopenv.metric.slides.debug:    Para 4: Alignment 'None' vs 'None'
+2026-07-08 21:30:37,497 - desktopenv.metric.slides.debug - DEBUG -     Para 5: Alignment 'None' vs 'None'
+DEBUG:desktopenv.metric.slides.debug:    Para 5: Alignment 'None' vs 'None'
+2026-07-08 21:30:37,497 - desktopenv.metric.slides.debug - DEBUG -     Para 6: Alignment 'None' vs 'None'
+DEBUG:desktopenv.metric.slides.debug:    Para 6: Alignment 'None' vs 'None'
+2026-07-08 21:30:37,497 - desktopenv.metric.slides.debug - DEBUG -     Para 7: Alignment 'None' vs 'None'
+DEBUG:desktopenv.metric.slides.debug:    Para 7: Alignment 'None' vs 'None'
+2026-07-08 21:30:37,497 - desktopenv.metric.slides.debug - DEBUG - --- Comparing Slide 3 ---
+DEBUG:desktopenv.metric.slides.debug:--- Comparing Slide 3 ---
+2026-07-08 21:30:37,497 - desktopenv.metric.slides.debug - DEBUG - Slide 3 - Shapes count: File1=2, File2=2
+DEBUG:desktopenv.metric.slides.debug:Slide 3 - Shapes count: File1=2, File2=2
+2026-07-08 21:30:37,498 - desktopenv.metric.slides.debug - DEBUG - Slide 3 - Text shapes found: File1=1, File2=1
+DEBUG:desktopenv.metric.slides.debug:Slide 3 - Text shapes found: File1=1, File2=1
+2026-07-08 21:30:37,498 - desktopenv.metric.slides.debug - DEBUG -   Shape 1 - Type: PICTURE (13) vs PICTURE (13)
+DEBUG:desktopenv.metric.slides.debug:  Shape 1 - Type: PICTURE (13) vs PICTURE (13)
+2026-07-08 21:30:37,498 - desktopenv.metric.slides.debug - DEBUG -   Shape 2 - Type: AUTO_SHAPE (1) vs AUTO_SHAPE (1)
+DEBUG:desktopenv.metric.slides.debug:  Shape 2 - Type: AUTO_SHAPE (1) vs AUTO_SHAPE (1)
+2026-07-08 21:30:37,498 - desktopenv.metric.slides.debug - DEBUG -   Shape 2 - Text: 'Name  
+Club or Organization' vs 'Name  
+Club or Organization'
+DEBUG:desktopenv.metric.slides.debug:  Shape 2 - Text: 'Name  
+Club or Organization' vs 'Name  
+Club or Organization'
+2026-07-08 21:30:37,498 - desktopenv.metric.slides.debug - DEBUG -   Shape 2 - Position: (3504960, 2963520) vs (3504960, 2963520)
+DEBUG:desktopenv.metric.slides.debug:  Shape 2 - Position: (3504960, 2963520) vs (3504960, 2963520)
+2026-07-08 21:30:37,498 - desktopenv.metric.slides.debug - DEBUG -   Shape 2 - Size: (5180760, 2880720) vs (5180760, 2880720)
+DEBUG:desktopenv.metric.slides.debug:  Shape 2 - Size: (5180760, 2880720) vs (5180760, 2880720)
+2026-07-08 21:30:37,499 - desktopenv.metric.slides.debug - DEBUG -     Slide 3, Shape 2, Para 1 - Alignment: 'CENTER' vs 'CENTER'
+DEBUG:desktopenv.metric.slides.debug:    Slide 3, Shape 2, Para 1 - Alignment: 'CENTER' vs 'CENTER'
+2026-07-08 21:30:37,499 - desktopenv.metric.slides.debug - DEBUG -     Slide 3, Shape 2, Para 1 - Text: 'Name  ' vs 'Name  '
+DEBUG:desktopenv.metric.slides.debug:    Slide 3, Shape 2, Para 1 - Text: 'Name  ' vs 'Name  '
+2026-07-08 21:30:37,499 - desktopenv.metric.slides.debug - DEBUG -     Slide 3, Shape 2, Para 2 - Alignment: 'CENTER' vs 'CENTER'
+DEBUG:desktopenv.metric.slides.debug:    Slide 3, Shape 2, Para 2 - Alignment: 'CENTER' vs 'CENTER'
+2026-07-08 21:30:37,500 - desktopenv.metric.slides.debug - DEBUG -     Slide 3, Shape 2, Para 2 - Text: 'Club or Organization ' vs 'Club or Organization '
+DEBUG:desktopenv.metric.slides.debug:    Slide 3, Shape 2, Para 2 - Text: 'Club or Organization ' vs 'Club or Organization '
+2026-07-08 21:30:37,500 - desktopenv.metric.slides.debug - DEBUG -   Additional text shape check 1: 'Name  
+Club or Organization' vs 'Name  
+Club or Organization'
+DEBUG:desktopenv.metric.slides.debug:  Additional text shape check 1: 'Name  
+Club or Organization' vs 'Name  
+Club or Organization'
+2026-07-08 21:30:37,500 - desktopenv.metric.slides.debug - DEBUG -     Para 1: Alignment 'CENTER' vs 'CENTER'
+DEBUG:desktopenv.metric.slides.debug:    Para 1: Alignment 'CENTER' vs 'CENTER'
+2026-07-08 21:30:37,500 - desktopenv.metric.slides.debug - DEBUG -     Para 2: Alignment 'CENTER' vs 'CENTER'
+DEBUG:desktopenv.metric.slides.debug:    Para 2: Alignment 'CENTER' vs 'CENTER'
+2026-07-08 21:30:37,500 - desktopenv.metric.slides.debug - DEBUG - --- Comparing Slide 4 ---
+DEBUG:desktopenv.metric.slides.debug:--- Comparing Slide 4 ---
+2026-07-08 21:30:37,500 - desktopenv.metric.slides.debug - DEBUG - Slide 4 - Shapes count: File1=3, File2=3
+DEBUG:desktopenv.metric.slides.debug:Slide 4 - Shapes count: File1=3, File2=3
+2026-07-08 21:30:37,502 - desktopenv.metric.slides.debug - DEBUG - Slide 4 - Text shapes found: File1=3, File2=3
+DEBUG:desktopenv.metric.slides.debug:Slide 4 - Text shapes found: File1=3, File2=3
+2026-07-08 21:30:37,502 - desktopenv.metric.slides.debug - DEBUG -   Shape 1 - Type: PLACEHOLDER (14) vs PLACEHOLDER (14)
+DEBUG:desktopenv.metric.slides.debug:  Shape 1 - Type: PLACEHOLDER (14) vs PLACEHOLDER (14)
+2026-07-08 21:30:37,502 - desktopenv.metric.slides.debug - DEBUG -   Shape 1 - Text: 'Director of Student Organizations' vs 'Director of Student Organizations'
+DEBUG:desktopenv.metric.slides.debug:  Shape 1 - Text: 'Director of Student Organizations' vs 'Director of Student Organizations'
+2026-07-08 21:30:37,502 - desktopenv.metric.slides.debug - DEBUG -   Shape 1 - Position: (540000, 180000) vs (540000, 180000)
+DEBUG:desktopenv.metric.slides.debug:  Shape 1 - Position: (540000, 180000) vs (540000, 180000)
+2026-07-08 21:30:37,502 - desktopenv.metric.slides.debug - DEBUG -   Shape 1 - Size: (11427120, 1254600) vs (11427120, 1254600)
+DEBUG:desktopenv.metric.slides.debug:  Shape 1 - Size: (11427120, 1254600) vs (11427120, 1254600)
+2026-07-08 21:30:37,502 - desktopenv.metric.slides.debug - DEBUG -     Slide 4, Shape 1, Para 1 - Alignment: 'CENTER' vs 'CENTER'
+DEBUG:desktopenv.metric.slides.debug:    Slide 4, Shape 1, Para 1 - Alignment: 'CENTER' vs 'CENTER'
+2026-07-08 21:30:37,502 - desktopenv.metric.slides.debug - DEBUG -     Slide 4, Shape 1, Para 1 - Text: 'Director of Student Organizations' vs 'Director of Student Organizations'
+DEBUG:desktopenv.metric.slides.debug:    Slide 4, Shape 1, Para 1 - Text: 'Director of Student Organizations' vs 'Director of Student Organizations'
+2026-07-08 21:30:37,503 - desktopenv.metric.slides.debug - DEBUG -   Shape 2 - Type: PLACEHOLDER (14) vs PLACEHOLDER (14)
+DEBUG:desktopenv.metric.slides.debug:  Shape 2 - Type: PLACEHOLDER (14) vs PLACEHOLDER (14)
+2026-07-08 21:30:37,503 - desktopenv.metric.slides.debug - DEBUG -   Shape 2 - Text: 'MARTY SULLIVAN II' vs 'MARTY SULLIVAN II'
+DEBUG:desktopenv.metric.slides.debug:  Shape 2 - Text: 'MARTY SULLIVAN II' vs 'MARTY SULLIVAN II'
+2026-07-08 21:30:37,503 - desktopenv.metric.slides.debug - DEBUG -   Shape 2 - Position: (2849760, 3367440) vs (2849760, 3367440)
+DEBUG:desktopenv.metric.slides.debug:  Shape 2 - Position: (2849760, 3367440) vs (2849760, 3367440)
+2026-07-08 21:30:37,503 - desktopenv.metric.slides.debug - DEBUG -   Shape 2 - Size: (6492600, 2161800) vs (6492600, 2161800)
+DEBUG:desktopenv.metric.slides.debug:  Shape 2 - Size: (6492600, 2161800) vs (6492600, 2161800)
+2026-07-08 21:30:37,504 - desktopenv.metric.slides.debug - DEBUG -     Slide 4, Shape 2, Para 1 - Alignment: 'CENTER' vs 'CENTER'
+DEBUG:desktopenv.metric.slides.debug:    Slide 4, Shape 2, Para 1 - Alignment: 'CENTER' vs 'CENTER'
+2026-07-08 21:30:37,504 - desktopenv.metric.slides.debug - DEBUG -     Slide 4, Shape 2, Para 1 - Text: 'MARTY SULLIVAN II ' vs 'MARTY SULLIVAN II '
+DEBUG:desktopenv.metric.slides.debug:    Slide 4, Shape 2, Para 1 - Text: 'MARTY SULLIVAN II ' vs 'MARTY SULLIVAN II '
+2026-07-08 21:30:37,505 - desktopenv.metric.slides.debug - DEBUG -   Shape 3 - Type: AUTO_SHAPE (1) vs AUTO_SHAPE (1)
+DEBUG:desktopenv.metric.slides.debug:  Shape 3 - Type: AUTO_SHAPE (1) vs AUTO_SHAPE (1)
+2026-07-08 21:30:37,505 - desktopenv.metric.slides.debug - DEBUG -   Shape 3 - Text: 'Office Hours:
+Monday 4PM to 5PM
+Wednesday 12PM to 1PM' vs 'Office Hours:
+Monday 4PM to 5PM
+Wednesday 12PM to 1PM'
+DEBUG:desktopenv.metric.slides.debug:  Shape 3 - Text: 'Office Hours:
+Monday 4PM to 5PM
+Wednesday 12PM to 1PM' vs 'Office Hours:
+Monday 4PM to 5PM
+Wednesday 12PM to 1PM'
+2026-07-08 21:30:37,505 - desktopenv.metric.slides.debug - DEBUG -   Shape 3 - Position: (4142880, 5456160) vs (4142880, 5456160)
+DEBUG:desktopenv.metric.slides.debug:  Shape 3 - Position: (4142880, 5456160) vs (4142880, 5456160)
+2026-07-08 21:30:37,505 - desktopenv.metric.slides.debug - DEBUG -   Shape 3 - Size: (3904560, 1027440) vs (3904560, 1027440)
+DEBUG:desktopenv.metric.slides.debug:  Shape 3 - Size: (3904560, 1027440) vs (3904560, 1027440)
+2026-07-08 21:30:37,505 - desktopenv.metric.slides.debug - DEBUG -     Slide 4, Shape 3, Para 1 - Alignment: 'CENTER' vs 'CENTER'
+DEBUG:desktopenv.metric.slides.debug:    Slide 4, Shape 3, Para 1 - Alignment: 'CENTER' vs 'CENTER'
+2026-07-08 21:30:37,505 - desktopenv.metric.slides.debug - DEBUG -     Slide 4, Shape 3, Para 1 - Text: 'Office Hours:' vs 'Office Hours:'
+DEBUG:desktopenv.metric.slides.debug:    Slide 4, Shape 3, Para 1 - Text: 'Office Hours:' vs 'Office Hours:'
+2026-07-08 21:30:37,506 - desktopenv.metric.slides.debug - DEBUG -     Slide 4, Shape 3, Para 2 - Alignment: 'CENTER' vs 'CENTER'
+DEBUG:desktopenv.metric.slides.debug:    Slide 4, Shape 3, Para 2 - Alignment: 'CENTER' vs 'CENTER'
+2026-07-08 21:30:37,506 - desktopenv.metric.slides.debug - DEBUG -     Slide 4, Shape 3, Para 2 - Text: 'Monday 4PM to 5PM' vs 'Monday 4PM to 5PM'
+DEBUG:desktopenv.metric.slides.debug:    Slide 4, Shape 3, Para 2 - Text: 'Monday 4PM to 5PM' vs 'Monday 4PM to 5PM'
+2026-07-08 21:30:37,507 - desktopenv.metric.slides.debug - DEBUG -     Slide 4, Shape 3, Para 3 - Alignment: 'CENTER' vs 'CENTER'
+DEBUG:desktopenv.metric.slides.debug:    Slide 4, Shape 3, Para 3 - Alignment: 'CENTER' vs 'CENTER'
+2026-07-08 21:30:37,507 - desktopenv.metric.slides.debug - DEBUG -     Slide 4, Shape 3, Para 3 - Text: 'Wednesday 12PM to 1PM' vs 'Wednesday 12PM to 1PM'
+DEBUG:desktopenv.metric.slides.debug:    Slide 4, Shape 3, Para 3 - Text: 'Wednesday 12PM to 1PM' vs 'Wednesday 12PM to 1PM'
+2026-07-08 21:30:37,508 - desktopenv.metric.slides.debug - DEBUG -   Additional text shape check 1: 'Director of Student Organizati' vs 'Director of Student Organizati'
+DEBUG:desktopenv.metric.slides.debug:  Additional text shape check 1: 'Director of Student Organizati' vs 'Director of Student Organizati'
+2026-07-08 21:30:37,508 - desktopenv.metric.slides.debug - DEBUG -     Para 1: Alignment 'CENTER' vs 'CENTER'
+DEBUG:desktopenv.metric.slides.debug:    Para 1: Alignment 'CENTER' vs 'CENTER'
+2026-07-08 21:30:37,508 - desktopenv.metric.slides.debug - DEBUG -   Additional text shape check 2: 'MARTY SULLIVAN II' vs 'MARTY SULLIVAN II'
+DEBUG:desktopenv.metric.slides.debug:  Additional text shape check 2: 'MARTY SULLIVAN II' vs 'MARTY SULLIVAN II'
+2026-07-08 21:30:37,508 - desktopenv.metric.slides.debug - DEBUG -     Para 1: Alignment 'CENTER' vs 'CENTER'
+DEBUG:desktopenv.metric.slides.debug:    Para 1: Alignment 'CENTER' vs 'CENTER'
+2026-07-08 21:30:37,508 - desktopenv.metric.slides.debug - DEBUG -   Additional text shape check 3: 'Office Hours:
+Monday 4PM to 5P' vs 'Office Hours:
+Monday 4PM to 5P'
+DEBUG:desktopenv.metric.slides.debug:  Additional text shape check 3: 'Office Hours:
+Monday 4PM to 5P' vs 'Office Hours:
+Monday 4PM to 5P'
+2026-07-08 21:30:37,508 - desktopenv.metric.slides.debug - DEBUG -     Para 1: Alignment 'CENTER' vs 'CENTER'
+DEBUG:desktopenv.metric.slides.debug:    Para 1: Alignment 'CENTER' vs 'CENTER'
+2026-07-08 21:30:37,508 - desktopenv.metric.slides.debug - DEBUG -     Para 2: Alignment 'CENTER' vs 'CENTER'
+DEBUG:desktopenv.metric.slides.debug:    Para 2: Alignment 'CENTER' vs 'CENTER'
+2026-07-08 21:30:37,508 - desktopenv.metric.slides.debug - DEBUG -     Para 3: Alignment 'CENTER' vs 'CENTER'
+DEBUG:desktopenv.metric.slides.debug:    Para 3: Alignment 'CENTER' vs 'CENTER'
+2026-07-08 21:30:37,509 - desktopenv.metric.slides.debug - DEBUG - --- Comparing Slide 5 ---
+DEBUG:desktopenv.metric.slides.debug:--- Comparing Slide 5 ---
+2026-07-08 21:30:37,509 - desktopenv.metric.slides.debug - DEBUG - Slide 5 - Shapes count: File1=2, File2=2
+DEBUG:desktopenv.metric.slides.debug:Slide 5 - Shapes count: File1=2, File2=2
+2026-07-08 21:30:37,510 - desktopenv.metric.slides.debug - DEBUG - Slide 5 - Text shapes found: File1=2, File2=2
+DEBUG:desktopenv.metric.slides.debug:Slide 5 - Text shapes found: File1=2, File2=2
+2026-07-08 21:30:37,510 - desktopenv.metric.slides.debug - DEBUG -   Shape 1 - Type: PLACEHOLDER (14) vs PLACEHOLDER (14)
+DEBUG:desktopenv.metric.slides.debug:  Shape 1 - Type: PLACEHOLDER (14) vs PLACEHOLDER (14)
+2026-07-08 21:30:37,510 - desktopenv.metric.slides.debug - DEBUG -   Shape 1 - Text: 'What I do:' vs 'What I do:'
+DEBUG:desktopenv.metric.slides.debug:  Shape 1 - Text: 'What I do:' vs 'What I do:'
+2026-07-08 21:30:37,510 - desktopenv.metric.slides.debug - DEBUG -   Shape 1 - Position: (520200, 483480) vs (520200, 483480)
+DEBUG:desktopenv.metric.slides.debug:  Shape 1 - Position: (520200, 483480) vs (520200, 483480)
+2026-07-08 21:30:37,510 - desktopenv.metric.slides.debug - DEBUG -   Shape 1 - Size: (11359440, 941760) vs (11359440, 941760)
+DEBUG:desktopenv.metric.slides.debug:  Shape 1 - Size: (11359440, 941760) vs (11359440, 941760)
+2026-07-08 21:30:37,510 - desktopenv.metric.slides.debug - DEBUG -     Slide 5, Shape 1, Para 1 - Alignment: 'None' vs 'None'
+DEBUG:desktopenv.metric.slides.debug:    Slide 5, Shape 1, Para 1 - Alignment: 'None' vs 'None'
+2026-07-08 21:30:37,510 - desktopenv.metric.slides.debug - DEBUG -     Slide 5, Shape 1, Para 1 - Text: 'What I do:' vs 'What I do:'
+DEBUG:desktopenv.metric.slides.debug:    Slide 5, Shape 1, Para 1 - Text: 'What I do:' vs 'What I do:'
+2026-07-08 21:30:37,512 - desktopenv.metric.slides.debug - DEBUG -   Shape 2 - Type: PLACEHOLDER (14) vs PLACEHOLDER (14)
+DEBUG:desktopenv.metric.slides.debug:  Shape 2 - Type: PLACEHOLDER (14) vs PLACEHOLDER (14)
+2026-07-08 21:30:37,512 - desktopenv.metric.slides.debug - DEBUG -   Shape 2 - Text: 'Finance Meetings:
+Providing another perspective for the clubs and organizations.
+Advocating for student Budget Requests.
+Tracking budgets to reflect attendance and participation.
+Meetings with the Program Coordinator:
+Touching base with what clubs and organizations are planning.
+Assisting during the planning process.
+Board of Directors Meetings:
+Sharing the agendas of clubs and organizations with the members of FIT SGA' vs 'Finance Meetings:
+Providing another perspective for the clubs and organizations.
+Advocating for student Budget Requests.
+Tracking budgets to reflect attendance and participation.
+Meetings with the Program Coordinator:
+Touching base with what clubs and organizations are planning.
+Assisting during the planning process.
+Board of Directors Meetings:
+Sharing the agendas of clubs and organizations with the members of FIT SGA'
+DEBUG:desktopenv.metric.slides.debug:  Shape 2 - Text: 'Finance Meetings:
+Providing another perspective for the clubs and organizations.
+Advocating for student Budget Requests.
+Tracking budgets to reflect attendance and participation.
+Meetings with the Program Coordinator:
+Touching base with what clubs and organizations are planning.
+Assisting during the planning process.
+Board of Directors Meetings:
+Sharing the agendas of clubs and organizations with the members of FIT SGA' vs 'Finance Meetings:
+Providing another perspective for the clubs and organizations.
+Advocating for student Budget Requests.
+Tracking budgets to reflect attendance and participation.
+Meetings with the Program Coordinator:
+Touching base with what clubs and organizations are planning.
+Assisting during the planning process.
+Board of Directors Meetings:
+Sharing the agendas of clubs and organizations with the members of FIT SGA'
+2026-07-08 21:30:37,512 - desktopenv.metric.slides.debug - DEBUG -   Shape 2 - Position: (880200, 1341000) vs (880200, 1341000)
+DEBUG:desktopenv.metric.slides.debug:  Shape 2 - Position: (880200, 1341000) vs (880200, 1341000)
+2026-07-08 21:30:37,512 - desktopenv.metric.slides.debug - DEBUG -   Shape 2 - Size: (10279440, 4721040) vs (10279440, 4721040)
+DEBUG:desktopenv.metric.slides.debug:  Shape 2 - Size: (10279440, 4721040) vs (10279440, 4721040)
+2026-07-08 21:30:37,513 - desktopenv.metric.slides.debug - DEBUG -     Slide 5, Shape 2, Para 1 - Alignment: 'None' vs 'None'
+DEBUG:desktopenv.metric.slides.debug:    Slide 5, Shape 2, Para 1 - Alignment: 'None' vs 'None'
+2026-07-08 21:30:37,513 - desktopenv.metric.slides.debug - DEBUG -     Slide 5, Shape 2, Para 1 - Text: 'Finance Meetings:' vs 'Finance Meetings:'
+DEBUG:desktopenv.metric.slides.debug:    Slide 5, Shape 2, Para 1 - Text: 'Finance Meetings:' vs 'Finance Meetings:'
+2026-07-08 21:30:37,514 - desktopenv.metric.slides.debug - DEBUG -     Slide 5, Shape 2, Para 2 - Alignment: 'None' vs 'None'
+DEBUG:desktopenv.metric.slides.debug:    Slide 5, Shape 2, Para 2 - Alignment: 'None' vs 'None'
+2026-07-08 21:30:37,515 - desktopenv.metric.slides.debug - DEBUG -     Slide 5, Shape 2, Para 2 - Text: 'Providing another perspective for the clubs and organizations.' vs 'Providing another perspective for the clubs and organizations.'
+DEBUG:desktopenv.metric.slides.debug:    Slide 5, Shape 2, Para 2 - Text: 'Providing another perspective for the clubs and organizations.' vs 'Providing another perspective for the clubs and organizations.'
+2026-07-08 21:30:37,924 - desktopenv.metric.slides.debug - DEBUG - === COMPARING PPTX FILES ===
+DEBUG:desktopenv.metric.slides.debug:=== COMPARING PPTX FILES ===
+2026-07-08 21:30:37,924 - desktopenv.metric.slides.debug - DEBUG - File 1: cache/550ce7e7-747b-495f-b122-acdc4d0b8e54/New_Club_Spring_2018_Training.pptx
+DEBUG:desktopenv.metric.slides.debug:File 1: cache/550ce7e7-747b-495f-b122-acdc4d0b8e54/New_Club_Spring_2018_Training.pptx
+2026-07-08 21:30:37,924 - desktopenv.metric.slides.debug - DEBUG - File 2: cache/550ce7e7-747b-495f-b122-acdc4d0b8e54/New_Club_Spring_2018_Training_Gold_all_fonts_1.pptx
+DEBUG:desktopenv.metric.slides.debug:File 2: cache/550ce7e7-747b-495f-b122-acdc4d0b8e54/New_Club_Spring_2018_Training_Gold_all_fonts_1.pptx
+2026-07-08 21:30:37,924 - desktopenv.metric.slides.debug - DEBUG - File 1 slides: 7
+DEBUG:desktopenv.metric.slides.debug:File 1 slides: 7
+2026-07-08 21:30:37,924 - desktopenv.metric.slides.debug - DEBUG - File 2 slides: 7
+DEBUG:desktopenv.metric.slides.debug:File 2 slides: 7
+2026-07-08 21:30:37,924 - desktopenv.metric.slides.debug - DEBUG - --- Comparing Slide 1 ---
+DEBUG:desktopenv.metric.slides.debug:--- Comparing Slide 1 ---
+2026-07-08 21:30:37,924 - desktopenv.metric.slides.debug - DEBUG - Slide 1 - Shapes count: File1=3, File2=3
+DEBUG:desktopenv.metric.slides.debug:Slide 1 - Shapes count: File1=3, File2=3
+2026-07-08 21:30:37,926 - desktopenv.metric.slides.debug - DEBUG - Slide 1 - Text shapes found: File1=2, File2=2
+DEBUG:desktopenv.metric.slides.debug:Slide 1 - Text shapes found: File1=2, File2=2
+2026-07-08 21:30:37,926 - desktopenv.metric.slides.debug - DEBUG -   Shape 1 - Type: PLACEHOLDER (14) vs PLACEHOLDER (14)
+DEBUG:desktopenv.metric.slides.debug:  Shape 1 - Type: PLACEHOLDER (14) vs PLACEHOLDER (14)
+2026-07-08 21:30:37,926 - desktopenv.metric.slides.debug - DEBUG -   Shape 1 - Text: 'New Club and Organization Training' vs 'New Club and Organization Training'
+DEBUG:desktopenv.metric.slides.debug:  Shape 1 - Text: 'New Club and Organization Training' vs 'New Club and Organization Training'
+2026-07-08 21:30:37,926 - desktopenv.metric.slides.debug - DEBUG -   Shape 1 - Position: (2340000, 1816920) vs (2340000, 1816920)
+DEBUG:desktopenv.metric.slides.debug:  Shape 1 - Position: (2340000, 1816920) vs (2340000, 1816920)
+2026-07-08 21:30:37,926 - desktopenv.metric.slides.debug - DEBUG -   Shape 1 - Size: (7491600, 3042720) vs (7491960, 3043080)
+DEBUG:desktopenv.metric.slides.debug:  Shape 1 - Size: (7491600, 3042720) vs (7491960, 3043080)
+2026-07-08 21:30:37,927 - desktopenv.metric.slides.debug - DEBUG -     Slide 1, Shape 1, Para 1 - Alignment: 'CENTER' vs 'CENTER'
+DEBUG:desktopenv.metric.slides.debug:    Slide 1, Shape 1, Para 1 - Alignment: 'CENTER' vs 'CENTER'
+2026-07-08 21:30:37,927 - desktopenv.metric.slides.debug - DEBUG -     Slide 1, Shape 1, Para 1 - Text: 'New Club and Organization Training' vs 'New Club and Organization Training'
+DEBUG:desktopenv.metric.slides.debug:    Slide 1, Shape 1, Para 1 - Text: 'New Club and Organization Training' vs 'New Club and Organization Training'
+2026-07-08 21:30:37,928 - desktopenv.metric.slides.debug - DEBUG -   Shape 2 - Type: PLACEHOLDER (14) vs PLACEHOLDER (14)
+DEBUG:desktopenv.metric.slides.debug:  Shape 2 - Type: PLACEHOLDER (14) vs PLACEHOLDER (14)
+2026-07-08 21:30:37,928 - desktopenv.metric.slides.debug - DEBUG -   Shape 2 - Text: 'SPRING 2018' vs 'SPRING 2018'
+DEBUG:desktopenv.metric.slides.debug:  Shape 2 - Text: 'SPRING 2018' vs 'SPRING 2018'
+2026-07-08 21:30:37,928 - desktopenv.metric.slides.debug - DEBUG -   Shape 2 - Position: (1334520, 5559840) vs (1334520, 5559840)
+DEBUG:desktopenv.metric.slides.debug:  Shape 2 - Position: (1334520, 5559840) vs (1334520, 5559840)
+2026-07-08 21:30:37,928 - desktopenv.metric.slides.debug - DEBUG -   Shape 2 - Size: (9127800, 1141560) vs (9128160, 1141920)
+DEBUG:desktopenv.metric.slides.debug:  Shape 2 - Size: (9127800, 1141560) vs (9128160, 1141920)
+2026-07-08 21:30:37,929 - desktopenv.metric.slides.debug - DEBUG -     Slide 1, Shape 2, Para 1 - Alignment: 'None' vs 'None'
+DEBUG:desktopenv.metric.slides.debug:    Slide 1, Shape 2, Para 1 - Alignment: 'None' vs 'None'
+2026-07-08 21:30:37,929 - desktopenv.metric.slides.debug - DEBUG -     Slide 1, Shape 2, Para 1 - Text: 'SPRING 2018 ' vs 'SPRING 2018 '
+DEBUG:desktopenv.metric.slides.debug:    Slide 1, Shape 2, Para 1 - Text: 'SPRING 2018 ' vs 'SPRING 2018 '
+2026-07-08 21:30:37,930 - desktopenv.metric.slides.debug - DEBUG -   Shape 3 - Type: PICTURE (13) vs PICTURE (13)
+DEBUG:desktopenv.metric.slides.debug:  Shape 3 - Type: PICTURE (13) vs PICTURE (13)
+2026-07-08 21:30:37,930 - desktopenv.metric.slides.debug - DEBUG -   Additional text shape check 1: 'New Club and Organization Tra' vs 'New Club and Organization Tra'
+DEBUG:desktopenv.metric.slides.debug:  Additional text shape check 1: 'New Club and Organization Tra' vs 'New Club and Organization Tra'
+2026-07-08 21:30:37,930 - desktopenv.metric.slides.debug - DEBUG -     Para 1: Alignment 'CENTER' vs 'CENTER'
+DEBUG:desktopenv.metric.slides.debug:    Para 1: Alignment 'CENTER' vs 'CENTER'
+2026-07-08 21:30:37,931 - desktopenv.metric.slides.debug - DEBUG -   Additional text shape check 2: 'SPRING 2018' vs 'SPRING 2018'
+DEBUG:desktopenv.metric.slides.debug:  Additional text shape check 2: 'SPRING 2018' vs 'SPRING 2018'
+2026-07-08 21:30:37,931 - desktopenv.metric.slides.debug - DEBUG -     Para 1: Alignment 'None' vs 'None'
+DEBUG:desktopenv.metric.slides.debug:    Para 1: Alignment 'None' vs 'None'
+2026-07-08 21:30:37,931 - desktopenv.metric.slides.debug - DEBUG - --- Comparing Slide 2 ---
+DEBUG:desktopenv.metric.slides.debug:--- Comparing Slide 2 ---
+2026-07-08 21:30:37,931 - desktopenv.metric.slides.debug - DEBUG - Slide 2 - Shapes count: File1=2, File2=2
+DEBUG:desktopenv.metric.slides.debug:Slide 2 - Shapes count: File1=2, File2=2
+2026-07-08 21:30:37,932 - desktopenv.metric.slides.debug - DEBUG - Slide 2 - Text shapes found: File1=2, File2=2
+DEBUG:desktopenv.metric.slides.debug:Slide 2 - Text shapes found: File1=2, File2=2
+2026-07-08 21:30:37,932 - desktopenv.metric.slides.debug - DEBUG -   Shape 1 - Type: PLACEHOLDER (14) vs PLACEHOLDER (14)
+DEBUG:desktopenv.metric.slides.debug:  Shape 1 - Type: PLACEHOLDER (14) vs PLACEHOLDER (14)
+2026-07-08 21:30:37,932 - desktopenv.metric.slides.debug - DEBUG -   Shape 1 - Text: 'Overview' vs 'Overview'
+DEBUG:desktopenv.metric.slides.debug:  Shape 1 - Text: 'Overview' vs 'Overview'
+2026-07-08 21:30:37,932 - desktopenv.metric.slides.debug - DEBUG -   Shape 1 - Position: (1260000, 0) vs (1260000, 0)
+DEBUG:desktopenv.metric.slides.debug:  Shape 1 - Position: (1260000, 0) vs (1260000, 0)
+2026-07-08 21:30:37,932 - desktopenv.metric.slides.debug - DEBUG -   Shape 1 - Size: (10056960, 1449360) vs (10057320, 1449720)
+DEBUG:desktopenv.metric.slides.debug:  Shape 1 - Size: (10056960, 1449360) vs (10057320, 1449720)
+2026-07-08 21:30:37,932 - desktopenv.metric.slides.debug - DEBUG -     Slide 2, Shape 1, Para 1 - Alignment: 'CENTER' vs 'CENTER'
+DEBUG:desktopenv.metric.slides.debug:    Slide 2, Shape 1, Para 1 - Alignment: 'CENTER' vs 'CENTER'
+2026-07-08 21:30:37,933 - desktopenv.metric.slides.debug - DEBUG -     Slide 2, Shape 1, Para 1 - Text: 'Overview' vs 'Overview'
+DEBUG:desktopenv.metric.slides.debug:    Slide 2, Shape 1, Para 1 - Text: 'Overview' vs 'Overview'
+2026-07-08 21:30:37,934 - desktopenv.metric.slides.debug - DEBUG -   Shape 2 - Type: PLACEHOLDER (14) vs PLACEHOLDER (14)
+DEBUG:desktopenv.metric.slides.debug:  Shape 2 - Type: PLACEHOLDER (14) vs PLACEHOLDER (14)
+2026-07-08 21:30:37,934 - desktopenv.metric.slides.debug - DEBUG -   Shape 2 - Text: 'Introductions
+Club Rights, Responsibilities & Resources
+Policies and Procedures
+FIT Link - Program and Activity Form
+FIT Link - Event Form 
+Important Dates
+Important Resources & Links' vs 'Introductions
+Club Rights, Responsibilities & Resources
+Policies and Procedures
+FIT Link - Program and Activity Form
+FIT Link - Event Form 
+Important Dates
+Important Resources & Links'
+DEBUG:desktopenv.metric.slides.debug:  Shape 2 - Text: 'Introductions
+Club Rights, Responsibilities & Resources
+Policies and Procedures
+FIT Link - Program and Activity Form
+FIT Link - Event Form 
+Important Dates
+Important Resources & Links' vs 'Introductions
+Club Rights, Responsibilities & Resources
+Policies and Procedures
+FIT Link - Program and Activity Form
+FIT Link - Event Form 
+Important Dates
+Important Resources & Links'
+2026-07-08 21:30:37,934 - desktopenv.metric.slides.debug - DEBUG -   Shape 2 - Position: (1803600, 1736280) vs (1803600, 1736280)
+DEBUG:desktopenv.metric.slides.debug:  Shape 2 - Position: (1803600, 1736280) vs (1803600, 1736280)
+2026-07-08 21:30:37,934 - desktopenv.metric.slides.debug - DEBUG -   Shape 2 - Size: (8456040, 3941280) vs (8456400, 3941640)
+DEBUG:desktopenv.metric.slides.debug:  Shape 2 - Size: (8456040, 3941280) vs (8456400, 3941640)
+2026-07-08 21:30:37,934 - desktopenv.metric.slides.debug - DEBUG -     Slide 2, Shape 2, Para 1 - Alignment: 'None' vs 'None'
+DEBUG:desktopenv.metric.slides.debug:    Slide 2, Shape 2, Para 1 - Alignment: 'None' vs 'None'
+2026-07-08 21:30:37,934 - desktopenv.metric.slides.debug - DEBUG -     Slide 2, Shape 2, Para 1 - Text: 'Introductions' vs 'Introductions'
+DEBUG:desktopenv.metric.slides.debug:    Slide 2, Shape 2, Para 1 - Text: 'Introductions' vs 'Introductions'
+2026-07-08 21:30:37,935 - desktopenv.metric.slides.debug - DEBUG -     Slide 2, Shape 2, Para 2 - Alignment: 'None' vs 'None'
+DEBUG:desktopenv.metric.slides.debug:    Slide 2, Shape 2, Para 2 - Alignment: 'None' vs 'None'
+2026-07-08 21:30:37,935 - desktopenv.metric.slides.debug - DEBUG -     Slide 2, Shape 2, Para 2 - Text: 'Club Rights, Responsibilities & Resources' vs 'Club Rights, Responsibilities & Resources'
+DEBUG:desktopenv.metric.slides.debug:    Slide 2, Shape 2, Para 2 - Text: 'Club Rights, Responsibilities & Resources' vs 'Club Rights, Responsibilities & Resources'
+2026-07-08 21:30:37,936 - desktopenv.metric.slides.debug - DEBUG -     Slide 2, Shape 2, Para 3 - Alignment: 'None' vs 'None'
+DEBUG:desktopenv.metric.slides.debug:    Slide 2, Shape 2, Para 3 - Alignment: 'None' vs 'None'
+2026-07-08 21:30:37,936 - desktopenv.metric.slides.debug - DEBUG -     Slide 2, Shape 2, Para 3 - Text: 'Policies and Procedures' vs 'Policies and Procedures'
+DEBUG:desktopenv.metric.slides.debug:    Slide 2, Shape 2, Para 3 - Text: 'Policies and Procedures' vs 'Policies and Procedures'
+2026-07-08 21:30:37,937 - desktopenv.metric.slides.debug - DEBUG -     Slide 2, Shape 2, Para 4 - Alignment: 'None' vs 'None'
+DEBUG:desktopenv.metric.slides.debug:    Slide 2, Shape 2, Para 4 - Alignment: 'None' vs 'None'
+2026-07-08 21:30:37,937 - desktopenv.metric.slides.debug - DEBUG -     Slide 2, Shape 2, Para 4 - Text: 'FIT Link - Program and Activity Form' vs 'FIT Link - Program and Activity Form'
+DEBUG:desktopenv.metric.slides.debug:    Slide 2, Shape 2, Para 4 - Text: 'FIT Link - Program and Activity Form' vs 'FIT Link - Program and Activity Form'
+2026-07-08 21:30:37,938 - desktopenv.metric.slides.debug - DEBUG -     Slide 2, Shape 2, Para 5 - Alignment: 'None' vs 'None'
+DEBUG:desktopenv.metric.slides.debug:    Slide 2, Shape 2, Para 5 - Alignment: 'None' vs 'None'
+2026-07-08 21:30:37,938 - desktopenv.metric.slides.debug - DEBUG -     Slide 2, Shape 2, Para 5 - Text: 'FIT Link - Event Form ' vs 'FIT Link - Event Form '
+DEBUG:desktopenv.metric.slides.debug:    Slide 2, Shape 2, Para 5 - Text: 'FIT Link - Event Form ' vs 'FIT Link - Event Form '
+2026-07-08 21:30:37,939 - desktopenv.metric.slides.debug - DEBUG -     Slide 2, Shape 2, Para 6 - Alignment: 'None' vs 'None'
+DEBUG:desktopenv.metric.slides.debug:    Slide 2, Shape 2, Para 6 - Alignment: 'None' vs 'None'
+2026-07-08 21:30:37,939 - desktopenv.metric.slides.debug - DEBUG -     Slide 2, Shape 2, Para 6 - Text: 'Important Dates' vs 'Important Dates'
+DEBUG:desktopenv.metric.slides.debug:    Slide 2, Shape 2, Para 6 - Text: 'Important Dates' vs 'Important Dates'
+2026-07-08 21:30:37,940 - desktopenv.metric.slides.debug - DEBUG -     Slide 2, Shape 2, Para 7 - Alignment: 'None' vs 'None'
+DEBUG:desktopenv.metric.slides.debug:    Slide 2, Shape 2, Para 7 - Alignment: 'None' vs 'None'
+2026-07-08 21:30:37,940 - desktopenv.metric.slides.debug - DEBUG -     Slide 2, Shape 2, Para 7 - Text: 'Important Resources & Links' vs 'Important Resources & Links'
+DEBUG:desktopenv.metric.slides.debug:    Slide 2, Shape 2, Para 7 - Text: 'Important Resources & Links' vs 'Important Resources & Links'
+2026-07-08 21:30:37,941 - desktopenv.metric.slides.debug - DEBUG -   Additional text shape check 1: 'Overview' vs 'Overview'
+DEBUG:desktopenv.metric.slides.debug:  Additional text shape check 1: 'Overview' vs 'Overview'
+2026-07-08 21:30:37,941 - desktopenv.metric.slides.debug - DEBUG -     Para 1: Alignment 'CENTER' vs 'CENTER'
+DEBUG:desktopenv.metric.slides.debug:    Para 1: Alignment 'CENTER' vs 'CENTER'
+2026-07-08 21:30:37,941 - desktopenv.metric.slides.debug - DEBUG -   Additional text shape check 2: 'Introductions
+Club Rights, Res' vs 'Introductions
+Club Rights, Res'
+DEBUG:desktopenv.metric.slides.debug:  Additional text shape check 2: 'Introductions
+Club Rights, Res' vs 'Introductions
+Club Rights, Res'
+2026-07-08 21:30:37,941 - desktopenv.metric.slides.debug - DEBUG -     Para 1: Alignment 'None' vs 'None'
+DEBUG:desktopenv.metric.slides.debug:    Para 1: Alignment 'None' vs 'None'
+2026-07-08 21:30:37,941 - desktopenv.metric.slides.debug - DEBUG -     Para 2: Alignment 'None' vs 'None'
+DEBUG:desktopenv.metric.slides.debug:    Para 2: Alignment 'None' vs 'None'
+2026-07-08 21:30:37,941 - desktopenv.metric.slides.debug - DEBUG -     Para 3: Alignment 'None' vs 'None'
+DEBUG:desktopenv.metric.slides.debug:    Para 3: Alignment 'None' vs 'None'
+2026-07-08 21:30:37,941 - desktopenv.metric.slides.debug - DEBUG -     Para 4: Alignment 'None' vs 'None'
+DEBUG:desktopenv.metric.slides.debug:    Para 4: Alignment 'None' vs 'None'
+2026-07-08 21:30:37,941 - desktopenv.metric.slides.debug - DEBUG -     Para 5: Alignment 'None' vs 'None'
+DEBUG:desktopenv.metric.slides.debug:    Para 5: Alignment 'None' vs 'None'
+2026-07-08 21:30:37,941 - desktopenv.metric.slides.debug - DEBUG -     Para 6: Alignment 'None' vs 'None'
+DEBUG:desktopenv.metric.slides.debug:    Para 6: Alignment 'None' vs 'None'
+2026-07-08 21:30:37,941 - desktopenv.metric.slides.debug - DEBUG -     Para 7: Alignment 'None' vs 'None'
+DEBUG:desktopenv.metric.slides.debug:    Para 7: Alignment 'None' vs 'None'
+2026-07-08 21:30:37,941 - desktopenv.metric.slides.debug - DEBUG - --- Comparing Slide 3 ---
+DEBUG:desktopenv.metric.slides.debug:--- Comparing Slide 3 ---
+2026-07-08 21:30:37,942 - desktopenv.metric.slides.debug - DEBUG - Slide 3 - Shapes count: File1=2, File2=2
+DEBUG:desktopenv.metric.slides.debug:Slide 3 - Shapes count: File1=2, File2=2
+2026-07-08 21:30:37,942 - desktopenv.metric.slides.debug - DEBUG - Slide 3 - Text shapes found: File1=1, File2=1
+DEBUG:desktopenv.metric.slides.debug:Slide 3 - Text shapes found: File1=1, File2=1
+2026-07-08 21:30:37,942 - desktopenv.metric.slides.debug - DEBUG -   Shape 1 - Type: PICTURE (13) vs PICTURE (13)
+DEBUG:desktopenv.metric.slides.debug:  Shape 1 - Type: PICTURE (13) vs PICTURE (13)
+2026-07-08 21:30:37,943 - desktopenv.metric.slides.debug - DEBUG -   Shape 2 - Type: AUTO_SHAPE (1) vs AUTO_SHAPE (1)
+DEBUG:desktopenv.metric.slides.debug:  Shape 2 - Type: AUTO_SHAPE (1) vs AUTO_SHAPE (1)
+2026-07-08 21:30:37,943 - desktopenv.metric.slides.debug - DEBUG -   Shape 2 - Text: 'Name  
+Club or Organization' vs 'Name  
+Club or Organization'
+DEBUG:desktopenv.metric.slides.debug:  Shape 2 - Text: 'Name  
+Club or Organization' vs 'Name  
+Club or Organization'
+2026-07-08 21:30:37,943 - desktopenv.metric.slides.debug - DEBUG -   Shape 2 - Position: (3504960, 2963520) vs (3504960, 2963520)
+DEBUG:desktopenv.metric.slides.debug:  Shape 2 - Position: (3504960, 2963520) vs (3504960, 2963520)
+2026-07-08 21:30:37,943 - desktopenv.metric.slides.debug - DEBUG -   Shape 2 - Size: (5180760, 2880720) vs (5181120, 2881080)
+DEBUG:desktopenv.metric.slides.debug:  Shape 2 - Size: (5180760, 2880720) vs (5181120, 2881080)
+2026-07-08 21:30:37,943 - desktopenv.metric.slides.debug - DEBUG -     Slide 3, Shape 2, Para 1 - Alignment: 'CENTER' vs 'CENTER'
+DEBUG:desktopenv.metric.slides.debug:    Slide 3, Shape 2, Para 1 - Alignment: 'CENTER' vs 'CENTER'
+2026-07-08 21:30:37,943 - desktopenv.metric.slides.debug - DEBUG -     Slide 3, Shape 2, Para 1 - Text: 'Name  ' vs 'Name  '
+DEBUG:desktopenv.metric.slides.debug:    Slide 3, Shape 2, Para 1 - Text: 'Name  ' vs 'Name  '
+2026-07-08 21:30:37,944 - desktopenv.metric.slides.debug - DEBUG -     Slide 3, Shape 2, Para 2 - Alignment: 'CENTER' vs 'CENTER'
+DEBUG:desktopenv.metric.slides.debug:    Slide 3, Shape 2, Para 2 - Alignment: 'CENTER' vs 'CENTER'
+2026-07-08 21:30:37,944 - desktopenv.metric.slides.debug - DEBUG -     Slide 3, Shape 2, Para 2 - Text: 'Club or Organization ' vs 'Club or Organization '
+DEBUG:desktopenv.metric.slides.debug:    Slide 3, Shape 2, Para 2 - Text: 'Club or Organization ' vs 'Club or Organization '
+2026-07-08 21:30:37,945 - desktopenv.metric.slides.debug - DEBUG -   Additional text shape check 1: 'Name  
+Club or Organization' vs 'Name  
+Club or Organization'
+DEBUG:desktopenv.metric.slides.debug:  Additional text shape check 1: 'Name  
+Club or Organization' vs 'Name  
+Club or Organization'
+2026-07-08 21:30:37,945 - desktopenv.metric.slides.debug - DEBUG -     Para 1: Alignment 'CENTER' vs 'CENTER'
+DEBUG:desktopenv.metric.slides.debug:    Para 1: Alignment 'CENTER' vs 'CENTER'
+2026-07-08 21:30:37,945 - desktopenv.metric.slides.debug - DEBUG -     Para 2: Alignment 'CENTER' vs 'CENTER'
+DEBUG:desktopenv.metric.slides.debug:    Para 2: Alignment 'CENTER' vs 'CENTER'
+2026-07-08 21:30:37,945 - desktopenv.metric.slides.debug - DEBUG - --- Comparing Slide 4 ---
+DEBUG:desktopenv.metric.slides.debug:--- Comparing Slide 4 ---
+2026-07-08 21:30:37,945 - desktopenv.metric.slides.debug - DEBUG - Slide 4 - Shapes count: File1=3, File2=3
+DEBUG:desktopenv.metric.slides.debug:Slide 4 - Shapes count: File1=3, File2=3
+2026-07-08 21:30:37,946 - desktopenv.metric.slides.debug - DEBUG - Slide 4 - Text shapes found: File1=3, File2=3
+DEBUG:desktopenv.metric.slides.debug:Slide 4 - Text shapes found: File1=3, File2=3
+2026-07-08 21:30:37,946 - desktopenv.metric.slides.debug - DEBUG -   Shape 1 - Type: PLACEHOLDER (14) vs PLACEHOLDER (14)
+DEBUG:desktopenv.metric.slides.debug:  Shape 1 - Type: PLACEHOLDER (14) vs PLACEHOLDER (14)
+2026-07-08 21:30:37,946 - desktopenv.metric.slides.debug - DEBUG -   Shape 1 - Text: 'Director of Student Organizations' vs 'Director of Student Organizations'
+DEBUG:desktopenv.metric.slides.debug:  Shape 1 - Text: 'Director of Student Organizations' vs 'Director of Student Organizations'
+2026-07-08 21:30:37,947 - desktopenv.metric.slides.debug - DEBUG -   Shape 1 - Position: (540000, 180000) vs (540000, 180000)
+DEBUG:desktopenv.metric.slides.debug:  Shape 1 - Position: (540000, 180000) vs (540000, 180000)
+2026-07-08 21:30:37,947 - desktopenv.metric.slides.debug - DEBUG -   Shape 1 - Size: (11427120, 1254600) vs (11427480, 1254960)
+DEBUG:desktopenv.metric.slides.debug:  Shape 1 - Size: (11427120, 1254600) vs (11427480, 1254960)
+2026-07-08 21:30:37,947 - desktopenv.metric.slides.debug - DEBUG -     Slide 4, Shape 1, Para 1 - Alignment: 'CENTER' vs 'CENTER'
+DEBUG:desktopenv.metric.slides.debug:    Slide 4, Shape 1, Para 1 - Alignment: 'CENTER' vs 'CENTER'
+2026-07-08 21:30:37,947 - desktopenv.metric.slides.debug - DEBUG -     Slide 4, Shape 1, Para 1 - Text: 'Director of Student Organizations' vs 'Director of Student Organizations'
+DEBUG:desktopenv.metric.slides.debug:    Slide 4, Shape 1, Para 1 - Text: 'Director of Student Organizations' vs 'Director of Student Organizations'
+2026-07-08 21:30:37,948 - desktopenv.metric.slides.debug - DEBUG -   Shape 2 - Type: PLACEHOLDER (14) vs PLACEHOLDER (14)
+DEBUG:desktopenv.metric.slides.debug:  Shape 2 - Type: PLACEHOLDER (14) vs PLACEHOLDER (14)
+2026-07-08 21:30:37,948 - desktopenv.metric.slides.debug - DEBUG -   Shape 2 - Text: 'MARTY SULLIVAN II' vs 'MARTY SULLIVAN II'
+DEBUG:desktopenv.metric.slides.debug:  Shape 2 - Text: 'MARTY SULLIVAN II' vs 'MARTY SULLIVAN II'
+2026-07-08 21:30:37,948 - desktopenv.metric.slides.debug - DEBUG -   Shape 2 - Position: (2849760, 3367440) vs (2849760, 3367440)
+DEBUG:desktopenv.metric.slides.debug:  Shape 2 - Position: (2849760, 3367440) vs (2849760, 3367440)
+2026-07-08 21:30:37,948 - desktopenv.metric.slides.debug - DEBUG -   Shape 2 - Size: (6492600, 2161800) vs (6492960, 2162160)
+DEBUG:desktopenv.metric.slides.debug:  Shape 2 - Size: (6492600, 2161800) vs (6492960, 2162160)
+2026-07-08 21:30:37,948 - desktopenv.metric.slides.debug - DEBUG -     Slide 4, Shape 2, Para 1 - Alignment: 'CENTER' vs 'CENTER'
+DEBUG:desktopenv.metric.slides.debug:    Slide 4, Shape 2, Para 1 - Alignment: 'CENTER' vs 'CENTER'
+2026-07-08 21:30:37,949 - desktopenv.metric.slides.debug - DEBUG -     Slide 4, Shape 2, Para 1 - Text: 'MARTY SULLIVAN II ' vs 'MARTY SULLIVAN II '
+DEBUG:desktopenv.metric.slides.debug:    Slide 4, Shape 2, Para 1 - Text: 'MARTY SULLIVAN II ' vs 'MARTY SULLIVAN II '
+2026-07-08 21:30:37,949 - desktopenv.metric.slides.debug - DEBUG -   Shape 3 - Type: AUTO_SHAPE (1) vs AUTO_SHAPE (1)
+DEBUG:desktopenv.metric.slides.debug:  Shape 3 - Type: AUTO_SHAPE (1) vs AUTO_SHAPE (1)
+2026-07-08 21:30:37,950 - desktopenv.metric.slides.debug - DEBUG -   Shape 3 - Text: 'Office Hours:
+Monday 4PM to 5PM
+Wednesday 12PM to 1PM' vs 'Office Hours:
+Monday 4PM to 5PM
+Wednesday 12PM to 1PM'
+DEBUG:desktopenv.metric.slides.debug:  Shape 3 - Text: 'Office Hours:
+Monday 4PM to 5PM
+Wednesday 12PM to 1PM' vs 'Office Hours:
+Monday 4PM to 5PM
+Wednesday 12PM to 1PM'
+2026-07-08 21:30:37,950 - desktopenv.metric.slides.debug - DEBUG -   Shape 3 - Position: (4142880, 5456160) vs (4142880, 5456160)
+DEBUG:desktopenv.metric.slides.debug:  Shape 3 - Position: (4142880, 5456160) vs (4142880, 5456160)
+2026-07-08 21:30:37,950 - desktopenv.metric.slides.debug - DEBUG -   Shape 3 - Size: (3904560, 1027440) vs (3904920, 1027800)
+DEBUG:desktopenv.metric.slides.debug:  Shape 3 - Size: (3904560, 1027440) vs (3904920, 1027800)
+2026-07-08 21:30:37,950 - desktopenv.metric.slides.debug - DEBUG -     Slide 4, Shape 3, Para 1 - Alignment: 'CENTER' vs 'CENTER'
+DEBUG:desktopenv.metric.slides.debug:    Slide 4, Shape 3, Para 1 - Alignment: 'CENTER' vs 'CENTER'
+2026-07-08 21:30:37,950 - desktopenv.metric.slides.debug - DEBUG -     Slide 4, Shape 3, Para 1 - Text: 'Office Hours:' vs 'Office Hours:'
+DEBUG:desktopenv.metric.slides.debug:    Slide 4, Shape 3, Para 1 - Text: 'Office Hours:' vs 'Office Hours:'
+2026-07-08 21:30:37,951 - desktopenv.metric.slides.debug - DEBUG -     Slide 4, Shape 3, Para 2 - Alignment: 'CENTER' vs 'CENTER'
+DEBUG:desktopenv.metric.slides.debug:    Slide 4, Shape 3, Para 2 - Alignment: 'CENTER' vs 'CENTER'
+2026-07-08 21:30:37,951 - desktopenv.metric.slides.debug - DEBUG -     Slide 4, Shape 3, Para 2 - Text: 'Monday 4PM to 5PM' vs 'Monday 4PM to 5PM'
+DEBUG:desktopenv.metric.slides.debug:    Slide 4, Shape 3, Para 2 - Text: 'Monday 4PM to 5PM' vs 'Monday 4PM to 5PM'
+2026-07-08 21:30:37,952 - desktopenv.metric.slides.debug - DEBUG -     Slide 4, Shape 3, Para 3 - Alignment: 'CENTER' vs 'CENTER'
+DEBUG:desktopenv.metric.slides.debug:    Slide 4, Shape 3, Para 3 - Alignment: 'CENTER' vs 'CENTER'
+2026-07-08 21:30:37,952 - desktopenv.metric.slides.debug - DEBUG -     Slide 4, Shape 3, Para 3 - Text: 'Wednesday 12PM to 1PM' vs 'Wednesday 12PM to 1PM'
+DEBUG:desktopenv.metric.slides.debug:    Slide 4, Shape 3, Para 3 - Text: 'Wednesday 12PM to 1PM' vs 'Wednesday 12PM to 1PM'
+2026-07-08 21:30:37,953 - desktopenv.metric.slides.debug - DEBUG -   Additional text shape check 1: 'Director of Student Organizati' vs 'Director of Student Organizati'
+DEBUG:desktopenv.metric.slides.debug:  Additional text shape check 1: 'Director of Student Organizati' vs 'Director of Student Organizati'
+2026-07-08 21:30:37,953 - desktopenv.metric.slides.debug - DEBUG -     Para 1: Alignment 'CENTER' vs 'CENTER'
+DEBUG:desktopenv.metric.slides.debug:    Para 1: Alignment 'CENTER' vs 'CENTER'
+2026-07-08 21:30:37,953 - desktopenv.metric.slides.debug - DEBUG -   Additional text shape check 2: 'MARTY SULLIVAN II' vs 'MARTY SULLIVAN II'
+DEBUG:desktopenv.metric.slides.debug:  Additional text shape check 2: 'MARTY SULLIVAN II' vs 'MARTY SULLIVAN II'
+2026-07-08 21:30:37,953 - desktopenv.metric.slides.debug - DEBUG -     Para 1: Alignment 'CENTER' vs 'CENTER'
+DEBUG:desktopenv.metric.slides.debug:    Para 1: Alignment 'CENTER' vs 'CENTER'
+2026-07-08 21:30:37,953 - desktopenv.metric.slides.debug - DEBUG -   Additional text shape check 3: 'Office Hours:
+Monday 4PM to 5P' vs 'Office Hours:
+Monday 4PM to 5P'
+DEBUG:desktopenv.metric.slides.debug:  Additional text shape check 3: 'Office Hours:
+Monday 4PM to 5P' vs 'Office Hours:
+Monday 4PM to 5P'
+2026-07-08 21:30:37,953 - desktopenv.metric.slides.debug - DEBUG -     Para 1: Alignment 'CENTER' vs 'CENTER'
+DEBUG:desktopenv.metric.slides.debug:    Para 1: Alignment 'CENTER' vs 'CENTER'
+2026-07-08 21:30:37,953 - desktopenv.metric.slides.debug - DEBUG -     Para 2: Alignment 'CENTER' vs 'CENTER'
+DEBUG:desktopenv.metric.slides.debug:    Para 2: Alignment 'CENTER' vs 'CENTER'
+2026-07-08 21:30:37,953 - desktopenv.metric.slides.debug - DEBUG -     Para 3: Alignment 'CENTER' vs 'CENTER'
+DEBUG:desktopenv.metric.slides.debug:    Para 3: Alignment 'CENTER' vs 'CENTER'
+2026-07-08 21:30:37,953 - desktopenv.metric.slides.debug - DEBUG - --- Comparing Slide 5 ---
+DEBUG:desktopenv.metric.slides.debug:--- Comparing Slide 5 ---
+2026-07-08 21:30:37,953 - desktopenv.metric.slides.debug - DEBUG - Slide 5 - Shapes count: File1=2, File2=2
+DEBUG:desktopenv.metric.slides.debug:Slide 5 - Shapes count: File1=2, File2=2
+2026-07-08 21:30:37,955 - desktopenv.metric.slides.debug - DEBUG - Slide 5 - Text shapes found: File1=2, File2=2
+DEBUG:desktopenv.metric.slides.debug:Slide 5 - Text shapes found: File1=2, File2=2
+2026-07-08 21:30:37,955 - desktopenv.metric.slides.debug - DEBUG -   Shape 1 - Type: PLACEHOLDER (14) vs PLACEHOLDER (14)
+DEBUG:desktopenv.metric.slides.debug:  Shape 1 - Type: PLACEHOLDER (14) vs PLACEHOLDER (14)
+2026-07-08 21:30:37,955 - desktopenv.metric.slides.debug - DEBUG -   Shape 1 - Text: 'What I do:' vs 'What I do:'
+DEBUG:desktopenv.metric.slides.debug:  Shape 1 - Text: 'What I do:' vs 'What I do:'
+2026-07-08 21:30:37,955 - desktopenv.metric.slides.debug - DEBUG -   Shape 1 - Position: (520200, 483480) vs (520200, 483480)
+DEBUG:desktopenv.metric.slides.debug:  Shape 1 - Position: (520200, 483480) vs (520200, 483480)
+2026-07-08 21:30:37,955 - desktopenv.metric.slides.debug - DEBUG -   Shape 1 - Size: (11359440, 941760) vs (11359800, 942120)
+DEBUG:desktopenv.metric.slides.debug:  Shape 1 - Size: (11359440, 941760) vs (11359800, 942120)
+2026-07-08 21:30:37,955 - desktopenv.metric.slides.debug - DEBUG -     Slide 5, Shape 1, Para 1 - Alignment: 'None' vs 'None'
+DEBUG:desktopenv.metric.slides.debug:    Slide 5, Shape 1, Para 1 - Alignment: 'None' vs 'None'
+2026-07-08 21:30:37,955 - desktopenv.metric.slides.debug - DEBUG -     Slide 5, Shape 1, Para 1 - Text: 'What I do:' vs 'What I do:'
+DEBUG:desktopenv.metric.slides.debug:    Slide 5, Shape 1, Para 1 - Text: 'What I do:' vs 'What I do:'
+2026-07-08 21:30:37,956 - desktopenv.metric.slides.debug - DEBUG -   Shape 2 - Type: PLACEHOLDER (14) vs PLACEHOLDER (14)
+DEBUG:desktopenv.metric.slides.debug:  Shape 2 - Type: PLACEHOLDER (14) vs PLACEHOLDER (14)
+2026-07-08 21:30:37,957 - desktopenv.metric.slides.debug - DEBUG -   Shape 2 - Text: 'Finance Meetings:
+Providing another perspective for the clubs and organizations.
+Advocating for student Budget Requests.
+Tracking budgets to reflect attendance and participation.
+Meetings with the Program Coordinator:
+Touching base with what clubs and organizations are planning.
+Assisting during the planning process.
+Board of Directors Meetings:
+Sharing the agendas of clubs and organizations with the members of FIT SGA' vs 'Finance Meetings:
+Providing another perspective for the clubs and organizations.
+Advocating for student Budget Requests.
+Tracking budgets to reflect attendance and participation.
+Meetings with the Program Coordinator:
+Touching base with what clubs and organizations are planning.
+Assisting during the planning process.
+Board of Directors Meetings:
+Sharing the agendas of clubs and organizations with the members of FIT SGA'
+DEBUG:desktopenv.metric.slides.debug:  Shape 2 - Text: 'Finance Meetings:
+Providing another perspective for the clubs and organizations.
+Advocating for student Budget Requests.
+Tracking budgets to reflect attendance and participation.
+Meetings with the Program Coordinator:
+Touching base with what clubs and organizations are planning.
+Assisting during the planning process.
+Board of Directors Meetings:
+Sharing the agendas of clubs and organizations with the members of FIT SGA' vs 'Finance Meetings:
+Providing another perspective for the clubs and organizations.
+Advocating for student Budget Requests.
+Tracking budgets to reflect attendance and participation.
+Meetings with the Program Coordinator:
+Touching base with what clubs and organizations are planning.
+Assisting during the planning process.
+Board of Directors Meetings:
+Sharing the agendas of clubs and organizations with the members of FIT SGA'
+2026-07-08 21:30:37,957 - desktopenv.metric.slides.debug - DEBUG -   Shape 2 - Position: (880200, 1341000) vs (880200, 1341000)
+DEBUG:desktopenv.metric.slides.debug:  Shape 2 - Position: (880200, 1341000) vs (880200, 1341000)
+2026-07-08 21:30:37,957 - desktopenv.metric.slides.debug - DEBUG -   Shape 2 - Size: (10279440, 4721040) vs (10279800, 4721400)
+DEBUG:desktopenv.metric.slides.debug:  Shape 2 - Size: (10279440, 4721040) vs (10279800, 4721400)
+2026-07-08 21:30:37,958 - desktopenv.metric.slides.debug - DEBUG -     Slide 5, Shape 2, Para 1 - Alignment: 'None' vs 'None'
+DEBUG:desktopenv.metric.slides.debug:    Slide 5, Shape 2, Para 1 - Alignment: 'None' vs 'None'
+2026-07-08 21:30:37,958 - desktopenv.metric.slides.debug - DEBUG -     Slide 5, Shape 2, Para 1 - Text: 'Finance Meetings:' vs 'Finance Meetings:'
+DEBUG:desktopenv.metric.slides.debug:    Slide 5, Shape 2, Para 1 - Text: 'Finance Meetings:' vs 'Finance Meetings:'
+2026-07-08 21:30:37,959 - desktopenv.metric.slides.debug - DEBUG -     Slide 5, Shape 2, Para 2 - Alignment: 'None' vs 'None'
+DEBUG:desktopenv.metric.slides.debug:    Slide 5, Shape 2, Para 2 - Alignment: 'None' vs 'None'
+2026-07-08 21:30:37,959 - desktopenv.metric.slides.debug - DEBUG -     Slide 5, Shape 2, Para 2 - Text: 'Providing another perspective for the clubs and organizations.' vs 'Providing another perspective for the clubs and organizations.'
+DEBUG:desktopenv.metric.slides.debug:    Slide 5, Shape 2, Para 2 - Text: 'Providing another perspective for the clubs and organizations.' vs 'Providing another perspective for the clubs and organizations.'
+   agent: 
+   ⟹ score=0.0
+
+══════ [libreoffice_writer/0810415c] Make the line spacing of first two paragraph into double line spacing
+INFO:desktopenv.providers.docker.DockerProvider:Stopping VM...
+INFO:desktopenv.providers.docker.DockerProvider:KVM device found, using hardware acceleration
+INFO:desktopenv.providers.docker.DockerProvider:Started container with ports - VNC: 8007, Server: 5000, Chrome: 9223, VLC: 8081
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+   agent: {"kind":"status","payload":{"detail":"The screen doesn't match what this step needs (\"Click the Applications menu\") — handing back to you. It may already be done, or the screen went somewhere I didn
+   ⟹ score=0.0
+
+══════ [libreoffice_writer/0a0faba3] I would like to make the first three words of the sentence left-aligned and the rest right
+INFO:desktopenv.providers.docker.DockerProvider:Stopping VM...
+INFO:desktopenv.providers.docker.DockerProvider:KVM device found, using hardware acceleration
+INFO:desktopenv.providers.docker.DockerProvider:Started container with ports - VNC: 8007, Server: 5000, Chrome: 9223, VLC: 8081
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+   agent: 
+   ⟹ score=0.0
+
+══════ [multi_apps/a74b607e] I have developed a new Chrome extension myself, so it needs to be installed manually. Plea
+INFO:desktopenv.providers.docker.DockerProvider:Stopping VM...
+INFO:desktopenv.providers.docker.DockerProvider:KVM device found, using hardware acceleration
+INFO:desktopenv.providers.docker.DockerProvider:Started container with ports - VNC: 8007, Server: 5000, Chrome: 9223, VLC: 8081
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+   agent: {"kind":"status","payload":{"detail":"The screen doesn't match what this step needs (\"Click the Chrome menu\") — handing back to you. It may already be done, or the screen went somewhere I didn't pla
+   ⟹ score=0.0
+
+══════ [multi_apps/5990457f] Append one entry of AI researcher Yann LeCun from Google Scholar into an existing table re
+INFO:desktopenv.providers.docker.DockerProvider:Stopping VM...
+INFO:desktopenv.providers.docker.DockerProvider:KVM device found, using hardware acceleration
+INFO:desktopenv.providers.docker.DockerProvider:Started container with ports - VNC: 8008, Server: 5001, Chrome: 9223, VLC: 8082
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+   agent: {"kind":"status","payload":{"detail":"The screen doesn't match what this step needs (\"Click the Applications menu\") — handing back to you. It may already be done, or the screen went somewhere I didn
+   ⟹ score=0.0
+
+══════ [multi_apps/2b9493d7] Hey, my LibreOffice Writer seems to have frozen and I can't get it to close normally. Can 
+INFO:desktopenv.providers.docker.DockerProvider:Stopping VM...
+INFO:desktopenv.providers.docker.DockerProvider:KVM device found, using hardware acceleration
+INFO:desktopenv.providers.docker.DockerProvider:Started container with ports - VNC: 8007, Server: 5001, Chrome: 9223, VLC: 8082
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+{'error': '', 'output': 'no libreoffice is running\nnot killed from terminal\n', 'returncode': 0, 'status': 'success'}
+no libreoffice is running
+not killed from terminal
+ {'include': ['no libreoffice is running', 'killed from terminal'], 'exclude': ['libreoffice is still running', 'not killed from terminal']}
+   agent: {"kind":"status","payload":{"detail":"A command step failed and I couldn't fix it (\"run the command killall libreoffice\") — handing back to you.","state":"goal_done"},"v":1}
+   ⟹ score=0.0
+
+══════ [multi_apps/46407397] Help me export charts, graph or other images from docx files received in email "Lecture Do
+INFO:desktopenv.providers.docker.DockerProvider:Stopping VM...
+INFO:desktopenv.providers.docker.DockerProvider:KVM device found, using hardware acceleration
+INFO:desktopenv.providers.docker.DockerProvider:Started container with ports - VNC: 8007, Server: 5001, Chrome: 9223, VLC: 8082
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+/home/alucard/projects/OSWorld/.venv/lib/python3.12/site-packages/oauth2client/_helpers.py:255: UserWarning: Cannot access evaluation_examples/settings/googledrive/credentials.json: No such file or directory
+  warnings.warn(_MISSING_FILE_MESSAGE.format(filename))
+ERROR:desktopenv.setup:SETUP FAILED at step 1/8: _googledrive_setup({'settings_file': 'evaluation_examples/settings/googledrive/settings.yml', 'operation': ['delete'], 'args': [{'query': "title = 'figures' and 'root' in parents and mimeType = 'application/vnd.google-apps.folder'", 'trash': False}]})
+ERROR:desktopenv.setup:Error details: Invalid client secrets file ('Error opening file', 'evaluation_examples/settings/googledrive/client_secrets.json', 'No such file or directory', 2)
+ERROR:desktopenv.setup:Traceback: Traceback (most recent call last):
+  File "/home/alucard/projects/OSWorld/.venv/lib/python3.12/site-packages/oauth2client/clientsecrets.py", line 121, in _loadfile
+    with open(filename, 'r') as fp:
+         ^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: 'evaluation_examples/settings/googledrive/client_secrets.json'
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/alucard/projects/OSWorld/.venv/lib/python3.12/site-packages/pydrive/auth.py", line 386, in LoadClientConfigFile
+    client_type, client_info = clientsecrets.loadfile(client_config_file)
+                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alucard/projects/OSWorld/.venv/lib/python3.12/site-packages/oauth2client/clientsecrets.py", line 165, in loadfile
+    return _loadfile(filename)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/home/alucard/projects/OSWorld/.venv/lib/python3.12/site-packages/oauth2client/clientsecrets.py", line 124, in _loadfile
+    raise InvalidClientSecretsError('Error opening file', exc.filename,
+oauth2client.clientsecrets.InvalidClientSecretsError: ('Error opening file', 'evaluation_examples/settings/googledrive/client_secrets.json', 'No such file or directory', 2)
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/alucard/projects/OSWorld/desktop_env/controllers/setup.py", line 98, in setup
+    getattr(self, setup_function)(**parameters)
+  File "/home/alucard/projects/OSWorld/desktop_env/controllers/setup.py", line 714, in _googledrive_setup
+    filelist: GoogleDriveFileList = drive.ListFile({'q': q_file}).GetList()
+                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alucard/projects/OSWorld/.venv/lib/python3.12/site-packages/pydrive/apiattr.py", line 162, in GetList
+    for x in self:
+             ^^^^
+  File "/home/alucard/projects/OSWorld/.venv/lib/python3.12/site-packages/pydrive/apiattr.py", line 146, in __next__
+    result = self._GetList()
+             ^^^^^^^^^^^^^^^
+  File "/home/alucard/projects/OSWorld/.venv/lib/python3.12/site-packages/pydrive/auth.py", line 57, in _decorated
+    self.auth.LocalWebserverAuth()
+  File "/home/alucard/projects/OSWorld/.venv/lib/python3.12/site-packages/pydrive/auth.py", line 113, in _decorated
+    self.GetFlow()
+  File "/home/alucard/projects/OSWorld/.venv/lib/python3.12/site-packages/pydrive/auth.py", line 443, in GetFlow
+    self.LoadClientConfig()
+  File "/home/alucard/projects/OSWorld/.venv/lib/python3.12/site-packages/pydrive/auth.py", line 366, in LoadClientConfig
+    self.LoadClientConfigFile()
+  File "/home/alucard/projects/OSWorld/.venv/lib/python3.12/site-packages/pydrive/auth.py", line 388, in LoadClientConfigFile
+    raise InvalidConfigError('Invalid client secrets file %s' % error)
+pydrive.settings.InvalidConfigError: Invalid client secrets file ('Error opening file', 'evaluation_examples/settings/googledrive/client_secrets.json', 'No such file or directory', 2)
+
+   agent: (exc Setup step 1 failed: _googledrive_setup - Invalid client secrets file ('Error opening file', 'evaluation_examples/settings/googledrive/client_secrets.json', 'No such file or directory', 2))
+   ⟹ score=0.0
+
+══════ [multi_apps/4e9f0faf] Could you help me extract data in the table from a new invoice uploaded to my Google Drive
+ERROR:desktopenv.setup:SETUP FAILED at step 1/5: _googledrive_setup({'settings_file': 'evaluation_examples/settings/googledrive/settings.yml', 'operation': ['delete', 'upload'], 'args': [{'query': "title = 'invoice.pdf'", 'trash': False}, {'url': 'https://huggingface.co/datasets/xlangai/ubuntu_osworld_file_cache/resolve/main/multi_apps/4e9f0faf-2ecc-4ae8-a804-28c9a75d1ddc/invoice.pdf', 'path': ['invoice.pdf']}]})
+ERROR:desktopenv.setup:Error details: Invalid client secrets file ('Error opening file', 'evaluation_examples/settings/googledrive/client_secrets.json', 'No such file or directory', 2)
+ERROR:desktopenv.setup:Traceback: Traceback (most recent call last):
+  File "/home/alucard/projects/OSWorld/.venv/lib/python3.12/site-packages/oauth2client/clientsecrets.py", line 121, in _loadfile
+    with open(filename, 'r') as fp:
+         ^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: 'evaluation_examples/settings/googledrive/client_secrets.json'
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/alucard/projects/OSWorld/.venv/lib/python3.12/site-packages/pydrive/auth.py", line 386, in LoadClientConfigFile
+    client_type, client_info = clientsecrets.loadfile(client_config_file)
+                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alucard/projects/OSWorld/.venv/lib/python3.12/site-packages/oauth2client/clientsecrets.py", line 165, in loadfile
+    return _loadfile(filename)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/home/alucard/projects/OSWorld/.venv/lib/python3.12/site-packages/oauth2client/clientsecrets.py", line 124, in _loadfile
+    raise InvalidClientSecretsError('Error opening file', exc.filename,
+oauth2client.clientsecrets.InvalidClientSecretsError: ('Error opening file', 'evaluation_examples/settings/googledrive/client_secrets.json', 'No such file or directory', 2)
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/alucard/projects/OSWorld/desktop_env/controllers/setup.py", line 98, in setup
+    getattr(self, setup_function)(**parameters)
+  File "/home/alucard/projects/OSWorld/desktop_env/controllers/setup.py", line 714, in _googledrive_setup
+    filelist: GoogleDriveFileList = drive.ListFile({'q': q_file}).GetList()
+                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alucard/projects/OSWorld/.venv/lib/python3.12/site-packages/pydrive/apiattr.py", line 162, in GetList
+    for x in self:
+             ^^^^
+  File "/home/alucard/projects/OSWorld/.venv/lib/python3.12/site-packages/pydrive/apiattr.py", line 146, in __next__
+    result = self._GetList()
+             ^^^^^^^^^^^^^^^
+  File "/home/alucard/projects/OSWorld/.venv/lib/python3.12/site-packages/pydrive/auth.py", line 57, in _decorated
+    self.auth.LocalWebserverAuth()
+  File "/home/alucard/projects/OSWorld/.venv/lib/python3.12/site-packages/pydrive/auth.py", line 113, in _decorated
+    self.GetFlow()
+  File "/home/alucard/projects/OSWorld/.venv/lib/python3.12/site-packages/pydrive/auth.py", line 443, in GetFlow
+    self.LoadClientConfig()
+  File "/home/alucard/projects/OSWorld/.venv/lib/python3.12/site-packages/pydrive/auth.py", line 366, in LoadClientConfig
+    self.LoadClientConfigFile()
+  File "/home/alucard/projects/OSWorld/.venv/lib/python3.12/site-packages/pydrive/auth.py", line 388, in LoadClientConfigFile
+    raise InvalidConfigError('Invalid client secrets file %s' % error)
+pydrive.settings.InvalidConfigError: Invalid client secrets file ('Error opening file', 'evaluation_examples/settings/googledrive/client_secrets.json', 'No such file or directory', 2)
+
+   agent: (exc Setup step 1 failed: _googledrive_setup - Invalid client secrets file ('Error opening file', 'evaluation_examples/settings/googledrive/client_secrets.json', 'No such file or directory', 2))
+   ⟹ score=0.0
+
+══════ [multi_apps/510f64c8] Could you start VS Code in folder ~/Desktop/project from the terminal?
+{'error': '', 'output': 'false\n', 'returncode': 0, 'status': 'success'}
+false
+ {'include': ['true']}
+   agent: 
+   ⟹ score=0.0
+
+══════ [multi_apps/897e3b53] I have a LibreOffice Writer file form.docx on the desktop. Help me convert it to PDF forma
+INFO:desktopenv.providers.docker.DockerProvider:Stopping VM...
+INFO:desktopenv.providers.docker.DockerProvider:KVM device found, using hardware acceleration
+INFO:desktopenv.providers.docker.DockerProvider:Started container with ports - VNC: 8007, Server: 5001, Chrome: 9223, VLC: 8082
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+INFO:desktopenv.providers.docker.DockerProvider:Checking if virtual machine is ready...
+ERROR:desktopenv.setup:SETUP FAILED at step 1/7: _googledrive_setup({'settings_file': 'evaluation_examples/settings/googledrive/settings.yml', 'operation': ['delete'], 'args': [{'query': "title = 'form.pdf' or title = 'form.docx' or title = 'form.docx.pdf' or title = 'forms'", 'trash': False}]})
+ERROR:desktopenv.setup:Error details: Invalid client secrets file ('Error opening file', 'evaluation_examples/settings/googledrive/client_secrets.json', 'No such file or directory', 2)
+ERROR:desktopenv.setup:Traceback: Traceback (most recent call last):
+  File "/home/alucard/projects/OSWorld/.venv/lib/python3.12/site-packages/oauth2client/clientsecrets.py", line 121, in _loadfile
+    with open(filename, 'r') as fp:
+         ^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: 'evaluation_examples/settings/googledrive/client_secrets.json'
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/alucard/projects/OSWorld/.venv/lib/python3.12/site-packages/pydrive/auth.py", line 386, in LoadClientConfigFile
+    client_type, client_info = clientsecrets.loadfile(client_config_file)
+                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alucard/projects/OSWorld/.venv/lib/python3.12/site-packages/oauth2client/clientsecrets.py", line 165, in loadfile
+    return _loadfile(filename)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/home/alucard/projects/OSWorld/.venv/lib/python3.12/site-packages/oauth2client/clientsecrets.py", line 124, in _loadfile
+    raise InvalidClientSecretsError('Error opening file', exc.filename,
+oauth2client.clientsecrets.InvalidClientSecretsError: ('Error opening file', 'evaluation_examples/settings/googledrive/client_secrets.json', 'No such file or directory', 2)
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/alucard/projects/OSWorld/desktop_env/controllers/setup.py", line 98, in setup
+    getattr(self, setup_function)(**parameters)
+  File "/home/alucard/projects/OSWorld/desktop_env/controllers/setup.py", line 714, in _googledrive_setup
+    filelist: GoogleDriveFileList = drive.ListFile({'q': q_file}).GetList()
+                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alucard/projects/OSWorld/.venv/lib/python3.12/site-packages/pydrive/apiattr.py", line 162, in GetList
+    for x in self:
+             ^^^^
+  File "/home/alucard/projects/OSWorld/.venv/lib/python3.12/site-packages/pydrive/apiattr.py", line 146, in __next__
+    result = self._GetList()
+             ^^^^^^^^^^^^^^^
+  File "/home/alucard/projects/OSWorld/.venv/lib/python3.12/site-packages/pydrive/auth.py", line 57, in _decorated
+    self.auth.LocalWebserverAuth()
+  File "/home/alucard/projects/OSWorld/.venv/lib/python3.12/site-packages/pydrive/auth.py", line 113, in _decorated
+    self.GetFlow()
+  File "/home/alucard/projects/OSWorld/.venv/lib/python3.12/site-packages/pydrive/auth.py", line 443, in GetFlow
+    self.LoadClientConfig()
+  File "/home/alucard/projects/OSWorld/.venv/lib/python3.12/site-packages/pydrive/auth.py", line 366, in LoadClientConfig
+    self.LoadClientConfigFile()
+  File "/home/alucard/projects/OSWorld/.venv/lib/python3.12/site-packages/pydrive/auth.py", line 388, in LoadClientConfigFile
+    raise InvalidConfigError('Invalid client secrets file %s' % error)
+pydrive.settings.InvalidConfigError: Invalid client secrets file ('Error opening file', 'evaluation_examples/settings/googledrive/client_secrets.json', 'No such file or directory', 2)
+
+   agent: (exc Setup step 1 failed: _googledrive_setup - Invalid client secrets file ('Error opening file', 'evaluation_examples/settings/googledrive/client_secrets.json', 'No such file or directory', 2))
+   ⟹ score=0.0
+INFO:desktopenv.providers.docker.DockerProvider:Stopping VM...
+
+=== WHOLE HARNESS on OSWorld: 1/20 ===
+   chrome/bb5e4c0d  0
+   chrome/7b6c7e24  1
+   chrome/35253b65  0
+   chrome/a96b564e  0
+   gimp/7a4deb26  0
+   gimp/554785e9  0
+   libreoffice_calc/357ef137  0
+   libreoffice_calc/42e0a640  0
+   libreoffice_calc/abed40dc  0
+   libreoffice_impress/5d901039  0
+   libreoffice_impress/550ce7e7  0
+   libreoffice_writer/0810415c  0
+   libreoffice_writer/0a0faba3  0
+   multi_apps/a74b607e  0
+   multi_apps/5990457f  0
+   multi_apps/2b9493d7  0
+   multi_apps/46407397  0
+   multi_apps/4e9f0faf  0
+   multi_apps/510f64c8  0
+   multi_apps/897e3b53  0
