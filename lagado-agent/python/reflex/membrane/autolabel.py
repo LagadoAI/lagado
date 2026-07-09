@@ -36,6 +36,7 @@ EXPECT = {
     "type_burst": {"none", "text_edit"},
 }
 MAX_FRAMES = 10
+PAIR_STRIDE_CAP = 40      # max adjacent pairs characterized per episode
 
 
 def replay(ep):
@@ -62,6 +63,52 @@ def replay(ep):
     return np.stack(frames), out_rects
 
 
+BURST_GAP_S = 0.03
+
+
+def replay_pairs(ep):
+    """v2.1 (the real scroll fix): yield frame pairs PER REPAINT BURST. Measured:
+    compositors shatter one repaint into dozens of per-cell sub-rects arriving <5ms
+    apart (a terminal scroll = ~6 bursts of ~20 fragments each). A pair per EVENT
+    compares fragments (no translation exists in a fragment); a pair per BURST
+    compares coherent before/after states — where the scroll IS a translation."""
+    canvas = ep["canvas0"].copy()
+    rects = ep["rects"]
+    patches = ep["patches"]
+    off = 0
+    prev_canvas = canvas.copy()
+    burst_rects = []
+    last_t = None
+    yielded = 0
+    for i, (t, x, y, w, h) in enumerate(rects):
+        x, y, w, h = int(x), int(y), int(w), int(h)
+        if last_t is not None and t - last_t > BURST_GAP_S and burst_rects:
+            if yielded < PAIR_STRIDE_CAP:
+                yield prev_canvas, canvas.copy(), burst_rects
+                yielded += 1
+            prev_canvas = canvas.copy()
+            burst_rects = []
+        canvas[y:y + h, x:x + w] = patches[off:off + w * h].reshape(h, w)
+        off += w * h
+        burst_rects.append((x, y, w, h))
+        last_t = t
+    if burst_rects and yielded < PAIR_STRIDE_CAP:
+        yield prev_canvas, canvas.copy(), burst_rects
+
+
+def label_episode(ep):
+    """Union of whole-episode window kinds (animation needs ≥3 frames) and
+    adjacent-pair kinds (scroll/moved need consecutive overlap)."""
+    frames, rects = replay(ep)
+    events = baseline.characterize_events(frames, rects=rects if rects else None)
+    kinds = {e["kind"] for e in events}
+    for prev, cur, burst in replay_pairs(ep):
+        pair_events = baseline.characterize_events(np.stack([prev, cur]), rects=burst)
+        kinds |= {e["kind"] for e in pair_events}
+    kinds.discard("none") if len(kinds) > 1 else None
+    return sorted(kinds) or ["none"], events, len(rects)
+
+
 def main():
     corpus = sys.argv[1]
     out = open(os.path.join(corpus, "labels.jsonl"), "w")
@@ -70,9 +117,8 @@ def main():
     for path in sorted(glob.glob(os.path.join(corpus, "ep*.npz"))):
         ep = np.load(path, allow_pickle=True)
         name = str(ep["name"])
-        frames, rects = replay(ep)
-        events = baseline.characterize_events(frames, rects=rects if rects else None)
-        kinds = sorted({e["kind"] for e in events if e["kind"] != "none"}) or ["none"]
+        kinds, events, n_r = label_episode(ep)
+        rects = list(range(n_r))
         ok = bool(EXPECT.get(name, set()) & set(kinds)) if name in EXPECT else None
         rec = {"ep": os.path.basename(path), "stim": name, "n_rects": len(rects),
                "kinds": kinds, "agree": ok,
