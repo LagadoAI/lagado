@@ -29,6 +29,20 @@ for s in specs:
     else:
         for tf in sorted(glob.glob(f"{EXDIR}/{dom}/*.json"))[:int(n or 3)]:
             plan.append((dom, tf))
+# RESUME-SAFE campaign mode: per-task results append to LAGADO_RESULTS (jsonl);
+# task ids already present are SKIPPED on startup — a crash costs nothing.
+RESULTS_JSONL = os.environ.get("LAGADO_RESULTS", "")
+done_ids = set()
+if RESULTS_JSONL and os.path.exists(RESULTS_JSONL):
+    for ln in open(RESULTS_JSONL):
+        try:
+            done_ids.add(json.loads(ln)["id"])
+        except Exception:
+            pass
+if done_ids:
+    plan = [(d, tf) for d, tf in plan
+            if json.load(open(tf)).get("id", os.path.basename(tf))[:8] not in done_ids]
+    print(f"resume: {len(done_ids)} done, {len(plan)} remaining", flush=True)
 print(f"=== WHOLE Lagado HARNESS × OSWorld | {len(plan)} tasks ===", flush=True)
 
 env = DesktopEnv(provider_name="docker", action_space="pyautogui", screen_size=(1920, 1080),
@@ -65,6 +79,11 @@ for dom, tf in plan:
     print(f"   ⟹ score={score}", flush=True)
     results.append({"domain": dom, "id": tid, "score": score, "instruction": instr})
     json.dump(results, open("/tmp/osworld_whole_harness.json", "w"), indent=1)
+    if RESULTS_JSONL:
+        with open(RESULTS_JSONL, "a") as rf:
+            rf.write(json.dumps({"domain": dom, "id": tid, "score": score}) + "\n")
+    import subprocess as _sp   # per-task volume prune: the known 3.6GB/task leak
+    _sp.run("podman volume prune -f", shell=True, capture_output=True)
 env.close()
 
 p = sum(1 for r in results if r["score"] >= 1.0)
