@@ -30,7 +30,7 @@ class DockerProvider(Provider):
         self.chromium_port = None
         self.vlc_port = None
         self.container = None
-        self.environment = {"DISK_SIZE": "32G", "RAM_SIZE": "4G", "CPU_CORES": "4"}  # Modify if needed
+        self.environment = {"DISK_SIZE": "32G", "RAM_SIZE": "3G", "CPU_CORES": "2"}  # trimmed for a 15Gi host under memory pressure (was 4G/4)
 
         temp_dir = Path(os.getenv('TEMP') if platform.system() == 'Windows' else '/tmp')
         self.lock_file = temp_dir / "docker_port_allocation.lck"
@@ -95,6 +95,9 @@ class DockerProvider(Provider):
                 self.server_port = self._get_available_port(5000)
                 self.chromium_port = self._get_available_port(9222)
                 self.vlc_port = self._get_available_port(8080)
+                # Lagado membrane: raw RFB (qemu-docker serves VNC on 5900 in-container).
+                # 8006 is only the noVNC web wrapper; the pixel feed speaks raw RFB.
+                self.rfb_port = self._get_available_port(5900)
 
                 # Start container while still holding the lock
                 # Check if KVM is available
@@ -129,10 +132,33 @@ class DockerProvider(Provider):
                         8006: self.vnc_port,
                         5000: self.server_port,
                         9222: self.chromium_port,
-                        8080: self.vlc_port
+                        8080: self.vlc_port,
+                        5900: self.rfb_port,   # Lagado membrane: raw RFB for the pixel feed
                     },
                     detach=True
                 )
+
+                # Rootless podman (passt >= 2026-06 / rootlessport): published-port traffic is
+                # delivered by rootlessport CONNECTING INSIDE the netns to the container's own
+                # eth0 address — it never traverses PREROUTING, so qemu-docker's DNAT-to-guest
+                # rules never match and host->guest :5000/:9222/:8080 reset (measured 2026-07-05:
+                # nginx on :8006 answered, :5000 reset, PREROUTING counters zero; OUTPUT DNAT at
+                # the container IP -> 200). Redirect those locally-destined ports to the guest in
+                # the OUTPUT chain; MASQUERADE gives the guest a return path.
+                # Detached + waits for the entrypoint's OWN nat rules first: qemu-docker's
+                # network setup FLUSHES the nat table, so rules added immediately after run()
+                # get wiped (measured: exec succeeded, rules gone 60s later). Its PREROUTING
+                # DNAT (contains 20.20.20.21) appearing = setup done; append ours after.
+                self.container.exec_run(["sh", "-c",
+                    "for i in $(seq 90); do "
+                    "iptables -t nat -L PREROUTING -n 2>/dev/null | grep -q 20.20.20.21 && break; "
+                    "sleep 2; done; "
+                    "set -- $(hostname -i); IP=$1; "
+                    "for p in 5000 9222 8080; do "
+                    "iptables -t nat -A OUTPUT -p tcp -d $IP --dport $p "
+                    "-j DNAT --to-destination 20.20.20.21:$p; done; "
+                    "iptables -t nat -A POSTROUTING -o dockerbridge -j MASQUERADE"],
+                    detach=True)
 
             logger.info(f"Started container with ports - VNC: {self.vnc_port}, "
                        f"Server: {self.server_port}, Chrome: {self.chromium_port}, VLC: {self.vlc_port}")

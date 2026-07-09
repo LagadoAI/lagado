@@ -1,5 +1,5 @@
 diff --git a/desktop_env/providers/docker/provider.py b/desktop_env/providers/docker/provider.py
-index 3d5cd20..0dc7231 100644
+index 3d5cd20..2c41d5d 100644
 --- a/desktop_env/providers/docker/provider.py
 +++ b/desktop_env/providers/docker/provider.py
 @@ -30,7 +30,7 @@ class DockerProvider(Provider):
@@ -20,7 +20,17 @@ index 3d5cd20..0dc7231 100644
          """Wait for VM to be ready by checking screenshot endpoint."""
          start_time = time.time()
          
-@@ -105,16 +105,24 @@ class DockerProvider(Provider):
+@@ -95,6 +95,9 @@ class DockerProvider(Provider):
+                 self.server_port = self._get_available_port(5000)
+                 self.chromium_port = self._get_available_port(9222)
+                 self.vlc_port = self._get_available_port(8080)
++                # Lagado membrane: raw RFB (qemu-docker serves VNC on 5900 in-container).
++                # 8006 is only the noVNC web wrapper; the pixel feed speaks raw RFB.
++                self.rfb_port = self._get_available_port(5900)
+ 
+                 # Start container while still holding the lock
+                 # Check if KVM is available
+@@ -105,27 +108,58 @@ class DockerProvider(Provider):
                  else:
                      self.environment["KVM"] = "N"
                      logger.warning("KVM device not found, running without hardware acceleration (will be slower)")
@@ -46,7 +56,13 @@ index 3d5cd20..0dc7231 100644
                          }
                      },
                      ports={
-@@ -126,6 +134,28 @@ class DockerProvider(Provider):
+                         8006: self.vnc_port,
+                         5000: self.server_port,
+                         9222: self.chromium_port,
+-                        8080: self.vlc_port
++                        8080: self.vlc_port,
++                        5900: self.rfb_port,   # Lagado membrane: raw RFB for the pixel feed
+                     },
                      detach=True
                  )
  
