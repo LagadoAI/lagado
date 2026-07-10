@@ -43,7 +43,11 @@ if done_ids:
     plan = [(d, tf) for d, tf in plan
             if json.load(open(tf)).get("id", os.path.basename(tf))[:8] not in done_ids]
     print(f"resume: {len(done_ids)} done, {len(plan)} remaining", flush=True)
-print(f"=== WHOLE Lagado HARNESS × OSWorld | {len(plan)} tasks ===", flush=True)
+# ABLATION CONTRACT (2026-07-10): every result records the capability-flag set it ran under,
+# so a score delta is attributable to a flag flip — no capability joins default un-ablated.
+FLAGS = {k: v for k, v in sorted(os.environ.items())
+         if k.startswith("LAGADO_") and k not in ("LAGADO_RESULTS", "LAGADO_OSWORLD_RUN_BIN")}
+print(f"=== WHOLE Lagado HARNESS × OSWorld | {len(plan)} tasks | flags={FLAGS} ===", flush=True)
 
 env = DesktopEnv(provider_name="docker", action_space="pyautogui", screen_size=(1920, 1080),
                  headless=True, os_type="Ubuntu", require_a11y_tree=False)
@@ -90,7 +94,7 @@ for dom, tf in plan:
     json.dump(results, open("/tmp/osworld_whole_harness.json", "w"), indent=1)
     if RESULTS_JSONL:
         with open(RESULTS_JSONL, "a") as rf:
-            rf.write(json.dumps({"domain": dom, "id": tid, "score": score}) + "\n")
+            rf.write(json.dumps({"domain": dom, "id": tid, "score": score, "flags": FLAGS}) + "\n")
     import subprocess as _sp   # per-task volume prune: the known 3.6GB/task leak
     _sp.run("podman volume prune -f", shell=True, capture_output=True)
 env.close()
