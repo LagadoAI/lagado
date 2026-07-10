@@ -30,18 +30,33 @@ pub enum Sense {
     VisionOnly,
     /// Both the accessibility tree and at least one vision source agree.
     Both,
+    /// Only the browser DOM (CDP read) reported this element — the DOM floor.
+    /// DOM elements carry real text, so unlike VisionOnly they are usually labeled.
+    DomOnly,
+}
+
+/// One element from the browser-DOM sense (CDP `Runtime.evaluate` walker): a screen-pixel
+/// box plus the page's own text for it (aria-label / innerText / placeholder / …).
+/// The web equivalent of an a11y box+label pair.
+#[derive(Debug, Clone)]
+pub struct DomBox {
+    pub label: Option<String>,
+    pub bbox: (i32, i32, i32, i32),
 }
 
 /// Which sense supplied an element's *label* (text), independent of which sense
 /// supplied its *box*. Detection and labelling are separate merges: a box can be
 /// `Both` (a11y + CV saw it) while its label comes solely from a11y. The merge
-/// priority is `A11y > Caption > Ocr > None` — a real accessibility label always
-/// wins; an OmniParser caption rescues a box a11y left unlabeled; OCR is the last
+/// priority is `A11y > Dom > Caption > Ocr > None` — a real accessibility label always
+/// wins; the page's own DOM text rescues a box a11y left unlabeled (the flaky-a11y
+/// browser case the DOM floor exists for); an OmniParser caption next; OCR is the last
 /// resort; `None` means no sense produced text (still selectable by index token).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LabelSource {
     /// Text came from the AT-SPI2 accessibility tree.
     A11y,
+    /// Text came from the browser DOM (CDP read — the DOM floor).
+    Dom,
     /// Text came from an OmniParser-style captioner (Phase 2).
     Caption,
     /// Text came from OCR (Phase 2).
@@ -131,20 +146,25 @@ fn inflate(bbox: (i32, i32, i32, i32), dx: i32, dy: i32) -> (i32, i32, i32, i32)
     (bbox.0 - dx, bbox.1 - dy, bbox.2 + 2 * dx, bbox.3 + 2 * dy)
 }
 
-/// Fuse three perception inputs into one deduplicated element set.
+/// Fuse the perception inputs into one deduplicated element set.
 ///
 /// Step 1: seed from a11y — one FusedElement per box, sense = A11yOnly, label
 ///         resolved from `a11y_labels` (the only label source until Phase 2).
-/// Step 2: for each CV box — dedup against VisionOnly elements, upgrade a matching
-///         a11y element to Both, or add a new VisionOnly element. A CV box carries
-///         no text, so an upgrade to `Both` keeps the a11y label untouched and a
-///         new VisionOnly element is `None`-labelled.
+/// Step 1.5: merge DOM boxes (the DOM floor) — a DOM box matching an a11y element
+///         donates its label if a11y left the element unlabeled (LabelSource::Dom
+///         rescue — a11y text still wins); an unmatched DOM box becomes a new
+///         DomOnly element carrying the page's own text.
+/// Step 2: for each CV box — dedup against VisionOnly AND DomOnly elements, upgrade
+///         a matching a11y element to Both, or add a new VisionOnly element. A CV box
+///         carries no text, so an upgrade to `Both` keeps the a11y label untouched and
+///         a new VisionOnly element is `None`-labelled.
 /// Step 3: attach the highest-IoU SPATIAL patch embedding to each element.
 ///         Overview tiles (is_overview == true) are skipped entirely (C3).
 pub fn fuse(
     a11y:        &HashMap<String, (i32, i32, i32, i32)>,
     a11y_labels: &HashMap<String, String>,
     cv_boxes:    &[ScreenBox],
+    dom_boxes:   &[DomBox],
     patches:     &[TilePatches],
 ) -> Vec<FusedElement> {
     // ── Step 1: seed from a11y ─────────────────────────────────────────────
@@ -164,13 +184,59 @@ pub fn fuse(
         })
         .collect();
 
+    // ── Step 1.5: merge DOM boxes (the DOM floor) ──────────────────────────
+    for db in dom_boxes {
+        let dom_label = db.label.as_deref().map(str::trim).filter(|t| !t.is_empty());
+
+        // self-dedup against already-accepted DomOnly elements (repeated selectors)
+        let duplicate = elements.iter().any(|e| {
+            matches!(e.sense, Sense::DomOnly) && iou(e.bbox, db.bbox) >= MATCH_THRESHOLD
+        });
+        if duplicate {
+            continue;
+        }
+
+        // best-matching a11y-backed element: donate the DOM label ONLY into a label
+        // vacuum — a real a11y label always wins (provenance priority).
+        let best_a11y_idx = elements
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| matches!(e.sense, Sense::A11yOnly | Sense::Both))
+            .map(|(i, e)| (i, iou(e.bbox, db.bbox)))
+            .filter(|(_, s)| *s >= MATCH_THRESHOLD)
+            .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+            .map(|(i, _)| i);
+
+        match best_a11y_idx {
+            Some(idx) => {
+                if elements[idx].label.is_none() {
+                    if let Some(t) = dom_label {
+                        elements[idx].label = Some(t.to_string());
+                        elements[idx].label_source = LabelSource::Dom;
+                    }
+                }
+            }
+            None => {
+                elements.push(FusedElement {
+                    ref_id:       None,
+                    bbox:         db.bbox,
+                    sense:        Sense::DomOnly,
+                    patch_embd:   None,
+                    label:        dom_label.map(str::to_string),
+                    label_source: if dom_label.is_some() { LabelSource::Dom } else { LabelSource::None },
+                });
+            }
+        }
+    }
+
     // ── Step 2: merge CV boxes ─────────────────────────────────────────────
     for sb in cv_boxes {
         let cv_bbox = (sb.x, sb.y, sb.w, sb.h);
 
-        // 2a: dedup against already-accepted VisionOnly elements
+        // 2a: dedup against already-accepted VisionOnly and DomOnly elements — a CV
+        // box over a DOM element is agreement on existence, and CV can add no text.
         let duplicate = elements.iter().any(|e| {
-            matches!(e.sense, Sense::VisionOnly) && iou(e.bbox, cv_bbox) >= MATCH_THRESHOLD
+            matches!(e.sense, Sense::VisionOnly | Sense::DomOnly) && iou(e.bbox, cv_bbox) >= MATCH_THRESHOLD
         });
         if duplicate {
             continue;
@@ -330,7 +396,7 @@ mod tests {
         // CV box is far away — no overlap
         let cv = vec![ScreenBox { x: 500, y: 500, w: 50, h: 50 }];
 
-        let result = fuse(&a11y, &nolabels(), &cv, &[]);
+        let result = fuse(&a11y, &nolabels(), &cv, &[], &[]);
 
         let elem = result.iter().find(|e| e.ref_id.as_deref() == Some("ref_1")).unwrap();
         assert!(matches!(elem.sense, Sense::A11yOnly));
@@ -346,7 +412,7 @@ mod tests {
         a11y.insert("ref_1".to_string(), (0, 0, 100, 100));
         let cv = vec![ScreenBox { x: 50, y: 0, w: 100, h: 100 }];
 
-        let result = fuse(&a11y, &nolabels(), &cv, &[]);
+        let result = fuse(&a11y, &nolabels(), &cv, &[], &[]);
 
         // One merged element, not two
         assert_eq!(result.len(), 1, "overlapping a11y+CV must merge, not split");
@@ -361,7 +427,7 @@ mod tests {
         let a11y = HashMap::new();
         let cv = vec![ScreenBox { x: 200, y: 200, w: 60, h: 40 }];
 
-        let result = fuse(&a11y, &nolabels(), &cv, &[]);
+        let result = fuse(&a11y, &nolabels(), &cv, &[], &[]);
 
         assert_eq!(result.len(), 1);
         assert!(matches!(result[0].sense, Sense::VisionOnly));
@@ -380,7 +446,7 @@ mod tests {
             ScreenBox { x: 10, y: 10, w: 80,  h: 80  },
         ];
 
-        let result = fuse(&a11y, &nolabels(), &cv, &[]);
+        let result = fuse(&a11y, &nolabels(), &cv, &[], &[]);
 
         assert_eq!(result.len(), 1, "heavily-overlapping CV boxes must collapse to one VisionOnly");
         assert!(matches!(result[0].sense, Sense::VisionOnly));
@@ -394,7 +460,7 @@ mod tests {
         a11y.insert("ref_1".to_string(), (0, 0, 100, 100));
         let tile = spatial_tile(0, 0, 27, 25, vec![1.0, 2.0, 3.0]);
 
-        let result = fuse(&a11y, &nolabels(), &[], &[tile]);
+        let result = fuse(&a11y, &nolabels(), &[], &[], &[tile]);
 
         assert!(result[0].patch_embd.is_some(), "overlapping spatial patch must attach");
         assert_eq!(result[0].patch_embd.as_ref().unwrap(), &[1.0_f32, 2.0, 3.0]);
@@ -418,7 +484,7 @@ mod tests {
             "without inflate the patch must not overlap the element"
         );
 
-        let result = fuse(&a11y, &nolabels(), &[], &[tile]);
+        let result = fuse(&a11y, &nolabels(), &[], &[], &[tile]);
 
         assert!(
             result[0].patch_embd.is_some(),
@@ -433,7 +499,7 @@ mod tests {
         let mut a11y = HashMap::new();
         a11y.insert("ref_1".to_string(), (0, 0, 100, 100));
 
-        let result = fuse(&a11y, &nolabels(), &[], &[overview_tile()]);
+        let result = fuse(&a11y, &nolabels(), &[], &[], &[overview_tile()]);
 
         assert!(
             result[0].patch_embd.is_none(),
@@ -449,7 +515,7 @@ mod tests {
         a11y.insert("ref_1".to_string(), (0, 0, 100, 100));
         let cv = vec![ScreenBox { x: 200, y: 200, w: 50, h: 50 }];
 
-        let result = fuse(&a11y, &nolabels(), &cv, &[overview_tile()]);
+        let result = fuse(&a11y, &nolabels(), &cv, &[], &[overview_tile()]);
 
         assert!(!result.is_empty());
         for elem in &result {
@@ -461,7 +527,7 @@ mod tests {
 
     #[test]
     fn empty_inputs_returns_empty_no_panic() {
-        let result = fuse(&HashMap::new(), &nolabels(), &[], &[]);
+        let result = fuse(&HashMap::new(), &nolabels(), &[], &[], &[]);
         assert!(result.is_empty());
     }
 
@@ -486,7 +552,7 @@ mod tests {
             ],
         };
 
-        let result = fuse(&a11y, &nolabels(), &[], &[tile]);
+        let result = fuse(&a11y, &nolabels(), &[], &[], &[tile]);
         let embd = result[0].patch_embd.as_ref().expect("patch_embd must be Some");
         assert!(
             (embd[0] - 3.0).abs() < 1e-5,
@@ -510,8 +576,8 @@ mod tests {
         a11y.insert("ref_a".to_string(), (10,  100, 30, 20)); // y=100
         a11y.insert("ref_b".to_string(), (5,   200, 40, 30)); // y=200
 
-        let result1 = fuse(&a11y, &nolabels(), &[], &[]);
-        let result2 = fuse(&a11y, &nolabels(), &[], &[]);
+        let result1 = fuse(&a11y, &nolabels(), &[], &[], &[]);
+        let result2 = fuse(&a11y, &nolabels(), &[], &[], &[]);
 
         // Both runs must produce the same bbox sequence
         let bboxes1: Vec<_> = result1.iter().map(|e| e.bbox).collect();
@@ -567,7 +633,7 @@ mod tests {
         let mut labels = HashMap::new();
         labels.insert("ref_1".to_string(), "Applications".to_string());
 
-        let result = fuse(&a11y, &labels, &[], &[]);
+        let result = fuse(&a11y, &labels, &[], &[], &[]);
 
         assert_eq!(result[0].label.as_deref(), Some("Applications"));
         assert_eq!(result[0].label_source, LabelSource::A11y);
@@ -580,11 +646,89 @@ mod tests {
         let a11y = HashMap::new();
         let cv = vec![ScreenBox { x: 200, y: 200, w: 60, h: 40 }];
 
-        let result = fuse(&a11y, &nolabels(), &cv, &[]);
+        let result = fuse(&a11y, &nolabels(), &cv, &[], &[]);
 
         assert_eq!(result.len(), 1);
         assert!(result[0].label.is_none());
         assert_eq!(result[0].label_source, LabelSource::None);
+    }
+
+    // ── DOM floor (step 1.5) ─────────────────────────────────────────────────
+
+    #[test]
+    fn dom_label_rescues_unlabeled_a11y_element() {
+        // The case the DOM floor exists for: a11y sees the box but produces no text;
+        // the page's own DOM text labels it, with honest Dom provenance.
+        let mut a11y = HashMap::new();
+        a11y.insert("ref_1".to_string(), (100, 100, 80, 24));
+        let dom = vec![DomBox { label: Some("Sign in".into()), bbox: (102, 100, 76, 24) }];
+
+        let result = fuse(&a11y, &nolabels(), &[], &dom, &[]);
+
+        assert_eq!(result.len(), 1, "overlapping a11y+DOM must merge, not split");
+        assert_eq!(result[0].label.as_deref(), Some("Sign in"));
+        assert_eq!(result[0].label_source, LabelSource::Dom);
+        assert!(matches!(result[0].sense, Sense::A11yOnly), "detection provenance stays a11y");
+    }
+
+    #[test]
+    fn dom_never_overrides_a_real_a11y_label() {
+        let mut a11y = HashMap::new();
+        a11y.insert("ref_1".to_string(), (100, 100, 80, 24));
+        let mut labels = HashMap::new();
+        labels.insert("ref_1".to_string(), "Save".to_string());
+        let dom = vec![DomBox { label: Some("Submit".into()), bbox: (100, 100, 80, 24) }];
+
+        let result = fuse(&a11y, &labels, &[], &dom, &[]);
+
+        assert_eq!(result[0].label.as_deref(), Some("Save"), "a11y text always wins");
+        assert_eq!(result[0].label_source, LabelSource::A11y);
+    }
+
+    #[test]
+    fn unmatched_dom_box_becomes_labeled_dom_only_element() {
+        let a11y = HashMap::new();
+        let dom = vec![DomBox { label: Some("Checkout".into()), bbox: (300, 400, 90, 30) }];
+
+        let result = fuse(&a11y, &nolabels(), &[], &dom, &[]);
+
+        assert_eq!(result.len(), 1);
+        assert!(matches!(result[0].sense, Sense::DomOnly));
+        assert!(result[0].ref_id.is_none());
+        assert_eq!(result[0].label.as_deref(), Some("Checkout"));
+        assert_eq!(result[0].label_source, LabelSource::Dom);
+    }
+
+    #[test]
+    fn empty_dom_label_yields_none_labeled_dom_element() {
+        let dom = vec![DomBox { label: Some("   ".into()), bbox: (300, 400, 90, 30) }];
+        let result = fuse(&HashMap::new(), &nolabels(), &[], &dom, &[]);
+        assert!(result[0].label.is_none());
+        assert_eq!(result[0].label_source, LabelSource::None);
+    }
+
+    #[test]
+    fn cv_box_over_dom_element_dedups_and_keeps_dom_label() {
+        // CV agreeing on a DOM element's existence must not add a second unlabeled
+        // candidate on top of the labeled one.
+        let dom = vec![DomBox { label: Some("Checkout".into()), bbox: (300, 400, 90, 30) }];
+        let cv = vec![ScreenBox { x: 302, y: 400, w: 88, h: 30 }];
+
+        let result = fuse(&HashMap::new(), &nolabels(), &cv, &dom, &[]);
+
+        assert_eq!(result.len(), 1, "CV over a DOM element must dedup");
+        assert!(matches!(result[0].sense, Sense::DomOnly));
+        assert_eq!(result[0].label.as_deref(), Some("Checkout"));
+    }
+
+    #[test]
+    fn dom_self_dedup_collapses_repeated_boxes() {
+        let dom = vec![
+            DomBox { label: Some("Menu".into()), bbox: (0, 0, 100, 100) },
+            DomBox { label: Some("Menu".into()), bbox: (5, 5, 95, 95) },
+        ];
+        let result = fuse(&HashMap::new(), &nolabels(), &[], &dom, &[]);
+        assert_eq!(result.len(), 1, "heavily-overlapping DOM boxes must collapse to one");
     }
 
     #[test]
@@ -597,7 +741,7 @@ mod tests {
         labels.insert("ref_1".to_string(), "Save".to_string());
         let cv = vec![ScreenBox { x: 50, y: 0, w: 100, h: 100 }]; // iou≈0.333 ≥ 0.30
 
-        let result = fuse(&a11y, &labels, &cv, &[]);
+        let result = fuse(&a11y, &labels, &cv, &[], &[]);
 
         assert_eq!(result.len(), 1);
         assert!(matches!(result[0].sense, Sense::Both));

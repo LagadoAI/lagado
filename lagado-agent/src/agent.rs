@@ -2658,9 +2658,20 @@ pub async fn agent_loop(
                 }
             }
         }
-        let fused = crate::perception::arbiter::fuse(&bboxes, &labels, &cv_boxes, &[]);
+        // DOM FLOOR (flag-gated, DEFAULT OFF — ablation contract 2026-07-10): when a browser
+        // is in play, read the page's own DOM via CDP as a structured sense. DOM boxes carry
+        // real text, so unlike CV they can rescue unlabeled a11y elements (LabelSource::Dom)
+        // and surface labeled DomOnly targets a11y is blind to. Fail-open on every path.
+        let mut dom_boxes: Vec<crate::perception::arbiter::DomBox> = Vec::new();
+        if crate::config::dom_enabled() {
+            if let Some((url, boxes)) = crate::perception::dom::read_dom(actuator.as_ref()) {
+                chronos::log(&format!("dom floor: {} elements from {url}", boxes.len()));
+                dom_boxes = boxes;
+            }
+        }
+        let fused = crate::perception::arbiter::fuse(&bboxes, &labels, &cv_boxes, &dom_boxes, &[]);
         let candidates = crate::perception::selection::build_candidates(&fused);
-        chronos::log(&format!("perceive: {} a11y → {} fused", bboxes.len(), fused.len()));
+        chronos::log(&format!("perceive: {} a11y + {} dom → {} fused", bboxes.len(), dom_boxes.len(), fused.len()));
         // world-model note: this a11y read + its CV coverage, window = union of element
         // bboxes. Then log the measured staleness/coverage fact — the dispatcher's future
         // input, today's audit trail.

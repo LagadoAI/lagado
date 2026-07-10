@@ -63,6 +63,13 @@ pub fn cv_enabled() -> bool {
     !matches!(std::env::var("LAGADO_CV_DISABLE").as_deref(), Ok("1") | Ok("true"))
 }
 
+/// DOM FLOOR (ablation contract 2026-07-10): read the browser's DOM via CDP as a structured
+/// perception sense (labeled screen-pixel boxes into `fuse()`, `LabelSource::Dom`). DEFAULT
+/// OFF — joins the default path only after its A/B delta on official tasks is measured.
+pub fn dom_enabled() -> bool {
+    matches!(std::env::var("LAGADO_DOM").as_deref(), Ok("1") | Ok("true"))
+}
+
 /// CALC SOLVER (ablation contract 2026-07-10): route the ApiPlane actor through the proven
 /// battery-B authoring pipeline (labeled candidates → emit-in-NAMES → fail-closed resolve →
 /// sound falsifiers → read-only corroboration) as a task-blind host-side subprocess

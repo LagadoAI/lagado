@@ -62,6 +62,7 @@ pub fn build_candidates(fused: &[FusedElement]) -> Vec<Candidate> {
                 Sense::A11yOnly => "a11y",
                 Sense::VisionOnly => "vision",
                 Sense::Both => "both",
+                Sense::DomOnly => "dom",
             };
             Candidate {
                 token: index_token(i),

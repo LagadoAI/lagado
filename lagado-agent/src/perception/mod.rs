@@ -242,6 +242,7 @@ pub mod canvas;
 pub mod capture;
 pub mod cv_proposer;
 pub mod delta;
+pub mod dom;
 pub mod frame;
 pub mod selection;
 pub mod vlm_adapter;
