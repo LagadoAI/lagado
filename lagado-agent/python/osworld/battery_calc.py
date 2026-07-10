@@ -683,6 +683,21 @@ def emit_gaps(reasoning, nameops, instr=""):
        not any(n.get("kind") == "total_row" for n in nameops) and \
        not any(n.get("kind") == "create_pivot" for n in nameops):
         gaps.append("total_row")
+    # INCOMPLETE-TOTAL completeness (2026-07-10, observed on a Total-row+chart miss): the model emitted an
+    # AGGREGATE formula in ONE cell (=SUM(B2:B10) at B12) and its OWN reasoning describes filling it ACROSS the
+    # columns ("drag the fill handle down to C12:G12", "for each rep"), but it never emitted the across-fill — so
+    # only one column of the total row is written and everything downstream (the chart over that row) is starved.
+    # Hold it to its analysis: total_row fills every data column in ONE op. Gated tight — needs a lone-ish
+    # aggregate set_cell, NO total_row already, AND an explicit fill-across phrase — so it cannot nag a finished
+    # single-value task (those emit compute_column/total_row, not a bare aggregate set_cell). Feedback-only. NOT leading.
+    _agg = re.compile(r"=\s*(sum|average|avg|count|counta|max|min)\s*\(", re.I)
+    if any(n.get("kind") == "set_cell" and _agg.search(str(n.get("value") or n.get("formula") or ""))
+           for n in nameops) and \
+       not any(n.get("kind") == "total_row" for n in nameops) and \
+       re.search(r"fill handle|drag .{0,25}(across|down|right|to cell|to the|to c[0-9])|"
+                 r"copy .{0,25}(across|the formula|to the)|for each (column|rep|month|category|item|row)|"
+                 r"across (all|the) (column|cell)|apply .{0,25}to (all|each|every)", r):
+        gaps.append("incomplete_total")
     # WRITES-DROPPED: the reasoning ENTERS FORMULAS into cells (the app gesture: "enter the formula
     # =SUM(...)", "type ... in cell") but the emit contains NO cell-writing op at all — the whole
     # computation was lost in the reason→emit conversion (observed 0326d92d: charts emitted, the
@@ -755,6 +770,11 @@ def gap_feedback(gaps):
         lines.append("- your analysis describes adding a TOTAL/summary row but you did NOT emit total_row(...). "
                      "Keep your other operations and ALSO emit: total_row(sheet=\"S\", label=\"Total\", "
                      "columns=\"{Header1},{Header2}\") — name the columns to SUM into the total row.")
+    if "incomplete_total" in gaps:
+        lines.append("- you wrote an aggregate formula in ONE cell, but your analysis describes filling it "
+                     "ACROSS every data column (a full total row). A single-cell total leaves the other columns "
+                     "empty. Emit total_row(sheet=\"S\", label=\"<the row label>\", columns=\"{Header1},{Header2},...\") "
+                     "which computes the total for EVERY named column in one operation, instead of the single-cell aggregate.")
     if "conditional_format" in gaps:
         lines.append("- your analysis styles only the cells matching a CONDITION, but format_cells(range=...) "
                      "styles EVERY cell in the range. Emit format_cells_where(sheet=\"S\", match=\"<your "
