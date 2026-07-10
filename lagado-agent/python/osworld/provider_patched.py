@@ -118,6 +118,10 @@ class DockerProvider(Provider):
                     "happysixd/osworld-docker",
                     environment=self.environment,
                     cap_add=["NET_ADMIN"],
+                    # Lagado thermal cap (<85°C policy): pin the container (and thus the nested
+                    # qemu) to a cpuset so parallel lanes can't drive all threads flat-out.
+                    # Per-lane: each lane process exports its own LAGADO_CPUSET.
+                    cpuset_cpus=os.environ.get("LAGADO_CPUSET") or None,
                     devices=devices,
                     security_opt=["label=disable"],  # SELinux Enforcing blocks /dev/kvm + /dev/net/tun in rootless podman
                     sysctls={"net.ipv4.ip_forward": "1"},

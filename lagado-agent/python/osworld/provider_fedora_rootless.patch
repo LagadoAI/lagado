@@ -1,5 +1,5 @@
 diff --git a/desktop_env/providers/docker/provider.py b/desktop_env/providers/docker/provider.py
-index 3d5cd20..2c41d5d 100644
+index 3d5cd20..ba79ea0 100644
 --- a/desktop_env/providers/docker/provider.py
 +++ b/desktop_env/providers/docker/provider.py
 @@ -30,7 +30,7 @@ class DockerProvider(Provider):
@@ -30,7 +30,7 @@ index 3d5cd20..2c41d5d 100644
  
                  # Start container while still holding the lock
                  # Check if KVM is available
-@@ -105,27 +108,58 @@ class DockerProvider(Provider):
+@@ -105,27 +108,62 @@ class DockerProvider(Provider):
                  else:
                      self.environment["KVM"] = "N"
                      logger.warning("KVM device not found, running without hardware acceleration (will be slower)")
@@ -44,6 +44,10 @@ index 3d5cd20..2c41d5d 100644
                      "happysixd/osworld-docker",
                      environment=self.environment,
                      cap_add=["NET_ADMIN"],
++                    # Lagado thermal cap (<85°C policy): pin the container (and thus the nested
++                    # qemu) to a cpuset so parallel lanes can't drive all threads flat-out.
++                    # Per-lane: each lane process exports its own LAGADO_CPUSET.
++                    cpuset_cpus=os.environ.get("LAGADO_CPUSET") or None,
                      devices=devices,
 +                    security_opt=["label=disable"],  # SELinux Enforcing blocks /dev/kvm + /dev/net/tun in rootless podman
 +                    sysctls={"net.ipv4.ip_forward": "1"},
