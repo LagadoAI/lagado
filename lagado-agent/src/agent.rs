@@ -1704,6 +1704,26 @@ async fn run_calc_solver(file: &str, goal: &str) -> Option<i32> {
     Some(code)
 }
 
+/// Back-door settings MENU — the typed route-around verbs (set_config / run_sibling), presented
+/// with NEUTRAL placeholder examples only (frozen-prompt integrity: never an example drawn from
+/// a bench task). The model picks from OBSERVED settings rows; the harness builds the command,
+/// gates it, and reads the setting back as the falsifier.
+const BACKDOOR_MENU: &str =
+"You change a desktop or app setting by issuing ONE typed call; the harness runs it and reads the setting back to verify. Available calls:
+  set_config(backend=\"gsettings\", schema=\"org.example.app\", key=\"example-key\", value=\"'example-value'\")
+  set_config(backend=\"dconf\", key=\"/org/example/app/example-key\", value=\"'example-value'\")
+  set_config(backend=\"file\", path=\"/home/user/.config/example.conf\", key=\"example_key\", value=\"example_value\")
+  run_sibling(tool=\"toolname\", input=\"/abs/input\", args=\"-flag value\", output=\"/abs/output\")
+Pick from the OBSERVED SETTINGS rows when one matches the goal — use its exact schema and key, and keep the value's type shape (booleans bare: true/false; strings inner-quoted: 'like-this').
+If no call applies, reply exactly: none";
+
+/// Back-door authoring prompt: goal + observed candidate settings rows (+ read-back feedback on
+/// retry). One call per generation — the short-output/temp-0 discipline.
+fn back_door_prompt(goal: &str, observed: &str, feedback: Option<&str>) -> String {
+    let fb = feedback.map(|f| format!("\nPrevious attempt read back wrong: {f}\n")).unwrap_or_default();
+    format!("{BACKDOOR_MENU}\n\nGoal: {goal}\nObserved settings (schema key value):\n{observed}\n{fb}\nEmit the single call:")
+}
+
 /// The app's native-op MENU (the silver platter) — shared by the whole-plan prompt and the per-step
 /// prompt so the vocabulary never drifts between them.
 const API_OPS_MENU: &str =
@@ -1963,6 +1983,68 @@ pub async fn agent_loop(
     };
     let api_in_app = matches!(crate::plane::classify_task(&goal, &api_findings), crate::plane::TaskKind::InAppSemantic);
     if _t_osw { eprintln!("[timing] api focus read_screen_bg {:.1}s → in_app={} (total {:.1}s)", _t_focus.elapsed().as_secs_f32(), api_in_app, _t0.elapsed().as_secs_f32()); }
+
+    // ── BACK-DOOR SETTINGS RUNG (flag-gated, DEFAULT OFF — ablation contract 2026-07-10) ──
+    // AppSettings-classified goal (desktop-scoped / no app focus): author ONE typed
+    // set_config/run_sibling call against OBSERVED candidate keys, run it through the SAME
+    // gate as any command, then READ THE SETTING BACK — a sound falsifier (a mismatch proves
+    // the write did not take; only a match may claim done). Unverified/no-call → fall through
+    // to the planes below UNCHANGED. This finally reaches the built-but-unreached back_door
+    // module (PlaneId::BackDoor is first in preferred_order(AppSettings) by design).
+    let backdoor_settings = matches!(crate::plane::classify_task(&goal, &api_findings), crate::plane::TaskKind::AppSettings);
+    if crate::config::backdoor_enabled() && backdoor_settings {
+        chronos::log("back_door: AppSettings goal → typed settings route");
+        // Observe: settings rows whose schema/key/value mention the goal's content words
+        // (runtime observation of the live config space — general mechanism, no task knowledge).
+        let pat: String = goal.split(|c: char| !c.is_alphanumeric())
+            .filter(|w| w.len() >= 4)
+            .map(str::to_lowercase)
+            .take(6)
+            .collect::<Vec<_>>()
+            .join("|");
+        let observed = if pat.is_empty() { String::new() } else {
+            actuator.run_command(&format!(
+                "gsettings list-recursively 2>/dev/null | grep -iE '{pat}' | head -30"))
+                .lines().filter(|l| !l.trim_start().starts_with('['))
+                .collect::<Vec<_>>().join("\n")
+        };
+        let mut feedback: Option<String> = None;
+        for _attempt in 0..2 {
+            let prompt = back_door_prompt(&goal, &observed, feedback.as_deref());
+            let ad = adapter.clone();
+            let raw = tokio::task::spawn_blocking(move || ad.generate(&prompt, 96, 0.0).ok())
+                .await.ok().flatten().unwrap_or_default();
+            chronos::log(&format!("back_door raw: {}", raw.replace('\n', " ").chars().take(160).collect::<String>()));
+            let Some(op) = scan_op_calls(&raw).into_iter()
+                .find_map(|(verb, kw)| crate::back_door::from_call(&verb, &kw)) else { break };
+            let Some(cmd) = crate::back_door::to_command(&op) else { break };
+            let tool_call = ToolCall::Invoke {
+                name: "vm_command".to_string(),
+                args: { let mut m = serde_json::Map::new();
+                        m.insert("command".to_string(), serde_json::Value::String(cmd.clone())); m },
+            };
+            if !matches!(gate::apply_plan_approval(
+                gate::confidence_escalate(gate::evaluate_action(&tool_call, &registry), 1.0), plan_approved),
+                gate::Verdict::Allow) { break; }
+            let out = execute_tool(&tool_call, &actuator, perceptor.as_ref(), &memory_tiers).await;
+            chronos::log(&format!("back_door applied: {cmd} → {}",
+                out.replace('\n', " | ").chars().take(160).collect::<String>()));
+            let Some((vcmd, expect)) = crate::back_door::verify_command(&op) else { break };
+            let rb = actuator.run_command(&vcmd);
+            if crate::back_door::readback_matches(&rb, &expect) {
+                chronos::log("back_door: read-back verified → done");
+                let _ = confirm_tx.send(envelope::make("action_log",
+                    envelope::ActionLogPayload { text: "applied setting via typed config route (read-back verified)".to_string() })).await;
+                complete_goal(&goal, actuator.as_ref(), &confirm_tx).await;
+                return;
+            }
+            feedback = Some(format!("wrote `{cmd}` but read back `{}` (expected `{expect}`)",
+                rb.lines().find(|l| !l.trim_start().starts_with('[')).unwrap_or("").trim()));
+            chronos::log(&format!("back_door: read-back MISMATCH → {}",
+                feedback.as_deref().unwrap_or("")));
+        }
+        chronos::log("back_door: unverified → falling through to the GUI planes");
+    }
 
     // ── ReAct COMMAND LOOP ────────────────────────────────────────────────────────────────────────
     // When plan_goal chose an ALL-COMMAND surface (a CLI/file goal), DON'T walk the untrusted upfront

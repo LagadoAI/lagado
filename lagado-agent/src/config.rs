@@ -63,6 +63,14 @@ pub fn cv_enabled() -> bool {
     !matches!(std::env::var("LAGADO_CV_DISABLE").as_deref(), Ok("1") | Ok("true"))
 }
 
+/// BACK-DOOR SETTINGS EXECUTOR (ablation contract 2026-07-10): give AppSettings-classified
+/// goals the typed set_config/run_sibling route (gsettings/dconf/ini + sibling CLI) with a
+/// deterministic read-back falsifier. The module was built + tested but UNREACHED from the
+/// loop until this flag. DEFAULT OFF until its A/B delta on official tasks is measured.
+pub fn backdoor_enabled() -> bool {
+    matches!(std::env::var("LAGADO_BACKDOOR").as_deref(), Ok("1") | Ok("true"))
+}
+
 /// DOM FLOOR (ablation contract 2026-07-10): read the browser's DOM via CDP as a structured
 /// perception sense (labeled screen-pixel boxes into `fuse()`, `LabelSource::Dom`). DEFAULT
 /// OFF — joins the default path only after its A/B delta on official tasks is measured.

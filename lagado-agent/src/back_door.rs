@@ -113,6 +113,50 @@ pub fn to_command(op: &BackDoorOp) -> Option<String> {
     }
 }
 
+/// Build the READ-BACK falsifier for an applied op: `Some((command, expected))` where running
+/// `command` and comparing its output against `expected` (via `readback_matches`) decides
+/// verified/unverified. Sound in one direction only — a mismatch proves the op did NOT take;
+/// a match is necessary, not sufficient (the gate on claiming "done" stays honest).
+pub fn verify_command(op: &BackDoorOp) -> Option<(String, String)> {
+    match op {
+        BackDoorOp::SetConfig { backend, key, value } => match backend {
+            ConfigBackend::Dconf => Some((format!("dconf read {}", shq(key)), value.clone())),
+            ConfigBackend::Gsettings { schema } => Some((
+                format!("gsettings get {} {}", shq(schema), shq(key)),
+                value.clone(),
+            )),
+            ConfigBackend::IniFile { path } => Some((
+                format!("grep -q {} {} && echo LAGADO_OK",
+                        shq(&format!("^{key}={value}")), shq(path)),
+                "LAGADO_OK".to_string(),
+            )),
+        },
+        BackDoorOp::RunSibling { output, .. } => Some((
+            format!("test -e {} && echo LAGADO_OK", shq(output)),
+            "LAGADO_OK".to_string(),
+        )),
+    }
+}
+
+/// Does a read-back output confirm the expected value? Normalizes the representational noise
+/// between write and read dialects (quote style, whitespace, case, gsettings type prefixes like
+/// `uint32 5`) WITHOUT weakening the value comparison itself. Pure.
+pub fn readback_matches(readback: &str, expected: &str) -> bool {
+    fn norm(s: &str) -> String {
+        s.trim()
+            .trim_start_matches("uint32 ").trim_start_matches("int32 ").trim_start_matches("double ")
+            .chars()
+            .filter(|c| !c.is_whitespace() && *c != '\'' && *c != '"')
+            .collect::<String>()
+            .to_lowercase()
+    }
+    // ignore harness markers ([exit N] / [stderr] lines) — compare content lines only
+    let content: String = readback.lines()
+        .filter(|l| !l.trim_start().starts_with('['))
+        .collect::<Vec<_>>().join("\n");
+    !norm(expected).is_empty() && norm(&content) == norm(expected)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -203,5 +247,39 @@ mod tests {
         };
         // the dangerous chars are quoted inside a single arg — the gate still decides whether it RUNS
         assert_eq!(to_command(&op).unwrap(), "'convert' 'a; rm -rf ~' 'b'");
+    }
+
+    #[test]
+    fn verify_command_builds_the_read_back_per_backend() {
+        let g = BackDoorOp::SetConfig {
+            backend: ConfigBackend::Gsettings { schema: "org.gnome.desktop.interface".into() },
+            key: "color-scheme".into(), value: "'prefer-dark'".into(),
+        };
+        let (cmd, expect) = verify_command(&g).unwrap();
+        assert_eq!(cmd, "gsettings get 'org.gnome.desktop.interface' 'color-scheme'");
+        assert_eq!(expect, "'prefer-dark'");
+
+        let d = BackDoorOp::SetConfig {
+            backend: ConfigBackend::Dconf, key: "/org/x/y".into(), value: "true".into() };
+        assert_eq!(verify_command(&d).unwrap().0, "dconf read '/org/x/y'");
+
+        let s = BackDoorOp::RunSibling {
+            tool: "convert".into(), input: "a".into(), output: "/tmp/out.png".into(), args: vec![] };
+        let (cmd, expect) = verify_command(&s).unwrap();
+        assert!(cmd.contains("test -e '/tmp/out.png'"));
+        assert_eq!(expect, "LAGADO_OK");
+    }
+
+    #[test]
+    fn readback_matching_normalizes_dialect_not_value() {
+        // quote style + type prefix are dialect; the value itself must match exactly
+        assert!(readback_matches("'prefer-dark'\n[exit 0]", "prefer-dark"));
+        assert!(readback_matches("uint32 5", "5"));
+        assert!(readback_matches("true", "true"));
+        assert!(!readback_matches("'prefer-light'", "prefer-dark"));
+        assert!(!readback_matches("", "prefer-dark"));
+        assert!(!readback_matches("[exit 1]", "LAGADO_OK"));
+        // an empty expectation can never auto-verify
+        assert!(!readback_matches("anything", "  "));
     }
 }
