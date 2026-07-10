@@ -66,8 +66,17 @@ for dom, tf in plan:
         if os.environ.get("OSW_TRACE") and r.stderr:
             for ln in r.stderr.splitlines():
                 if any(k in ln for k in ("reconciled_via_session", "native session", "one-shot floor",
-                                         "session deploy", "api session", "api_plane")):
+                                         "session deploy", "api session", "api_plane", "calc solver")):
                     print(f"   trace: {ln.strip()}", flush=True)
+        # The agent may DECLARE infeasibility (model verdict from app truth, never task knowledge).
+        # OSWorld's contract for that answer is the literal FAIL action through env.step — an
+        # infeasible-func task scores 1 on it, a feasible task scores 0 (a wrong declaration can
+        # only lose, never false-pass).
+        if "LAGADO_DECLARES: FAIL" in (r.stdout or ""):
+            try:
+                env.step("FAIL")
+            except Exception as e:
+                print(f"   (FAIL declaration step error: {e})", flush=True)
         score = env.evaluate() or 0.0
     except subprocess.TimeoutExpired:
         agent_out = "(agent timed out)"

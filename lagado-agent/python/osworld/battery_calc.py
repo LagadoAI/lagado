@@ -25,9 +25,10 @@ import requests
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from run_session_task import (Guest, deploy_daemon, pick_uno_python, task_input_path, memory_ok)
-from desktop_env.desktop_env import DesktopEnv
+# DesktopEnv is imported lazily in main(): only the A/B bench boots its own env. calc_solve.py
+# imports THIS module for the authoring/falsifier core and must run without the OSWorld venv.
 
-BRAIN = "http://localhost:8080/completion"
+BRAIN = os.environ.get("LAGADO_BRAIN", "http://localhost:8080/completion")
 LOGDIR = "/tmp/lagado_battery"
 
 # ── column letters ────────────────────────────────────────────────────────────
@@ -882,7 +883,7 @@ def compose_feedback(fails, fired):
                 lines.append("- observed row %d near %s: %s" % (i + 1, f["range"], str(row)[:140]))
     return "\n".join(lines)
 
-CHAT = "http://localhost:8080/v1/chat/completions"   # applies the GGUF's own chat template (model-agnostic)
+CHAT = BRAIN.rsplit("/completion", 1)[0] + "/v1/chat/completions"   # applies the GGUF's own chat template (model-agnostic)
 
 def _chat(content, grammar=None, temperature=0.0, seed=7, max_tokens=800):
     """Invoke the model via its native chat template (correct way to address an instruct model — the raw
@@ -1851,7 +1852,7 @@ def apply_B(g, nameops, log, instr=""):
 
 NAME_TOK = re.compile(r"\{([^}]*)\}")
 
-EMB_URL = "http://localhost:8080/v1/embeddings"   # the brain serves embeddings too (--embeddings --pooling last)
+EMB_URL = BRAIN.rsplit("/completion", 1)[0] + "/v1/embeddings"   # the brain serves embeddings too (--embeddings --pooling last)
 SEM_THETA = 0.08                                  # min top1-top2 cosine margin to bind (else fail-closed/abstain)
 _emb_cache = {}
 
@@ -2883,6 +2884,7 @@ def run_core(g, task, cond, file_path, log, score_fn):
 
 # ── main ─────────────────────────────────────────────────────────────────────────
 def main():
+    from desktop_env.desktop_env import DesktopEnv   # lazy: see header note
     if len(sys.argv) < 2:
         raise SystemExit("usage: battery_calc.py <task_json> [N=3] [cond=AB]")
     task = json.load(open(sys.argv[1]))

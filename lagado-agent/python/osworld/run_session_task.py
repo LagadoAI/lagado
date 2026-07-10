@@ -25,7 +25,9 @@ import os
 import sys
 import time
 
-from desktop_env.desktop_env import DesktopEnv
+# DesktopEnv is imported lazily in main(): only the bench entry point boots an env. Importers of
+# the shared pieces (Guest, deploy_daemon, pick_uno_python) — e.g. calc_solve.py driving a guest
+# by URL from the general agent — must not require the OSWorld package/venv.
 
 LAGADO_OSW = os.path.dirname(os.path.abspath(__file__))
 DAEMON_FILES = ["uno_ops.py", "uno_daemon.py", "uno_client.py"]
@@ -185,6 +187,7 @@ def run_once(env, task, ops, file_path):
 
 
 def main():
+    from desktop_env.desktop_env import DesktopEnv   # lazy: see header note
     if len(sys.argv) < 3:
         raise SystemExit("usage: run_session_task.py <task_json> <oplog_json> [repeat]")
     task = json.load(open(sys.argv[1]))

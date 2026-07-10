@@ -63,6 +63,23 @@ pub fn cv_enabled() -> bool {
     !matches!(std::env::var("LAGADO_CV_DISABLE").as_deref(), Ok("1") | Ok("true"))
 }
 
+/// CALC SOLVER (ablation contract 2026-07-10): route the ApiPlane actor through the proven
+/// battery-B authoring pipeline (labeled candidates → emit-in-NAMES → fail-closed resolve →
+/// sound falsifiers → read-only corroboration) as a task-blind host-side subprocess
+/// (`calc_solve.py`). DEFAULT OFF — a capability joins the default path only after its A/B
+/// delta on official tasks is measured and logged.
+pub fn calc_solver_enabled() -> bool {
+    matches!(std::env::var("LAGADO_CALC_SOLVER").as_deref(), Ok("1") | Ok("true"))
+}
+
+/// Directory holding the solver scripts (calc_solve.py + the battery core it imports).
+/// Deferred via `LAGADO_SOLVER_DIR` for deployment; the compile-time manifest dir is the
+/// discovered default for dev/bench builds.
+pub fn solver_dir() -> String {
+    std::env::var("LAGADO_SOLVER_DIR")
+        .unwrap_or_else(|_| concat!(env!("CARGO_MANIFEST_DIR"), "/python/osworld").to_string())
+}
+
 const LLAMA_HOST: &str = "127.0.0.1";
 const LLAMA_PORT: u16 = 8080;
 const WS_HOST: &str = "127.0.0.1";

@@ -34,6 +34,9 @@ async fn main() {
         Some((h, p)) => (h.to_string(), p.parse::<u16>().unwrap_or(5000)),
         None => (stripped.to_string(), 5000),
     };
+    // Expose the guest URL to in-process consumers that spawn host-side sidecars over the same
+    // transport (the calc solver). Set once before the runtime starts, read-only after.
+    std::env::set_var("LAGADO_OSW_BASE_URL", format!("http://{host}:{port}"));
 
     // The whole harness, over the OSWorld guest (shared perception cache between perceptor + actuator).
     let cache = Arc::new(std::sync::Mutex::new(PerceptionCache::new()));

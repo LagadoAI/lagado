@@ -1669,6 +1669,41 @@ fn api_read_target(actuator: &dyn Actuator, _goal: &str) -> Option<(String, Stri
     Some((path, structure))
 }
 
+/// Run the task-blind calc solver (`calc_solve.py` — the proven battery-B authoring pipeline as a
+/// host-side subprocess) against the guest. It receives ONLY what this loop legitimately knows:
+/// the guest URL, the discovered file path, and the goal — no task config, no evaluator knowledge
+/// (integrity contract 2026-07-10). Returns the solver's exit code (its routing contract: 0
+/// corroborated-done / 3 model-declared-infeasible / 2 operated-unverified / 1 infra), or `None`
+/// when it couldn't run at all (no guest URL, script missing, spawn failure) — the caller falls
+/// through to the in-process floor unchanged.
+async fn run_calc_solver(file: &str, goal: &str) -> Option<i32> {
+    let base_url = std::env::var("LAGADO_OSW_BASE_URL").ok()?;
+    let script = std::path::Path::new(&crate::config::solver_dir()).join("calc_solve.py");
+    if !script.exists() {
+        chronos::log(&format!("calc solver: script missing at {} → floor", script.display()));
+        return None;
+    }
+    let (file, goal) = (file.to_string(), goal.to_string());
+    let out = tokio::task::spawn_blocking(move || {
+        std::process::Command::new("python3")
+            .arg(&script).arg(&base_url).arg(&file).arg(&goal)
+            .env("LAGADO_BRAIN", format!("{}/completion", crate::config::llama_base_url()))
+            .output()
+    }).await.ok()?.ok()?;
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    // Last JSON line is the verdict object — log it so every solver run is auditable in chronos.
+    let verdict = stdout.lines().rev()
+        .find(|l| l.trim_start().starts_with('{'))
+        .unwrap_or("(no verdict line)");
+    let code = out.status.code().unwrap_or(-1);
+    let verdict_short: String = verdict.chars().take(400).collect();
+    chronos::log(&format!("calc solver exit={code} verdict: {verdict_short}"));
+    if std::env::var("OSW_TRACE").is_ok() {
+        eprintln!("calc solver exit={code} verdict: {verdict_short}");
+    }
+    Some(code)
+}
+
 /// The app's native-op MENU (the silver platter) — shared by the whole-plan prompt and the per-step
 /// prompt so the vocabulary never drifts between them.
 const API_OPS_MENU: &str =
@@ -2044,6 +2079,38 @@ pub async fn agent_loop(
         if let Some((file, structure)) = api_read_target(actuator.as_ref(), &goal) {
             chronos::log("api_plane: spreadsheet found → authoring native ops via the app's tools");
             if _t_osw { eprintln!("[timing] api_read_target done (total {:.1}s)", _t0.elapsed().as_secs_f32()); }
+            // ── CALC SOLVER RUNG (flag-gated, DEFAULT OFF — ablation contract 2026-07-10) ──
+            // Route this ApiPlane task through the proven battery-B pipeline (labeled candidates →
+            // emit-in-NAMES → fail-closed resolve → sound falsifiers → read-only corroboration) as
+            // a task-blind subprocess. Its exit code is the routing contract; on 1/None (infra) the
+            // session+floor path below runs UNCHANGED. On 2 (operated, unverified) we hand back
+            // honestly WITHOUT falling through — the solver already applied+reconciled; a second
+            // authoring pass over the mutated doc would double-apply.
+            if crate::config::calc_solver_enabled() {
+                match run_calc_solver(&file, &goal).await {
+                    Some(0) => {
+                        let _ = confirm_tx.send(envelope::make("action_log",
+                            envelope::ActionLogPayload { text: "applied native app operations (solver, corroborated)".to_string() })).await;
+                        complete_goal(&goal, actuator.as_ref(), &confirm_tx).await;
+                        return;
+                    }
+                    Some(3) => {
+                        // Model-declared infeasibility. The runner translates this marker into
+                        // OSWorld's literal FAIL answer (env.step("FAIL")) — declared by the model
+                        // from app truth, never by task knowledge.
+                        println!("LAGADO_DECLARES: FAIL");
+                        verify_or_handback(&goal, actuator.as_ref(), &confirm_tx,
+                            "The app's own engine shows this goal is infeasible as stated — declared FAIL.").await;
+                        return;
+                    }
+                    Some(2) => {
+                        verify_or_handback(&goal, actuator.as_ref(), &confirm_tx,
+                            "I operated the app's tools but couldn't verify the goal — handing back.").await;
+                        return;
+                    }
+                    _ => chronos::log("calc solver infra-fail/unavailable → in-process floor"),
+                }
+            }
             let checks = goal_completion_checks(&goal);
             let verify_now = |act: &dyn Actuator| -> bool {
                 !checks.is_empty() && checks.iter().all(|c| parse_exit_code(&act.run_command(c)) == Some(0))
