@@ -87,6 +87,15 @@ def main():
     except Exception as e:
         v["error"] = "run_core: %r" % (e,)
         emit(v, 1)
+    finally:
+        # Full attribution dump (nameops / readback / falsifiers / feedbacks) — the compact
+        # verdict line can't explain a silent-wrong; this file can. Best-effort, never fatal.
+        try:
+            os.makedirs(B.LOGDIR, exist_ok=True)
+            with open(os.path.join(B.LOGDIR, "solve_%d.json" % int(time.time())), "w") as f:
+                json.dump(log, f, default=str)
+        except Exception:
+            pass
 
     v["ok"] = True
     v["self_report_done"] = bool(log.get("self_report_done"))
