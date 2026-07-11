@@ -49,6 +49,36 @@ FLAGS = {k: v for k, v in sorted(os.environ.items())
          if k.startswith("LAGADO_") and k not in ("LAGADO_RESULTS", "LAGADO_OSWORLD_RUN_BIN")}
 print(f"=== WHOLE Lagado HARNESS × OSWorld | {len(plan)} tasks | flags={FLAGS} ===", flush=True)
 
+# MEMORY WATCHDOG (2026-07-10): on a long run the brain (llama-server) can grow past its lean
+# startup and, combined with the 3G guest, drop MemAvailable below what the next boot needs →
+# the container Exits(17) and the provider wedges 900s. Before each task, if MemAvailable is low,
+# restart the brain LEAN (start_brain.sh) to reclaim it. Cheap (~10s) and only fires when needed.
+MIN_AVAIL_MB = int(os.environ.get("LAGADO_MIN_AVAIL_MB", "4500"))
+START_BRAIN = "/home/alucard/projects/lagado/lagado-agent/python/osworld/start_brain.sh"
+
+def mem_available_mb():
+    for ln in open("/proc/meminfo"):
+        if ln.startswith("MemAvailable:"):
+            return int(ln.split()[1]) // 1024
+    return 1 << 30
+
+def ensure_memory():
+    avail = mem_available_mb()
+    if avail >= MIN_AVAIL_MB:
+        return
+    print(f"   [watchdog] MemAvailable {avail}MB < {MIN_AVAIL_MB}MB → restarting brain lean", flush=True)
+    subprocess.run(f"bash {START_BRAIN} > /tmp/brain.log 2>&1 &", shell=True)
+    import time as _t
+    for _ in range(30):
+        try:
+            import urllib.request
+            if urllib.request.urlopen("http://localhost:8080/health", timeout=2).status == 200:
+                break
+        except Exception:
+            pass
+        _t.sleep(2)
+    print(f"   [watchdog] brain restarted, MemAvailable now {mem_available_mb()}MB", flush=True)
+
 env = DesktopEnv(provider_name="docker", action_space="pyautogui", screen_size=(1920, 1080),
                  headless=True, os_type="Ubuntu", require_a11y_tree=False)
 results = []
@@ -57,6 +87,7 @@ for dom, tf in plan:
     print(f"\n══════ [{dom}/{tid}] {instr[:90]}", flush=True)
     score, agent_out = 0.0, ""
     try:
+        ensure_memory()   # watchdog: restart the brain if memory is low before booting the guest
         env.reset(task_config=task)
         base_url = env.controller.http_server          # http://<vm_ip>:<server_port>
         r = subprocess.run([BIN, base_url, instr],
