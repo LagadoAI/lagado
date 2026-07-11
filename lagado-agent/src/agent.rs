@@ -267,7 +267,22 @@ async fn request_plan_approval(
 /// artifact is absent (plan incompleteness, or a step that achieved its own effect but not the goal),
 /// hand back instead of falsely claiming success. Emits the terminal status either way.
 async fn complete_goal(goal: &str, actuator: &dyn Actuator, confirm_tx: &mpsc::Sender<String>) {
-    for check in goal_postconditions(goal) {
+    // FAIL-CLOSED on no verifiable check (integrity fix, Opus audit of the full-369 run): the
+    // false-pass generator was this loop passing VACUOUSLY when goal_postconditions() returns
+    // empty — which it does for any goal that isn't create/delete/git/exec-shaped. An empty
+    // check-set is "I cannot verify this", NOT "verified". Claiming success from it is the exact
+    // over-claim the whole harness forbids. `goal_satisfied` already fails-closed on empty
+    // (checks.is_empty() → false); this call site must too. When we can't prove it, we hand back.
+    let checks = goal_postconditions(goal);
+    if checks.is_empty() {
+        chronos::log("complete_goal: no verifiable postcondition for this goal → handing back (never claim unverified done)");
+        let _ = confirm_tx.send(envelope::make("status", envelope::StatusPayload {
+            state: "goal_done".to_string(),
+            detail: "I ran the steps, but I can't verify the goal is done — handing back to you.".to_string(),
+        })).await;
+        return;
+    }
+    for check in checks {
         if parse_exit_code(&actuator.run_command(&check)) != Some(0) {
             chronos::log(&format!("goal_postcondition_failed: {check}"));
             let _ = confirm_tx.send(envelope::make("status", envelope::StatusPayload {
@@ -1680,24 +1695,26 @@ async fn run_calc_solver(file: &str, goal: &str) -> Option<(i32, String)> {
     run_office_solver("calc", "calc_solve.py", file, goal).await
 }
 
-/// May a SUB-PLANE's infeasible declaration speak for the WHOLE agent? (Integrity fix for the
-/// full-369 false claim, multi_apps/deec51c9: the calc solver — seeing only spreadsheet ops —
-/// declared a composite arxiv→sheet task infeasible, and the harness propagated it to OSWorld's
-/// literal FAIL on a task the whole agent could do.) Capability-limit ≠ impossibility: a plane's
-/// "my ops can't do this" only counts when the goal lives entirely inside that app. Deterministic
-/// gate, held to the model's OWN words on both sides: if the GOAL or the model's DECLARATION
-/// REASON references a cross-surface need (web/browser/mail/another app/scraping), the
-/// declaration does NOT propagate — the rung falls through to the other planes instead.
-fn infeasible_declaration_in_scope(goal: &str, verdict_json: &str) -> bool {
-    const CROSS_SURFACE: &[&str] = &[
-        "web", "website", "browser", "online", "internet", "http", "www", "url",
-        "download", "email", "e-mail", "scrap", // scraping/scraper
-        "another app", "other app", "external",
-    ];
-    let g = goal.to_lowercase();
-    let v = verdict_json.to_lowercase();
-    !CROSS_SURFACE.iter().any(|t| g.contains(t) || v.contains(t))
-}
+// ── WHO MAY DECLARE A TASK IMPOSSIBLE ────────────────────────────────────────────────────────
+// STRUCTURAL RULE (integrity fix, full-369 false claim on multi_apps/deec51c9): a SUB-PLANE NEVER
+// declares a whole-agent FAIL. Not conditionally — never.
+//
+// A solver (calc/writer/impress) knows exactly one app's operations. "Infeasible" from inside it
+// can only ever mean "not with MY ops" — which is a CAPABILITY REPORT, not a verdict on the task.
+// The authority to declare a task genuinely impossible belongs to the level that has EXHAUSTED the
+// plane ladder (every surface tried, all report can't), not to the first plane that shrugs.
+//
+// The rejected alternative is worth recording, because it is the seductive one: gate the
+// declaration on whether the goal/reason mentions a cross-surface need (web, browser, email, …).
+// That is a BLOCKLIST OF FAILURES WE HAPPENED TO SEE. The next task phrased "fetch from the API"
+// or "pull from the server" sails through and produces the same false claim, and the list grows one
+// token per incident, forever. Overfitting in a mechanism costume. Scope is decided by WHO HAS
+// STANDING (fixed, closed), never by WHAT WORDS APPEAR (open-ended, unknowable).
+//
+// Consequence, accepted deliberately: the agent currently has NO path that emits the FAIL answer,
+// so genuinely-infeasible bench tasks score 0 rather than 1. That is the honest state — we decline
+// to claim a certainty we have not earned. Rebuilding the declaration at ladder-exhaustion (where
+// it DOES have standing) is separate, properly-scoped work; it is not a keyword list.
 
 /// Run a task-blind office solver subprocess (calc/writer/impress — all share the exit-code
 /// contract: 0 corroborated / 3 model-declared-infeasible / 2 operated-unverified / 1 infra).
@@ -2049,16 +2066,10 @@ pub async fn agent_loop(
                     complete_goal(&goal, actuator.as_ref(), &confirm_tx).await;
                     return;
                 }
-                Some((3, verdict)) => {
-                    // Sub-plane infeasible declaration only counts on an in-app-scoped goal
-                    // (integrity fix, deec51c9) — else fall through to the other planes.
-                    if infeasible_declaration_in_scope(&goal, &verdict) {
-                        println!("LAGADO_DECLARES: FAIL");
-                        verify_or_handback(&goal, actuator.as_ref(), &confirm_tx,
-                            "The app's own engine shows this goal is infeasible as stated — declared FAIL.").await;
-                        return;
-                    }
-                    chronos::log(&format!("{app} solver declared infeasible on a CROSS-SURFACE goal → falling through"));
+                Some((3, _)) => {
+                    // A SUB-PLANE NEVER declares a whole-agent FAIL (structural rule above):
+                    // its "infeasible" only means "not with MY ops". Fall through.
+                    chronos::log(&format!("{app} solver reports a capability limit (NOT a task verdict) → other planes"));
                 }
                 Some((2, _)) => {
                     verify_or_handback(&goal, actuator.as_ref(), &confirm_tx,
@@ -2262,19 +2273,12 @@ pub async fn agent_loop(
                         complete_goal(&goal, actuator.as_ref(), &confirm_tx).await;
                         return;
                     }
-                    Some((3, verdict)) => {
-                        // Model-declared infeasibility — but a SUB-PLANE may only declare a
-                        // whole-agent FAIL on a goal scoped to its own app (integrity fix,
-                        // deec51c9): on a composite goal the declaration means "not with MY
-                        // ops", so fall through to the other planes instead.
-                        if infeasible_declaration_in_scope(&goal, &verdict) {
-                            println!("LAGADO_DECLARES: FAIL");
-                            verify_or_handback(&goal, actuator.as_ref(), &confirm_tx,
-                                "The app's own engine shows this goal is infeasible as stated — declared FAIL.").await;
-                            return;
-                        }
-                        chronos::log("calc solver declared infeasible on a CROSS-SURFACE goal — \
-                                      capability-limit ≠ impossibility → falling through to other planes");
+                    Some((3, _)) => {
+                        // A SUB-PLANE NEVER declares a whole-agent FAIL (see the structural rule
+                        // above). "Infeasible" from the calc plane means only "not with MY ops" —
+                        // a capability report, not a verdict on the task. Fall through.
+                        chronos::log("calc solver reports it cannot do this with its own ops \
+                                      (capability limit, NOT a task verdict) → other planes");
                     }
                     Some((2, _)) => {
                         verify_or_handback(&goal, actuator.as_ref(), &confirm_tx,
@@ -3704,44 +3708,6 @@ mod observation_tests {
 }
 
 // ── Distillation tests ────────────────────────────────────────────
-
-#[cfg(test)]
-mod infeasible_scope_tests {
-    use super::*;
-
-    /// The EXACT verdict the calc solver emitted on multi_apps/deec51c9 in the full-369 run —
-    /// the run's only false claim. The goal is feasible for the whole agent (browse, then fill
-    /// the sheet); the calc plane merely lacked the ops. It must NOT propagate to FAIL.
-    #[test]
-    fn the_deec51c9_false_claim_no_longer_propagates() {
-        let goal = "Find a paper list of all the new foundation language models issued on 11st \
-                    Oct. 2023 via arxiv daily, and organize it into the sheet I opened.";
-        let verdict = r#"{"ok": true, "self_report_done": true, "declared_infeasible": "The goal requires finding and organizing papers from a specific date on arXiv, which involves web scraping and manual data extraction. This task cannot be fully automated using the available operations in this application.", "n_ops": 0}"#;
-        assert!(!infeasible_declaration_in_scope(goal, verdict),
-            "a sub-plane's capability limit on a cross-surface goal must not become a whole-agent FAIL");
-    }
-
-    #[test]
-    fn a_genuine_in_app_impossibility_still_declares() {
-        // Nothing cross-surface in goal or reason → the plane speaks with authority about its
-        // own app, and the FAIL declaration (which can only LOSE if wrong) still propagates.
-        let goal = "Compute the profit column using the Revenue column that does not exist.";
-        let verdict = r#"{"declared_infeasible": "the named column is absent from the workbook and cannot be derived from the present columns"}"#;
-        assert!(infeasible_declaration_in_scope(goal, verdict));
-    }
-
-    #[test]
-    fn cross_surface_detected_from_goal_alone_and_from_reason_alone() {
-        // goal names the other surface, reason doesn't
-        assert!(!infeasible_declaration_in_scope(
-            "download the csv from the website and chart it",
-            r#"{"declared_infeasible": "cannot obtain the data"}"#));
-        // reason names it, goal doesn't (the deec51c9 shape — 'arxiv' is not a generic token)
-        assert!(!infeasible_declaration_in_scope(
-            "organize the paper list into the sheet",
-            r#"{"declared_infeasible": "this requires scraping an external source"}"#));
-    }
-}
 
 #[cfg(test)]
 mod distill_tests {
