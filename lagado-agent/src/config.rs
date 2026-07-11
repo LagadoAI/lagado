@@ -95,6 +95,19 @@ pub fn solver_dir() -> String {
         .unwrap_or_else(|_| concat!(env!("CARGO_MANIFEST_DIR"), "/python/osworld").to_string())
 }
 
+/// WRITER SOLVER (ablation contract 2026-07-10): route a focused LibreOffice Writer doc through
+/// the Writer UNO plane (writer_solve.py — same task-blind, falsifier-guarded pattern as calc).
+/// DEFAULT OFF; its A/B delta on official writer tasks is measured before it joins default.
+pub fn writer_solver_enabled() -> bool {
+    matches!(std::env::var("LAGADO_WRITER_SOLVER").as_deref(), Ok("1") | Ok("true"))
+}
+
+/// IMPRESS SOLVER (ablation contract 2026-07-10): route a focused LibreOffice Impress deck
+/// through the Impress UNO plane (impress_solve.py). DEFAULT OFF until its A/B is measured.
+pub fn impress_solver_enabled() -> bool {
+    matches!(std::env::var("LAGADO_IMPRESS_SOLVER").as_deref(), Ok("1") | Ok("true"))
+}
+
 const LLAMA_HOST: &str = "127.0.0.1";
 const LLAMA_PORT: u16 = 8080;
 const WS_HOST: &str = "127.0.0.1";

@@ -1677,13 +1677,20 @@ fn api_read_target(actuator: &dyn Actuator, _goal: &str) -> Option<(String, Stri
 /// when it couldn't run at all (no guest URL, script missing, spawn failure) — the caller falls
 /// through to the in-process floor unchanged.
 async fn run_calc_solver(file: &str, goal: &str) -> Option<i32> {
+    run_office_solver("calc", "calc_solve.py", file, goal).await
+}
+
+/// Run a task-blind office solver subprocess (calc/writer/impress — all share the exit-code
+/// contract: 0 corroborated / 3 model-declared-infeasible / 2 operated-unverified / 1 infra).
+/// `label` names it in the audit trail. Returns the exit code, or None if it couldn't run.
+async fn run_office_solver(label: &str, script_name: &str, file: &str, goal: &str) -> Option<i32> {
     let base_url = std::env::var("LAGADO_OSW_BASE_URL").ok()?;
-    let script = std::path::Path::new(&crate::config::solver_dir()).join("calc_solve.py");
+    let script = std::path::Path::new(&crate::config::solver_dir()).join(script_name);
     if !script.exists() {
-        chronos::log(&format!("calc solver: script missing at {} → floor", script.display()));
+        chronos::log(&format!("{label} solver: script missing at {} → floor", script.display()));
         return None;
     }
-    let (file, goal) = (file.to_string(), goal.to_string());
+    let (file, goal, label) = (file.to_string(), goal.to_string(), label.to_string());
     let out = tokio::task::spawn_blocking(move || {
         std::process::Command::new("python3")
             .arg(&script).arg(&base_url).arg(&file).arg(&goal)
@@ -1697,11 +1704,23 @@ async fn run_calc_solver(file: &str, goal: &str) -> Option<i32> {
         .unwrap_or("(no verdict line)");
     let code = out.status.code().unwrap_or(-1);
     let verdict_short: String = verdict.chars().take(400).collect();
-    chronos::log(&format!("calc solver exit={code} verdict: {verdict_short}"));
+    chronos::log(&format!("{label} solver exit={code} verdict: {verdict_short}"));
     if std::env::var("OSW_TRACE").is_ok() {
-        eprintln!("calc solver exit={code} verdict: {verdict_short}");
+        eprintln!("{label} solver exit={code} verdict: {verdict_short}");
     }
     Some(code)
+}
+
+/// Find the first document with one of `exts` in the user's working dirs (the office-doc analog
+/// of `api_read_target`, without the spreadsheet-specific structure dump). Returns the guest path.
+fn office_doc_path(actuator: &dyn Actuator, exts: &[&str]) -> Option<String> {
+    let names = exts.iter().map(|e| format!("-name '*.{e}'")).collect::<Vec<_>>().join(" -o ");
+    let find = format!(
+        "find \"$HOME\" \"$HOME/Desktop\" \"$HOME/Documents\" -maxdepth 3 \\( {names} \\) 2>/dev/null | head -1");
+    actuator.run_command(&find).lines()
+        .find(|l| !l.starts_with("[exit") && l.trim().starts_with('/'))
+        .map(|s| s.trim().to_string())
+        .filter(|p| !p.is_empty())
 }
 
 /// Back-door settings MENU — the typed route-around verbs (set_config / run_sibling), presented
@@ -1983,6 +2002,48 @@ pub async fn agent_loop(
     };
     let api_in_app = matches!(crate::plane::classify_task(&goal, &api_findings), crate::plane::TaskKind::InAppSemantic);
     if _t_osw { eprintln!("[timing] api focus read_screen_bg {:.1}s → in_app={} (total {:.1}s)", _t_focus.elapsed().as_secs_f32(), api_in_app, _t0.elapsed().as_secs_f32()); }
+
+    // ── WRITER / IMPRESS SOLVER RUNGS (flag-gated, DEFAULT OFF — ablation contract 2026-07-10) ──
+    // The office analog of the calc-solver rung: route a focused LibreOffice Writer/Impress doc
+    // through its task-blind UNO plane (writer_solve.py / impress_solve.py — same emit→apply→
+    // falsify→corroborate pipeline as calc). Keyed off the FOCUSED APP (not mere file presence) so
+    // a multi_apps task with several docs open doesn't misroute; the doc path is then found by
+    // extension. Exit contract identical to calc: 0 done / 3 declared-FAIL / 2 unverified / 1 infra
+    // (→ fall through to the GUI planes UNCHANGED). Same no-double-apply discipline as the calc rung.
+    {
+        let focus = api_findings.focused_app.as_deref().unwrap_or("").to_lowercase();
+        let office = [
+            (crate::config::writer_solver_enabled(), "writer", "writer_solve.py",
+             &["docx", "odt", "doc", "rtf"][..]),
+            (crate::config::impress_solver_enabled(), "impress", "impress_solve.py",
+             &["pptx", "odp", "ppt"][..]),
+        ];
+        for (enabled, app, script, exts) in office {
+            if !enabled || !focus.contains(app) { continue; }
+            let Some(file) = office_doc_path(actuator.as_ref(), exts) else { continue };
+            chronos::log(&format!("{app} solver: focused doc {file} → task-blind UNO plane"));
+            match run_office_solver(app, script, &file, &goal).await {
+                Some(0) => {
+                    let _ = confirm_tx.send(envelope::make("action_log", envelope::ActionLogPayload {
+                        text: format!("applied native {app} operations (solver, corroborated)") })).await;
+                    complete_goal(&goal, actuator.as_ref(), &confirm_tx).await;
+                    return;
+                }
+                Some(3) => {
+                    println!("LAGADO_DECLARES: FAIL");
+                    verify_or_handback(&goal, actuator.as_ref(), &confirm_tx,
+                        "The app's own engine shows this goal is infeasible as stated — declared FAIL.").await;
+                    return;
+                }
+                Some(2) => {
+                    verify_or_handback(&goal, actuator.as_ref(), &confirm_tx,
+                        &format!("I operated {app}'s tools but couldn't verify the goal — handing back.")).await;
+                    return;
+                }
+                _ => chronos::log(&format!("{app} solver infra-fail/unavailable → continue to floor")),
+            }
+        }
+    }
 
     // ── BACK-DOOR SETTINGS RUNG (flag-gated, DEFAULT OFF — ablation contract 2026-07-10) ──
     // AppSettings-classified goal (desktop-scoped / no app focus): author ONE typed
