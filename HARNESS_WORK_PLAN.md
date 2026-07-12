@@ -1,81 +1,75 @@
-# Harness Work Plan (2026-07-03)
+# Harness Work Plan (2026-07-11)
 
-The steering summary for the harness phase. CLAUDE.md "Status (2026-07-03)" is the
-short form; this file carries the work queue. Authoritative deep resume:
-`docs/osworld/INVESTIGATION_PLAN_2026-06-23.md` (top "POST-CLEAR RESUME PLAN" block).
+The steering summary for the harness phase — the live work queue. CLAUDE.md carries the
+architecture; this file carries what's next. The full-run record and its adversarial audit are in
+`docs/osworld/FULL_369_RESULTS_2026-07-10.md`.
 
 ## Current state
 
-- **Real OSWorld, held-out stress (30 never-opened calc tasks): 7/30 gold, 0 false-pass.**
-  7/30 = golds achieved by model+harness together; model-alone attribution is NOT yet
-  measured (that's the ablation matrix, below).
-- **Fracture line = OP-VOCAB coverage** (pivots, sparklines, freeze, csv, transpose,
-  reorder, resize, conditional, locale unbuilt) — NOT comprehension, NOT grounding
-  (0 grounding mis-fires under stress).
-- Branch: `Harness` (continuation of `deskew/class-not-instance`; `main` is pre-OSWorld).
+- **Full OSWorld run (all 369 tasks, official `env.evaluate()` only): 24/368 scored.** But that
+  number is NOT yet trustworthy — see the audit below. The one domain built out end-to-end
+  (LibreOffice Calc) reached **19/47 ≈ 40%** on the official grader; every other domain sitting near
+  zero is an honest build-map (no plane built yet), not a comprehension verdict.
+- **OP-vocab is built** (22 calc op kinds — pivots, charts, freeze, csv, transpose, reorder,
+  conditional, locale, dedup, sort, zoom, pdf, …) and reachable from the general loop via the
+  calc-solver rung. The old "op-vocab is the fracture line" framing is retired.
+- Branch: `Harness` (now the default). `main` is pre-OSWorld.
 
-## Three directions (2026-06-29 docs, adversarially reviewed 2026-07-03)
+## THE GOVERNING EVENT — the 2026-07-10 adversarial audit (Opus, told to REFUTE us)
 
-1. **Integrate-before-invent** — `docs/INTEGRATION_SURVEY_2026-06-29.md`. 3 of 4 layers
-   have permissive external candidates (verdicts are ADOPT/eval and ADAPT — evaluations,
-   not decided adoptions); the fusion dispatcher + selection loop is the white space and
-   is already built. Treat the survey as hindsight validation of that call, not an open
-   design question.
-2. **Verifiable-evals integrity** — `docs/osworld/PROMPT_GROUNDING_AUDIT_2026-06-29.md`.
-   Eight Class-B corrective-grounding sites reshape model output; each could be earning
-   golds. The ablation matrix separates model from harness.
-3. **Human-verifiable work** — `docs/osworld/watch_qwen.py` / `watch_session.py`. Live
-   paced-op watching. Known gap (from review): the watcher sees the RESULT, not the
-   ATTRIBUTION — needs a `--disable-grounding` mode to show model-only output.
+An independent model, briefed to overturn our conclusions, dug the raw traces and found our
+integrity claim was **wrong in count, identity, and direction.** This reframes everything downstream.
 
-## OPEN DECISION — the next bet (user's call, both have standing endorsements)
+1. **False passes: ≥6, not the 1 we reported** (multi_apps 7e287123/02ce9a50/68a25bd4/a503b07f,
+   vs_code 6ed0a554, libreoffice_calc 6054afcb) — and a FLOOR, not a ceiling (117/368 tasks have no
+   trace coverage at all).
+2. **The generator (FIXED):** `complete_goal` claimed success VACUOUSLY when `goal_postconditions()`
+   returned empty — which it does for any goal not create/delete/git/exec-shaped. Calc broadly
+   exposed (20/47 goals get no derivable check). Now fail-closed.
+3. **The one we flagged (deec51c9) was NOT a false pass** — it was a false-FAIL (over-cautious FAIL on
+   a feasible task = lost gold). Opposite direction. Also FIXED: a sub-plane no longer declares a
+   whole-agent FAIL.
+4. **The atlas's false-pass detector never actually ran** — it greps the trace for a string that only
+   ever goes to stdout. The integrity guard was structurally blind.
+5. **The failure atlas categorizes by DOMAIN, not evidence** — `no_plane 134` / `composite_fail 96`
+   are the domain histogram relabeled, polluted by 3 setup failures + ~23 blank-output no-engage tasks.
+   The fix-classes are NOT measurements.
+6. **The run mixed 3 flag configs** — 24/368 and even calc 19/47 are not single-config numbers.
+7. **The "build Writer+Impress next" priority is NOT supported by this data.** Browser/web appears in
+   ~25 of 101 multi_apps tasks vs Impress's ~8; chrome actuation may be the bigger lever. Unknowable
+   until the instrumentation can answer where each task actually died.
 
-- **Option A: Ablation-first** (endorsed 2026-06-29, "NEXT(green-light)"): run the
-  per-grounding ablation matrix on the baseline golds. Higher leverage intellectually —
-  it answers "is op-vocab really the bottleneck, or is the harness carrying the model?"
-- **Option B: Op-vocab-first** (endorsed 2026-06-23, post-clear goal): build the missing
-  verbs → re-stress the held-out 30 → if the golds climb, the thesis (harness lets a 7B
-  reach the ~72% floor) gains its strongest evidence; ablate afterwards on the larger
-  gold set.
+## Work queue — in the audit's own recommended order (do NOT reorder)
 
-## Work queue
+### Phase 1 — Instrumentation first (BEFORE building any new plane)
+The capability signal is currently contaminated; building on it repeats the mistake.
+1. **Atlas reads stdout, not just chronos** — so the false-pass detector actually fires. Cross-check
+   EVERY completion assertion against its real score.
+2. **Per-task stderr + clean per-run chronos** — categorize failures by evidence (which plane engaged,
+   where it died), not by domain default. Fix the 70-char-prefix trace join (it pulls stale segments).
+3. **Separate infra/setup failures and blank-output no-engage tasks** out of the capability denominator.
 
-### Phase: Ablation baseline (if Option A)
-1. Pre-register the matrix shape + which golds, BEFORE running (frozen, announced).
-   Keep survivor predictions private until the matrix runs.
-2. Determinism pre-check: re-run ONE gold 2x through `env.evaluate()`; if it doesn't
-   reproduce, diagnose before scaling.
-3. Run golds x 8 ablation sites (~56 evals on the current 7). Artifact-first: raw
-   `env.evaluate()` returns per cell; the summary table is GENERATED from the artifact.
+### Phase 2 — Re-audit
+4. With honest instrumentation, re-run the failure atlas on the full 369 and get the TRUE false-pass
+   count and evidence-based fix-classes. Only this tells us the real build priority.
 
-### Phase: Op-vocab completion (if Option B; eventually either way)
-1. Build missing verbs (pivots done at turn-4; sparklines, freeze, csv, transpose,
-   reorder, resize, conditional, locale remain) — each VM-verified mechanism-first.
-2. Zero-regression rule: after each verb, re-run the existing golds.
-3. Re-stress the full held-out 30 with the official evaluator only.
+### Phase 3 — Build the priority the re-audit actually names (not the guessed one)
+- Writer + Impress UNO planes are BUILT but UNVALIDATED (flag-gated default-OFF). Validate via the
+  engineering-iteration loop: run a few real tasks → read the failure trace → refine → re-run.
+  First checks: the Impress color-name→RGB table (flagged false-pass risk) and Writer
+  subscript/highlight serialization (already found empirically during the build).
+- Chrome CDP actuation (the DOM floor gives sight; add action) — candidate top lever per the audit.
+- Rebuild the binary ONCE for the Rust routing (already cargo-check-clean, not yet built).
 
-### Verification debts (from the 2026-07-03 adversarial review — batchable)
-- `watch_qwen.py --disable-grounding [CLASS_A|CLASS_B|all]` so a human can compare
-  model-only vs grounded output and judge attribution by eye.
-- Test UQLM white-box scorers against llama.cpp logprobs IN ISOLATION before any
-  confidence gating depends on them.
-- Extend the prompt-grounding audit to the Rust prompts (`forge.rs`, `recovery.rs`,
-  `operator.rs`) — the operator urgency nudge is low-risk (anti-loop, not leading)
-  but the discipline claim is incomplete until Rust is covered.
-- Publish the integration survey's 6 search angles + source list (coverage-gap check).
-
-### Structural debts
-- ~~Move executable tooling out of `docs/osworld/`~~ **DONE 2026-07-03 (d6039a3):** all
-  tooling now at `lagado-agent/python/osworld/` (pure `git mv`, history preserved;
-  `native_session.rs` include_str! updated, cargo check + py_compile green; path-moved
-  notes added to the resume plan + osworld README). New PYTHONPATH:
-  `/home/alucard/projects/OSWorld:/home/alucard/projects/lagado/lagado-agent/python/osworld`.
-- README still frames app-first; rewrite pends the user's public-narrative decision.
+### Integrity discipline (permanent)
+- Official evaluator only; the harness never grades itself. Frozen prompts, held-out where possible.
+- Zero false-pass is the bar and it is MEASURED adversarially, not asserted. "I can't verify this" is
+  an honest handback, never a silent success.
+- No leading: fixes are general mechanisms keyed to structure, never keyword blocklists of failures
+  we happened to see (a mistake made and reverted this cycle — see the integrity commits).
 
 ## Success criteria
-- 72% on the real OSWorld bench treated as a FLOOR (greed doctrine), zero false-pass
-  maintained (currently held: 0 under extreme stress).
-- Model-vs-harness attribution measured, not asserted (ablation matrix artifact).
-- Every gold eventually carries a grounding-dependency vector (which Class-B sites it
-  needed).
-- Results human-verifiable live (watch tools, including grounding-off mode).
+- **72% on real OSWorld with a ≤7B model, treated as a FLOOR** (greed doctrine), zero false-pass held.
+- Every reported number reproducible from a single, logged flag config — no more config mixtures.
+- Model-vs-harness attribution measured, not asserted.
+- Results human-verifiable and audit-survivable — the number means what it says.
