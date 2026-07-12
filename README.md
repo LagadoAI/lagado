@@ -1,104 +1,64 @@
-# Lagado AI
+# Lagado
 
-**A sovereign desktop agent that remembers. Runs entirely on your machine — no cloud, no telemetry, no egress.**
+**A deterministic harness that lets a small local model reliably operate a real desktop — entirely on your own machine. No cloud, no telemetry, no egress.**
 
-Lagado is a local-first AI agent built on one thesis: a small model inside the right support
-structure beats a large model with none. An 8B-parameter "frontal cortex" is surrounded by the
-faculties that make human work possible — persistent memory, procedural habit, recognition,
-recovery, and a human in the loop — all running on consumer hardware, with every byte of the
-user's data staying on the user's disk.
+The bet: **a small model inside the right support structure beats a large model with none.** A modest
+local model (≤8B) is wrapped in deterministic machinery — structured perception, typed actions, and
+read-back verification — that does the reliability the model can't. The harness is engineered so
+carefully that the model becomes a commodity: swapping the brain for a different model of the same
+size *raised* the completion rate with the harness unchanged. **The harness is the moat, not the model.**
 
 ---
 
-## The four pillars
+## What we're building
 
-1. **Maximum security & sovereignty** — local-only inference, AES-256-GCM encrypted storage,
-   Argon2id-wrapped keys, zero telemetry. Nothing leaves the machine. This is not a feature
-   flag; the architecture has no cloud path to disable.
-2. **Dual-brain orchestration** — a fast 1.2B classifier routes every request on a clean,
-   history-free prompt; the 8B mixture-of-experts brain is reserved for reasoning and
-   synthesis. Small models stay in the single-pass regime they're good at.
-3. **One integrated stack** — perception, actuation, memory, and security are one coherent
-   system in a single binary, not a chain of loosely-coupled services.
-4. **Persistent learning** — the agent's experience survives reboots: workflows become
-   muscle memory, completed tasks distill into skills, and screens it has seen become
-   recognition memory.
+A harness that drives a real desktop the way a competent person does — reaching for the most reliable
+channel available and only falling back when it must:
 
-## Architecture at a glance
+- **Structured perception, fused.** The screen is read through several senses at once — the
+  accessibility tree, the browser's own DOM, classical computer vision, and raw pixels — deduplicated
+  into one element set and labelled by where each label came from. Each sense is blind exactly where
+  another sees; the browser DOM, for instance, surfaces dozens of real labelled controls on pages
+  where the accessibility tree returns nothing.
+- **Typed actions through apps' real interfaces.** Instead of blindly clicking, the model selects
+  from a typed operation vocabulary and the harness drives the app's own scripting interface — a
+  richest-first ladder: app API → CLI → accessibility → CV → raw pixels.
+- **Read-back verification, and honest handbacks.** The harness reads the world back after acting and
+  will hand a task back to you rather than claim a success it cannot prove. *"I can't verify this"* is
+  a first-class outcome, never a silent success.
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│  Tauri desktop app (React UI + Rust agent core)             │
-│                                                             │
-│  1.2B intent classifier ──► routes on clean context         │
-│  8B agent brain         ──► reasons, plans, acts            │
-│  450M vision encoder    ──► visual memory (in-process FFI)  │
-│                                                             │
-│  Living memory triangle                                     │
-│    hot (working) → warm (summarized) → cold (encrypted)     │
-│    entropy-based forgetting: V = T·e^(−λt)·(1+ln(n+1))      │
-│    + action graph (habit) + skill library (technique)       │
-│    + visual embeddings (recognition)                        │
-│                                                             │
-│  QEMU desktop VM — the agent's sandboxed working surface    │
-│    perceive: accessibility tree → elements with coordinates │
-│    act:      mouse/keyboard, every action HITL-gated        │
-│    verify:   frame deltas — did the action do what was      │
-│              expected?                                      │
-└─────────────────────────────────────────────────────────────┘
-```
+## Where it stands (honestly)
 
-**The agent works inside a virtual machine, not on your desktop.** It perceives the VM's
-screen through the accessibility tree fused with classical CV and vision-model patches,
-acts through synthetic input, and every action passes a human-in-the-loop gate — routine
-actions confirm with a tap, destructive ones require typed confirmation.
+Measured on a real 369-task desktop-automation benchmark, scored by the benchmark's **own official
+evaluator** — never by the harness grading itself.
 
-**Memory is modeled thermodynamically.** Every trace carries a temperature that decays with
-time and reheats on access. A background consolidation cycle ("sleep gate") summarizes the
-day's residue, promotes what matters, and lets the rest fade on an Ebbinghaus curve.
-Completed tasks are distilled into a skill library; successful workflows become an action
-graph the agent can replay without re-reasoning. The result is effective context bounded by
-disk, not by a context window.
+- **Spreadsheets are built out end-to-end** and reach a meaningful fraction of that domain's tasks on
+  the official grader — the proof that the structured-plane approach works.
+- **Other surfaces are in progress.** Word-processor and presentation planes are built but not yet
+  validated; browser actuation, media, and mail are next. Every surface without a built-out plane is
+  an honest zero, not a mystery — that's the build map, not a verdict.
+- **Integrity is measured, not assumed.** The target for *false passes* — claiming a task is done when
+  it isn't — is zero, and we hunt them adversarially. A recent internal audit (an independent model
+  told to *refute* our own results) overturned some of our conclusions, found false passes we'd
+  missed, and exposed a verification path that could claim success without checking anything. All
+  now fixed. Hardening the measurement comes before building anything new on top of it.
 
-**Learning from demonstration (in design).** The most reliable teacher is the human. The
-Lens — a separate recorder, deliberately not part of the agent binary — captures workflows
-as the user demonstrates them, producing inspectable "workflow capsules" that import into
-the agent's action graph. The trust model is strict: *the thing that watches cannot touch,
-and the thing that touches cannot watch.*
-
-## What works today
-
-- Full desktop app: first-run ceremony, encrypted auth (wrapped-DEK scheme), chat with
-  retrieval over the agent's own history
-- Dual-model routing with clean-context classification
-- Complete memory system: hot/warm/cold tiers, sleep-gate consolidation, entropy pruning,
-  skill distillation, visual-similarity recall
-- VM control loop, end-to-end and independently verified: boot → perceive elements with
-  screen coordinates → resolve a target → click → observe the change
-- Perception fusion: accessibility tree + CV box proposer + per-patch vision embeddings,
-  deduplicated by an IoU arbiter
-- 44 built-in native tools + MCP client; tiered trust with a human gate on every action
-- 156 library tests; CI green on Linux, macOS, and Windows
-
-## Honest status
-
-This is a working foundation, not a finished product. The control loop is proven
-mechanically; the current frontier is letting the 8B drive it on real multi-step tasks and
-wiring the verification loop (act → observe delta → check expectation) into the agent's
-own reasoning. Windows-native perception, the browser backend, and the Lens recorder are
-designed but not yet built. We publish what works and what doesn't.
-
-## Design rationale
-
-Every major decision here was an argument we had on purpose. [DESIGN.md](DESIGN.md) records
-the twelve that matter — each one as *the decision, why, and what it cost us*.
+This is a working research harness, not a finished product. We report the ugly numbers with the good.
 
 ## Stack
 
-Rust (agent core) · Tauri + React (app) · llama.cpp (vendored, local inference) ·
-LFM2.5 model family (8B MoE / 1.2B / 450M vision) · QEMU/KVM (sandboxed working surface) ·
-SQLite (memory, encrypted at rest)
+Rust (agent core) · llama.cpp (vendored, local inference) · model-swappable brain (≤8B; benchmarked
+on Qwen2.5-Coder-7B) · QEMU/KVM (sandboxed working surface) · SQLite (encrypted at rest). 362 library
+tests; CI on Linux/macOS/Windows.
+
+## Where to read
+
+- **[CLAUDE.md](CLAUDE.md)** — the working map: architecture, current status, and the harness doctrine.
+- **[docs/osworld/](docs/osworld/)** — the benchmark investigation, results, and per-run audits.
+- **[docs/plans/](docs/plans/)** — the design decisions and open questions, as they were argued.
+- **[docs/vision/](docs/vision/)** — the longer product arc (sovereign local agent, persistent memory,
+  the app shell). The eventual shipping vehicle; not the current work.
 
 ---
 
-*Lagado Labs*
+*Lagado Labs — sovereign, local, honest about what works and what doesn't.*
