@@ -15,14 +15,18 @@ size *raised* the completion rate with the harness unchanged. **The harness is t
 A harness that drives a real desktop the way a competent person does — reaching for the most reliable
 channel available and only falling back when it must:
 
-- **Structured perception, fused.** The screen is read through several senses at once — the
-  accessibility tree, the browser's own DOM, classical computer vision, and raw pixels — deduplicated
-  into one element set and labelled by where each label came from. Each sense is blind exactly where
-  another sees; the browser DOM, for instance, surfaces dozens of real labelled controls on pages
-  where the accessibility tree returns nothing.
-- **Typed actions through apps' real interfaces.** Instead of blindly clicking, the model selects
-  from a typed operation vocabulary and the harness drives the app's own scripting interface — a
-  richest-first ladder: app API → CLI → accessibility → CV → raw pixels.
+- **Perception is fused, always — one world model, not a fallback chain.** Every sense reads the
+  screen at once — the accessibility tree, the browser's own DOM, computer vision, and the raw pixel
+  feed — and they're fused into a single deduplicated, provenance-labelled model of what's on screen.
+  Each sense is blind exactly where another sees (the browser DOM surfaces dozens of real controls on
+  pages where the accessibility tree returns nothing), so we don't pick one — we fuse all of them into
+  one representation, the way a self-driving stack fuses every sensor into a single world model rather
+  than trusting any one.
+- **Action reaches for the richest channel available.** Perception is unified; *acting* is where the
+  richest-first ladder lives. The model picks a typed operation and the harness drives it through the
+  most reliable channel the app exposes — its own scripting API where one exists, a command-line /
+  back-door route otherwise, and GUI actuation (aimed by the fused perception above) as the general
+  floor. Most reliable first, falling back only when it must.
 - **Read-back verification, and honest handbacks.** The harness reads the world back after acting and
   will hand a task back to you rather than claim a success it cannot prove. *"I can't verify this"* is
   a first-class outcome, never a silent success.
