@@ -1,3 +1,7 @@
+> **⚠ HISTORICAL PRODUCT PLAN — NOT the current source of truth.** Perception is FUSED, not the laddered
+> "a11y primary / vision fallback" described here; tool counts, module layout, and the WebSocket UI wire are
+> stale; `parser.rs`/`verifier.rs` are deleted. Current steering: `HARNESS_WORK_PLAN.md` + `CLAUDE.md` doctrine sections.
+
 # LAPUTA v1.0 — MASTER EXECUTION PLAN
 **Version:** 4.0 (Liquid-Native / Living-Fortress)
 **Date:** May 30, 2026

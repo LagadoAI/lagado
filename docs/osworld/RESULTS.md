@@ -1,3 +1,6 @@
+> **⚠ Graduated / superseded** by `docs/osworld/FULL_369_RESULTS_2026-07-10.md` (the full-369 run). The rows
+> below stop at 2026-06-21 and are not maintained.
+
 # OSWorld — Lagado Results Baseline (living record)
 
 The honest, reproducible record of Lagado against the **real OSWorld benchmark** (xlang-ai), to study and

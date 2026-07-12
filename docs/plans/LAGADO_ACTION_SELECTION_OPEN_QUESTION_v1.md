@@ -1,3 +1,6 @@
+> **⚠ HISTORICAL experiment record.** The perception framing (tiered / vision-as-last-resort) is superseded by
+> the 2026-07-08 fusion — perception is FUSED. The action-selection experiments themselves remain valid. Current: `CLAUDE.md`.
+
 # Action Selection — the full chronological record (CURRENT state + plan in §2.18)
 
 **Status 2026-06-17. READ §2.18 FIRST for the current state and build order** (latest work is at the

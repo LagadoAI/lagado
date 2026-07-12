@@ -1,3 +1,6 @@
+> **⚠ SUPERSEDED — pre-harness.** Describes FAISS memory (reality: SQLite `memory_tiers.rs`), a 3-phase hydra,
+> and modules that were deleted or renamed. Do not read as current. Current: `CLAUDE.md` + `HARNESS_WORK_PLAN.md`.
+
 # LAPUTA — FILE DEPENDENCY REFERENCE
 **Companion to the Master Plan.** For each file: **what it is** · **theory (why this shape)** · **how we build it** · **connections (depends on / depended on by)**.
 

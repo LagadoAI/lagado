@@ -12,8 +12,10 @@ Guidance for working in this repo. Read before making changes.
 
 Production targets: **Windows-first, macOS, Linux**. Development on Linux.
 GitHub Actions CI (linux/macos/windows) is the cross-platform test bench.
-**Single source of truth:** `LAPUTA HOW TO/LAGADO_MASTER_PLAN.md.pdf` (June 3 2026 — supersedes all other plan files).
-Companion detail: `docs/plans/FILE_DEPENDENCY_REFERENCE_v3.md`.
+**Current steering:** `HARNESS_WORK_PLAN.md` (the live queue) + this file's harness-doctrine sections.
+The June-3 `LAPUTA HOW TO/LAGADO_MASTER_PLAN.md.pdf` and `docs/plans/FILE_DEPENDENCY_REFERENCE_v3.md`
+are the ORIGINAL product plan — **historical vision, superseded on the perception architecture and
+module layout; do not read as current.** They describe an app/product arc, not the harness being built now.
 
 **CURRENT FOCUS (2026-07-03): THE HARNESS IS THE PRODUCT; the app/UI is the eventual shipping vehicle, not the current work.** The four pillars above are the long-term product vision. The defensible thing being built NOW is the deterministic harness that lets a small local model reliably operate a real desktop — proven on the REAL OSWorld benchmark, where success = golds with **zero false-pass** (integrity is scored, not assumed). Start from **"Status (2026-07-03)"** below and the harness doctrine sections; treat app-phase sections as background.
 
@@ -23,15 +25,19 @@ Companion detail: `docs/plans/FILE_DEPENDENCY_REFERENCE_v3.md`.
 Single Tauri binary (`lagado-ui/src-tauri/`) wraps:
 - React/shadcn UI — Liquid AI inspired, deep navy + blue/purple glassmorphism
 - Rust agent core (`lagado-agent/` as a library)
-- Vendored `llama-server` subprocess (HTTP inference on :8080, NOT FFI) — main 8B model
+- Vendored `llama-server` subprocess (HTTP inference on :8080, NOT FFI) — the brain (model-swappable)
 - Classifier subprocess on :8081 (LFM2.5-1.2B-Instruct, intent classification, CPU-only)
 - Embedder subprocess on :8082 (LFM2-ColBERT-350M, `--embeddings --pooling mean`, CPU-only) — the Board's relevance signal; spawned in `main.rs`, watched by `server_guard`, fed by `sleep_gate` backfill, consumed by `agent_loop` via `assemble_slice` (recency floor when down)
 - Visual encoder: in-process `libmtmd.so` FFI (LFM2-VL-450M + mmproj, vision → embedding vectors, no subprocess)
 - QEMU desktop VM (agent's sandboxed working surface)
 
-Inference: HTTP to `llama-server` → `/v1/chat/completions`.
-Models in `~/.laputa-secure/models/`:
-- `LFM2-8B-A1B-Q4_K_M.gguf` — main agent model (gen2, temp 0.3/min_p 0.15)
+Inference: HTTP to `llama-server` → `/v1/chat/completions`. **The brain is model-swappable — the
+harness is the moat, not the model** (proven: swapping to a different same-size model raised the
+score, harness unchanged). The OSWorld harness work benchmarks on **Qwen2.5-Coder-7B**
+(`start_brain.sh`); the LFM2 family below is the eventual *shipping* intent for the app, not the
+current benchmark brain.
+Models in `~/.laputa-secure/models/` (the LFM2 app-shipping set — NOT the benchmark brain):
+- `LFM2-8B-A1B-Q4_K_M.gguf` — app-shipping agent model (gen2, temp 0.3/min_p 0.15)
 - `LFM2.5-1.2B-Instruct-Q4_K_M.gguf` — intent classifier (gen2.5, temp 0.1/top_k 50)
 - `LFM2-VL-450M-F16.gguf` + `mmproj-LFM2-VL-450M-F16.gguf` — vision encoder
 - `LFM2-ColBERT-350M-Q4_K_M.gguf` — Board embeddings (Phase 1)
@@ -245,7 +251,17 @@ Verify with `cargo check --workspace` + `npx tsc --noEmit` after changes.
 
 **Branch `Harness`** (continuation of `deskew/class-not-instance`; `main` is pre-OSWorld). Current work = the REAL OSWorld benchmark as the harness's proving ground; `env.evaluate()` is the incorruptible judge.
 
-- **Where we are:** LibreOffice Calc battery, held-out stress (30 never-opened tasks) = **7/30 gold, 0 false-pass** (2026-06-29). OP-VOCAB coverage note NOW STALE: as of 2026-07-10 the calc vocab is 22 op kinds in `uno_ops.py` (pivots/freeze/csv/transpose/reorder/conditional(format_cells_where)/locale(set_decimal_separator)/dedup/sort/zoom/pdf/charts ALL built) — only sparklines + row/col-resize genuinely absent. This full vocab is now REACHABLE FROM THE GENERAL LOOP via the calc-solver rung (`calc_solve.py`, flag `LAGADO_CALC_SOLVER`, A/B 2/3 vs 0/3 baseline 2026-07-10). Attribution model+harness vs model-alone awaits the per-grounding ablation matrix (see `docs/osworld/PROMPT_GROUNDING_AUDIT_2026-06-29.md`).
+- **Where we are (2026-07-11 — the earlier "7/30 gold" line is SUPERSEDED; see `HARNESS_WORK_PLAN.md`):**
+  The **full 369-task OSWorld run** has run (official `env.evaluate()` only): **24/368 scored**, with
+  LibreOffice Calc — the one domain built out end-to-end — at **19/47 (~40%)**. Every other domain
+  near zero is an honest build-map (no plane yet), not a comprehension verdict. OP-VOCAB IS BUILT
+  (22 calc op kinds in `uno_ops.py`), reachable from the general loop via the calc-solver rung
+  (`calc_solve.py`, `LAGADO_CALC_SOLVER`). **GOVERNING EVENT — the 2026-07-10 Opus adversarial audit
+  overturned our integrity claim:** the real false-pass count is **≥6, not the "0" or "1" earlier
+  reported** (generator was `complete_goal` claiming success vacuously on empty postconditions — now
+  fail-closed; a sub-plane no longer declares a whole-agent FAIL). The failure atlas categorizes by
+  domain not evidence and the run mixed 3 flag configs, so those numbers need a single-config rerun to
+  be trusted. Next: fix instrumentation → re-audit → then build. Full record: `docs/osworld/FULL_369_RESULTS_2026-07-10.md`.
 - **Architecture in play:** native session plane (resident guest UNO daemon over a host-owned op log; the proven stateless one-shot kept as the floor) + interface-altitude loop (candidates → reason → emit-in-names → notation-robust resolve, fail-closed → read-back/corroborate → retry). Grounding applied at seven seams, bind-or-abstain integrity held under stress.
 - **Authoritative resume:** `docs/osworld/INVESTIGATION_PLAN_2026-06-23.md` (the "POST-CLEAR RESUME PLAN" block at top). Companions: `docs/osworld/PREDICTIONS.md`, `docs/osworld/BATTERY_FINDINGS_2026-06-22.md`, `docs/INTEGRATION_SURVEY_2026-06-29.md`.
 - **Operating agreements (binding, see memory):** integrate-before-invent; verifiable-evals integrity (official evaluator only, frozen/held-out prompts, never lead-to-gold); deterministic-over-prompt (never prompt-nudge to pass a task); never replace what works; honest numbers — never soften a failure or inflate a result.

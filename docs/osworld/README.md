@@ -1,3 +1,6 @@
+> **⚠ HISTORICAL MVP snapshot** (terminal-plane-only, before the GUI/UNO/DOM planes). Setup/env steps may
+> still apply; the architecture description is superseded. Current: `docs/osworld/FULL_369_RESULTS_2026-07-10.md` + `HARNESS_WORK_PLAN.md`.
+
 # Running Lagado against the REAL OSWorld benchmark
 
 > **PATHS MOVED (2026-07-03):** the executable tooling formerly in this directory lives at

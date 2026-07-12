@@ -1,3 +1,6 @@
+> **⚠ The "0 false-pass" note here is superseded** by the 2026-07-10 audit (≥6 found). The reflex-timing
+> content stands.
+
 # Settle-reflex (CfC expert #1) — build + investigation log, 2026-07-05/06
 
 **Context.** First expert of the reflex bank (cortex/subcortex directive, ratified 2026-07-05):

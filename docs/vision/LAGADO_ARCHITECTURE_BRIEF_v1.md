@@ -1,3 +1,8 @@
+> **⚠ SUPERSEDED (2026-07-08 sensorimotor redesign) — parts are now INVERTED vs the code.** §5 and §9
+> claimed CV/DOM are not wired and "browser perception does not exist" — the OPPOSITE is true: `fuse()`
+> takes `cv_boxes` + `dom_boxes` and is called live at the agent perceive site; `perception/dom.rs` exists
+> (the DOM floor). DOM *actuation* is still unbuilt. Perception is FUSED, not a fallback ladder. Current: `HARNESS_WORK_PLAN.md`.
+
 # Lagado — Architecture Brief (for outside prior-art survey)
 
 **Date:** 2026-06-17 · **Scope:** the Lagado *agent app* only (excludes the custom-OS / "Laputa" work and the demonstration-capture "Lens", which is designed-not-built). **Source of truth:** verified against the codebase at HEAD, file-cited. Where the code contradicts prior verbal description, the **code wins** and the discrepancy is flagged ⚠️. Status labels: **BUILT&VERIFIED** (wired + exercised end-to-end or unit-tested) / **BUILT-UNVERIFIED** (code exists, not exercised in the live path) / **IN-PROGRESS** / **PLANNED** / **STUBBED** (dead code).

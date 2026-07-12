@@ -1,3 +1,7 @@
+> **⚠ The turn log below stops at 2026-07-06** — it predates the full 369-task run and the 2026-07-10 Opus
+> audit. Current authoritative picture: `docs/osworld/FULL_369_RESULTS_2026-07-10.md` + `HARNESS_WORK_PLAN.md`.
+> Retained as turn-by-turn mechanism history.
+
 # Investigation plan — locate the failure MOMENT, get HARD DATA on every interaction variable
 
 > **PATHS MOVED (2026-07-03, branch `Harness`, commit d6039a3):** all executable tooling referenced in
