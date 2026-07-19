@@ -1,3 +1,8 @@
+> **SUPERSEDED 2026-07-14 — see `../CURRENT_STATE.md` for current fact.** This map is preserved
+> because it's the diagnostic record that motivated the sensorimotor redesign (CV wiring, the
+> fused-perception push) — several things it calls "inert"/"discarded" below were fixed the same
+> day it was written. Read it as history, not present tense.
+
 # THE RUST HARNESS — COMPLETE MAP (2026-07-08)
 
 Five independent full-read passes over all 91 files / 23,651 lines of `lagado-agent/src`

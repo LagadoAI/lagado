@@ -1,3 +1,6 @@
+> **SUPERSEDED 2026-07-14 — see `CURRENT_STATE.md` for current fact.** Preserved as the OSWorld
+> Python harness's diagnostic record from that date. Read as history, not present tense.
+
 # THE HARNESS — COMPLETE MAP (2026-07-06)
 
 Compiled from a full line-level read of every file in the working system (four independent
