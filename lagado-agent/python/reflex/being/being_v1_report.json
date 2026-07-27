@@ -1,0 +1,188 @@
+{
+  "date": "2026-07-08 17:48",
+  "quick": true,
+  "params": 120388,
+  "iters": 25,
+  "t_steps": 120,
+  "note": "unseen backgrounds; glyph target among decoys; null = exact-template matched filter",
+  "rows": [
+    {
+      "regime": "clean",
+      "pipeline_pd": {
+        "kp": 12,
+        "kd": 0.5,
+        "success": 0.703,
+        "median_steps": 13,
+        "breakage": {
+          "fail": 19,
+          "near_miss": 0.0,
+          "decoy_capture": 0.47,
+          "wander": 0.53
+        }
+      },
+      "pipeline_hands": {
+        "success": 0.703,
+        "median_steps": 14,
+        "breakage": {
+          "fail": 19,
+          "near_miss": 0.0,
+          "decoy_capture": 0.47,
+          "wander": 0.53
+        }
+      },
+      "being": {
+        "success": 0.0,
+        "median_steps": 120,
+        "breakage": {
+          "fail": 64,
+          "near_miss": 0.0,
+          "decoy_capture": 0.0,
+          "wander": 1.0
+        }
+      }
+    },
+    {
+      "regime": "lag (in-range)",
+      "pipeline_pd": {
+        "kp": 12,
+        "kd": 1.0,
+        "success": 0.812,
+        "median_steps": 14,
+        "breakage": {
+          "fail": 12,
+          "near_miss": 0.0,
+          "decoy_capture": 0.58,
+          "wander": 0.42
+        }
+      },
+      "pipeline_hands": {
+        "success": 0.812,
+        "median_steps": 15,
+        "breakage": {
+          "fail": 12,
+          "near_miss": 0.0,
+          "decoy_capture": 0.58,
+          "wander": 0.42
+        }
+      },
+      "being": {
+        "success": 0.0,
+        "median_steps": 120,
+        "breakage": {
+          "fail": 64,
+          "near_miss": 0.0,
+          "decoy_capture": 0.0,
+          "wander": 1.0
+        }
+      }
+    },
+    {
+      "regime": "lag (extrap)",
+      "pipeline_pd": {
+        "kp": 12,
+        "kd": 1.0,
+        "success": 0.797,
+        "median_steps": 14,
+        "breakage": {
+          "fail": 13,
+          "near_miss": 0.0,
+          "decoy_capture": 0.46,
+          "wander": 0.54
+        }
+      },
+      "pipeline_hands": {
+        "success": 0.797,
+        "median_steps": 14,
+        "breakage": {
+          "fail": 13,
+          "near_miss": 0.0,
+          "decoy_capture": 0.46,
+          "wander": 0.54
+        }
+      },
+      "being": {
+        "success": 0.0,
+        "median_steps": 120,
+        "breakage": {
+          "fail": 64,
+          "near_miss": 0.0,
+          "decoy_capture": 0.0,
+          "wander": 1.0
+        }
+      }
+    },
+    {
+      "regime": "moving target",
+      "pipeline_pd": {
+        "kp": 18,
+        "kd": 0.0,
+        "success": 0.328,
+        "median_steps": 120,
+        "breakage": {
+          "fail": 43,
+          "near_miss": 0.19,
+          "decoy_capture": 0.14,
+          "wander": 0.67
+        }
+      },
+      "pipeline_hands": {
+        "success": 0.422,
+        "median_steps": 120,
+        "breakage": {
+          "fail": 37,
+          "near_miss": 0.19,
+          "decoy_capture": 0.24,
+          "wander": 0.57
+        }
+      },
+      "being": {
+        "success": 0.0,
+        "median_steps": 120,
+        "breakage": {
+          "fail": 64,
+          "near_miss": 0.0,
+          "decoy_capture": 0.0,
+          "wander": 1.0
+        }
+      }
+    },
+    {
+      "regime": "messy (combined)",
+      "pipeline_pd": {
+        "kp": 18,
+        "kd": 2.0,
+        "success": 0.188,
+        "median_steps": 120,
+        "breakage": {
+          "fail": 52,
+          "near_miss": 0.21,
+          "decoy_capture": 0.1,
+          "wander": 0.69
+        }
+      },
+      "pipeline_hands": {
+        "success": 0.234,
+        "median_steps": 120,
+        "breakage": {
+          "fail": 49,
+          "near_miss": 0.18,
+          "decoy_capture": 0.06,
+          "wander": 0.76
+        }
+      },
+      "being": {
+        "success": 0.016,
+        "median_steps": 120,
+        "breakage": {
+          "fail": 63,
+          "near_miss": 0.0,
+          "decoy_capture": 0.02,
+          "wander": 0.98
+        }
+      }
+    }
+  ],
+  "messy_wins": "0/4",
+  "clean_held": false,
+  "verdict": "HOLD(pipeline-null)"
+}
