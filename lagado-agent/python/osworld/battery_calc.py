@@ -977,7 +977,13 @@ def author_B(instr, detected, log, feedback=None, temperature=0.0, additive=Fals
         else:
             emit += ("\n\nYour PREVIOUS attempt had these problems. Keep your operations EXACTLY as written "
                      "(same verbs, same targets, same structure) and change ONLY what these notes say:\n%s" % feedback)
-    raw = _chat(emit, grammar=GRAMMAR_B_ACTIVE, temperature=temperature, seed=seed, max_tokens=800)
+    # LAGADO_EMIT_FREE=1: UNCONSTRAINED emission A/B — no GBNF rail, model may think/preamble freely;
+    # the parser extracts only well-formed bracketed calls (unparseable lines drop, fail-closed).
+    # Larger budget because a thinking-tuned brain spends tokens deliberating before the calls.
+    _free = os.environ.get("LAGADO_EMIT_FREE") == "1"
+    _egr = None if _free else GRAMMAR_B_ACTIVE
+    _etok = 3000 if _free else 800
+    raw = _chat(emit, grammar=_egr, temperature=temperature, seed=seed, max_tokens=_etok)
     log.setdefault("emit_raw", [])
     log["emit_raw"].append(raw)
     ops = parse_emitted_nameops(raw)
@@ -991,8 +997,8 @@ def author_B(instr, detected, log, feedback=None, temperature=0.0, additive=Fals
     for t, retemp in ((1, 0.35), (2, 0.7)):
         if best_d == 0:
             break
-        raw2 = _chat(emit, grammar=GRAMMAR_B_ACTIVE, temperature=max(temperature, retemp),
-                     seed=seed + 1000 * t, max_tokens=800)
+        raw2 = _chat(emit, grammar=_egr, temperature=max(temperature, retemp),
+                     seed=seed + 1000 * t, max_tokens=_etok)
         log["emit_raw"].append(raw2)
         ops2 = parse_emitted_nameops(raw2)
         d2 = static_defects(ops2, instr, detected)

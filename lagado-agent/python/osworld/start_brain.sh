@@ -27,5 +27,9 @@ echo "launching lean brain: ctx=$CTX, --no-mmap, full GPU offload, single slot"
 # --embeddings --pooling last: the SAME server also serves /v1/embeddings in the
 # reasoner's OWN latent space (last-token pooling = the binding lever, R1b 2026-06-23;
 # chat+grammar verified unaffected). Consumed by the membrane-fluency panel + semantic_col.
+# LAGADO_BRAIN_EXTRA_ARGS: model-specific server flags the caller discovers per-model (e.g. a
+# thinking-tuned brain needs --reasoning-budget 0 or chat content comes back empty). Kept as an
+# env passthrough so nothing model-specific is hardcoded here.
 exec "$LLAMA" -m "$MODEL" --port "$PORT" -c "$CTX" -ngl 99 --threads 8 -fa on \
-     -ctk q8_0 -ctv q8_0 --no-mmap --parallel 1 --embeddings --pooling last
+     -ctk q8_0 -ctv q8_0 --no-mmap --parallel 1 --embeddings --pooling last \
+     ${LAGADO_BRAIN_EXTRA_ARGS:-}
